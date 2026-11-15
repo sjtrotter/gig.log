@@ -54,6 +54,26 @@
             ]
           },
           "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: a digit-bearing Building Name value plain-masks, ahead of the hash entry and the generic street shapes.",
+          "find": {
+            "all": [
+              {
+                "hasPrecedingSiblingText": "Building Name"
+              },
+              {
+                "hasTextMatchesRegex": "\\d"
+              }
+            ]
+          },
+          "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: an all-letter Building Name value hash-masks.",
+          "find": {
+            "hasPrecedingSiblingText": "Building Name"
+          }
         }
       ],
       "require": {
@@ -169,6 +189,26 @@
             ]
           },
           "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: a digit-bearing Building Name value plain-masks, ahead of the hash entry and the generic street shapes.",
+          "find": {
+            "all": [
+              {
+                "hasPrecedingSiblingText": "Building Name"
+              },
+              {
+                "hasTextMatchesRegex": "\\d"
+              }
+            ]
+          },
+          "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: an all-letter Building Name value hash-masks.",
+          "find": {
+            "hasPrecedingSiblingText": "Building Name"
+          }
         },
         {
           "comment": "Defense-in-depth (FIX 3): a modal-over-handoff combined frame that carries the multi-order-confirm's id-less first-name+last-initial line could be claimed by THIS earlier-priority rule instead of dropoff_multi_order_confirm, whose id-keyed redacts wouldn't cover the id-less name node. Same canonical name-shape SSOT as SnapshotRedactor.FIRST_LAST_INITIAL_PATTERN so the leak closes regardless of which rule wins the frame; hasNoId keeps it off id-bearing nav anchors.",
@@ -342,6 +382,26 @@
           "plainMask": true
         },
         {
+          "comment": "#860/#1122/#1650: a digit-bearing Building Name value plain-masks, ahead of the hash entry and the generic street shapes.",
+          "find": {
+            "all": [
+              {
+                "hasPrecedingSiblingText": "Building Name"
+              },
+              {
+                "hasTextMatchesRegex": "\\d"
+              }
+            ]
+          },
+          "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: an all-letter Building Name value hash-masks.",
+          "find": {
+            "hasPrecedingSiblingText": "Building Name"
+          }
+        },
+        {
           "find": {
             "hasNoId": true
           }
@@ -417,6 +477,26 @@
             ]
           },
           "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: a digit-bearing Building Name value plain-masks, ahead of the hash entry and the generic street shapes.",
+          "find": {
+            "all": [
+              {
+                "hasPrecedingSiblingText": "Building Name"
+              },
+              {
+                "hasTextMatchesRegex": "\\d"
+              }
+            ]
+          },
+          "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: an all-letter Building Name value hash-masks.",
+          "find": {
+            "hasPrecedingSiblingText": "Building Name"
+          }
         },
         {
           "comment": "#803 F1/F3: bare 'gate 4821' (no 'code' token) — word-bounded, digit-adjacent (3+); the [\\s:#] separator class covers 'gate: 4821' / 'gate#4821' / 'Gate4821'. Masks the whole body incl. any embedded name.",
@@ -575,6 +655,26 @@
           "plainMask": true
         },
         {
+          "comment": "#860/#1122/#1650: a digit-bearing Building Name value plain-masks, ahead of the hash entry and the generic street shapes.",
+          "find": {
+            "all": [
+              {
+                "hasPrecedingSiblingText": "Building Name"
+              },
+              {
+                "hasTextMatchesRegex": "\\d"
+              }
+            ]
+          },
+          "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: an all-letter Building Name value hash-masks.",
+          "find": {
+            "hasPrecedingSiblingText": "Building Name"
+          }
+        },
+        {
           "comment": "#795: mask the entered PIN — the whole-PIN EditText and each echoed single-digit TextView are id-less pure-digit nodes. plainMask drops the distinctness hash (a bounded PIN is recoverable from 4 hex). The rule's require anchors are non-digit text nodes, so masking these leaves replay recognition unchanged.",
           "find": {
             "all": [
@@ -650,6 +750,26 @@
             ]
           },
           "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: a digit-bearing Building Name value plain-masks, ahead of the hash entry and the generic street shapes.",
+          "find": {
+            "all": [
+              {
+                "hasPrecedingSiblingText": "Building Name"
+              },
+              {
+                "hasTextMatchesRegex": "\\d"
+              }
+            ]
+          },
+          "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: an all-letter Building Name value hash-masks.",
+          "find": {
+            "hasPrecedingSiblingText": "Building Name"
+          }
         }
       ],
       "comment": "#795: the informational bottom sheet that precedes the PIN keypad — 'You'll need a PIN from the customer to confirm delivery' + 'To protect your Dasher rating...'. RECOGNIZE-ONLY (no state.flow, no parse — mirrors dropoff_multi_order_confirm): a pre-arrival advisory sheet, not a lifecycle anchor; recognizing it only graduates the frame out of UNKNOWN. The sheet's OWN copy needs no mask — it carries only generic DoorDash text, no customer name/address/PIN (verified against both captured frames, text and contentDescription); its single redact entry is the #993 nav-banner belt, which is inert on any frame that does not carry the banner. Anchors are corpus-unique; 112 is the next free screen priority after 109 (behaviorally inert).",
@@ -721,6 +841,26 @@
             ]
           },
           "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: a digit-bearing Building Name value plain-masks, ahead of the hash entry and the generic street shapes.",
+          "find": {
+            "all": [
+              {
+                "hasPrecedingSiblingText": "Building Name"
+              },
+              {
+                "hasTextMatchesRegex": "\\d"
+              }
+            ]
+          },
+          "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: an all-letter Building Name value hash-masks.",
+          "find": {
+            "hasPrecedingSiblingText": "Building Name"
+          }
         },
         {
           "comment": "#803 F1/F3: bare 'gate 4821' (no 'code' token) — word-bounded, digit-adjacent (3+); [\\s:#] covers 'gate: 4821'/'gate#4821'/'Gate4821'.",
@@ -907,6 +1047,26 @@
             ]
           },
           "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: a digit-bearing Building Name value plain-masks, ahead of the hash entry and the generic street shapes.",
+          "find": {
+            "all": [
+              {
+                "hasPrecedingSiblingText": "Building Name"
+              },
+              {
+                "hasTextMatchesRegex": "\\d"
+              }
+            ]
+          },
+          "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: an all-letter Building Name value hash-masks.",
+          "find": {
+            "hasPrecedingSiblingText": "Building Name"
+          }
         }
       ],
       "state": {
@@ -967,6 +1127,26 @@
             ]
           },
           "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: a digit-bearing Building Name value plain-masks, ahead of the hash entry and the generic street shapes.",
+          "find": {
+            "all": [
+              {
+                "hasPrecedingSiblingText": "Building Name"
+              },
+              {
+                "hasTextMatchesRegex": "\\d"
+              }
+            ]
+          },
+          "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: an all-letter Building Name value hash-masks.",
+          "find": {
+            "hasPrecedingSiblingText": "Building Name"
+          }
         },
         {
           "comment": "The id-less first-name + last-initial customer name. Whole-value anchored (^...$, whitespace-tolerant so a trailing space still masks) so it masks ONLY the bare name node, never the multi-word merchant anchor, the zone code, a count, or the 'Confirm ...'/'Mix-ups ...' copy. Char classes cover accented/Unicode letters (José, Muñoz), interior capitals (McKenna), hyphenated first names (Mary-Jo), and apostrophes (O'Brien, D'Angelo); every quantifier is bounded ({0,20}/{0,3}/{0,8}/{1,4}) so RegexSafety's ReDoS guard accepts it. Compiled IGNORE_CASE (all rule regexes are), so 'JOSE G' masks too. SSOT with SnapshotRedactor.FIRST_LAST_INITIAL_PATTERN. #885: the token SEPARATOR is `\\s{1,4}`, not a literal space — the 07-26 field render was 'Firstname  L.' with a DOUBLE space, which the old single-space separator did not match, so this entry existed but never fired and a raw customer name reached the recognized envelope. `normalize: customerName` (#733) canonicalizes the token before the <4hex> distinctness hash, so this card's mask hex equals the same customer's mask on 'Deliver to <name>' surfaces AND the persisted customerNameHash — one customer, one mask, across every surface form.",
@@ -1878,6 +2058,26 @@
             ]
           },
           "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: a digit-bearing Building Name value plain-masks, ahead of the hash entry and the generic street shapes.",
+          "find": {
+            "all": [
+              {
+                "hasPrecedingSiblingText": "Building Name"
+              },
+              {
+                "hasTextMatchesRegex": "\\d"
+              }
+            ]
+          },
+          "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: an all-letter Building Name value hash-masks.",
+          "find": {
+            "hasPrecedingSiblingText": "Building Name"
+          }
         }
       ],
       "branches": [
@@ -1940,6 +2140,26 @@
             ]
           },
           "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: a digit-bearing Building Name value plain-masks, ahead of the hash entry and the generic street shapes.",
+          "find": {
+            "all": [
+              {
+                "hasPrecedingSiblingText": "Building Name"
+              },
+              {
+                "hasTextMatchesRegex": "\\d"
+              }
+            ]
+          },
+          "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: an all-letter Building Name value hash-masks.",
+          "find": {
+            "hasPrecedingSiblingText": "Building Name"
+          }
         }
       ],
       "state": {
@@ -2236,6 +2456,26 @@
             ]
           },
           "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: a digit-bearing Building Name value plain-masks, ahead of the hash entry and the generic street shapes.",
+          "find": {
+            "all": [
+              {
+                "hasPrecedingSiblingText": "Building Name"
+              },
+              {
+                "hasTextMatchesRegex": "\\d"
+              }
+            ]
+          },
+          "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: an all-letter Building Name value hash-masks.",
+          "find": {
+            "hasPrecedingSiblingText": "Building Name"
+          }
         }
       ],
       "state": {
@@ -2476,6 +2716,26 @@
             ]
           },
           "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: a digit-bearing Building Name value plain-masks, ahead of the hash entry and the generic street shapes.",
+          "find": {
+            "all": [
+              {
+                "hasPrecedingSiblingText": "Building Name"
+              },
+              {
+                "hasTextMatchesRegex": "\\d"
+              }
+            ]
+          },
+          "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: an all-letter Building Name value hash-masks.",
+          "find": {
+            "hasPrecedingSiblingText": "Building Name"
+          }
         }
       ],
       "state": {
@@ -2544,6 +2804,26 @@
             ]
           },
           "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: a digit-bearing Building Name value plain-masks, ahead of the hash entry and the generic street shapes.",
+          "find": {
+            "all": [
+              {
+                "hasPrecedingSiblingText": "Building Name"
+              },
+              {
+                "hasTextMatchesRegex": "\\d"
+              }
+            ]
+          },
+          "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: an all-letter Building Name value hash-masks.",
+          "find": {
+            "hasPrecedingSiblingText": "Building Name"
+          }
         }
       ],
       "state": {
@@ -2606,6 +2886,26 @@
             ]
           },
           "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: a digit-bearing Building Name value plain-masks, ahead of the hash entry and the generic street shapes.",
+          "find": {
+            "all": [
+              {
+                "hasPrecedingSiblingText": "Building Name"
+              },
+              {
+                "hasTextMatchesRegex": "\\d"
+              }
+            ]
+          },
+          "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: an all-letter Building Name value hash-masks.",
+          "find": {
+            "hasPrecedingSiblingText": "Building Name"
+          }
         }
       ],
       "require": {
@@ -2665,6 +2965,26 @@
             ]
           },
           "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: a digit-bearing Building Name value plain-masks, ahead of the hash entry and the generic street shapes.",
+          "find": {
+            "all": [
+              {
+                "hasPrecedingSiblingText": "Building Name"
+              },
+              {
+                "hasTextMatchesRegex": "\\d"
+              }
+            ]
+          },
+          "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: an all-letter Building Name value hash-masks.",
+          "find": {
+            "hasPrecedingSiblingText": "Building Name"
+          }
         }
       ],
       "require": {
@@ -2731,6 +3051,26 @@
             ]
           },
           "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: a digit-bearing Building Name value plain-masks, ahead of the hash entry and the generic street shapes.",
+          "find": {
+            "all": [
+              {
+                "hasPrecedingSiblingText": "Building Name"
+              },
+              {
+                "hasTextMatchesRegex": "\\d"
+              }
+            ]
+          },
+          "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: an all-letter Building Name value hash-masks.",
+          "find": {
+            "hasPrecedingSiblingText": "Building Name"
+          }
         }
       ],
       "require": {
@@ -2890,6 +3230,26 @@
           "plainMask": true
         },
         {
+          "comment": "#860/#1122/#1650: a digit-bearing Building Name value plain-masks, ahead of the hash entry and the generic street shapes.",
+          "find": {
+            "all": [
+              {
+                "hasPrecedingSiblingText": "Building Name"
+              },
+              {
+                "hasTextMatchesRegex": "\\d"
+              }
+            ]
+          },
+          "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: an all-letter Building Name value hash-masks.",
+          "find": {
+            "hasPrecedingSiblingText": "Building Name"
+          }
+        },
+        {
           "comment": "#1079: a FUSED `Delivery for <customer>` render (the fielded frames split the label and the name across `user_name_label` / `user_name`, which the id entries below own). keepPrefix keeps the lead-in for replay context; normalize customerName keys the hex on the canonical first-token + second-token-initial form, so it equals the persisted `customerNameHash` (#623/#733). The trailing space makes the bare `Delivery for` LABEL a non-match (it stays as chrome). Ordered FIRST: `Delivery for Jane D` also satisfies the id-less name shape below, which would hash the lead-in away with it.",
           "find": {
             "hasTextStartsWith": "Delivery for "
@@ -2980,6 +3340,26 @@
           "plainMask": true
         },
         {
+          "comment": "#860/#1122/#1650: a digit-bearing Building Name value plain-masks, ahead of the hash entry and the generic street shapes.",
+          "find": {
+            "all": [
+              {
+                "hasPrecedingSiblingText": "Building Name"
+              },
+              {
+                "hasTextMatchesRegex": "\\d"
+              }
+            ]
+          },
+          "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: an all-letter Building Name value hash-masks.",
+          "find": {
+            "hasPrecedingSiblingText": "Building Name"
+          }
+        },
+        {
           "comment": "#1031 (the dropoff twin): the id-less fused `For <FirstName L> • <store>` attribution line. This rule's own comment used to argue that menu frames carry no customer PII — #1031 disproved exactly that reasoning on the pickup side, where `pickup_issue_menu` shipped no redact at all while its four sub-flow siblings masked this same header, and one fielded frame carried the customer verbatim. The sibling `dropoff_issue_resolution` already masks this line on THIS sub-flow, so the entry is copied from it VERBATIM: the mask hex must stay equal across the sub-flow and equal to the first 4 hex of the persisted `customerNameHash` (#623/#733), which a re-derived entry could silently break. The whole post-`For ` remainder — name AND the ` • <store>` tail — masks to ONE token; nothing here reads that node (the requires key on the `Drop-off issues` / `Have not reached drop-off location` option chrome), so replay recognition is unchanged. Inert on a frame that does not render the line.",
           "find": {
             "hasTextStartsWith": "For "
@@ -3057,6 +3437,26 @@
             ]
           },
           "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: a digit-bearing Building Name value plain-masks, ahead of the hash entry and the generic street shapes.",
+          "find": {
+            "all": [
+              {
+                "hasPrecedingSiblingText": "Building Name"
+              },
+              {
+                "hasTextMatchesRegex": "\\d"
+              }
+            ]
+          },
+          "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: an all-letter Building Name value hash-masks.",
+          "find": {
+            "hasPrecedingSiblingText": "Building Name"
+          }
         }
       ],
       "require": {
@@ -3107,6 +3507,26 @@
             ]
           },
           "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: a digit-bearing Building Name value plain-masks, ahead of the hash entry and the generic street shapes.",
+          "find": {
+            "all": [
+              {
+                "hasPrecedingSiblingText": "Building Name"
+              },
+              {
+                "hasTextMatchesRegex": "\\d"
+              }
+            ]
+          },
+          "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: an all-letter Building Name value hash-masks.",
+          "find": {
+            "hasPrecedingSiblingText": "Building Name"
+          }
         },
         {
           "comment": "#1031 (the dropoff twin): the id-less fused `For <FirstName L> • <store>` attribution line. The fielded frames of this sheet showed option labels only — but per #1031 a \"no PII observed\" reading is not a control: `pickup_issue_menu` carried the same absence-of-evidence claim and then fielded a raw customer name on a recognized envelope. This help sheet sits in the same drop-off issue sub-flow as `doordash.screen.dropoff_issue_resolution`, which masks this exact line, so the entry is copied from it VERBATIM for mask-hex parity across the sub-flow (#623/#733). Nothing here reads that node (the requires key on the generic help copy plus a `help_menu_item` naming drop-off), so replay recognition is unchanged. Inert on a frame that does not render the line.",
@@ -3183,6 +3603,26 @@
             ]
           },
           "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: a digit-bearing Building Name value plain-masks, ahead of the hash entry and the generic street shapes.",
+          "find": {
+            "all": [
+              {
+                "hasPrecedingSiblingText": "Building Name"
+              },
+              {
+                "hasTextMatchesRegex": "\\d"
+              }
+            ]
+          },
+          "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: an all-letter Building Name value hash-masks.",
+          "find": {
+            "hasPrecedingSiblingText": "Building Name"
+          }
         }
       ],
       "require": {
@@ -3249,6 +3689,26 @@
             ]
           },
           "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: a digit-bearing Building Name value plain-masks, ahead of the hash entry and the generic street shapes.",
+          "find": {
+            "all": [
+              {
+                "hasPrecedingSiblingText": "Building Name"
+              },
+              {
+                "hasTextMatchesRegex": "\\d"
+              }
+            ]
+          },
+          "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: an all-letter Building Name value hash-masks.",
+          "find": {
+            "hasPrecedingSiblingText": "Building Name"
+          }
         }
       ],
       "require": {
@@ -3621,6 +4081,26 @@
           "plainMask": true
         },
         {
+          "comment": "#860/#1122/#1650: a digit-bearing Building Name value plain-masks, ahead of the hash entry and the generic street shapes.",
+          "find": {
+            "all": [
+              {
+                "hasPrecedingSiblingText": "Building Name"
+              },
+              {
+                "hasTextMatchesRegex": "\\d"
+              }
+            ]
+          },
+          "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: an all-letter Building Name value hash-masks.",
+          "find": {
+            "hasPrecedingSiblingText": "Building Name"
+          }
+        },
+        {
           "comment": "#1107, THE FIELDED LEAK: the step card's `description_text_view` is the customer's own free-text delivery instruction — the fielded 09-13 frames rendered a gate code and cross-street directions in it. The #803/#920 class ('Customer Notes' precedent): customer-AUTHORED text that can carry a gate code, a unit, a floor, a name or a phone number, with no internal structure to anchor a partial mask on, so the WHOLE node goes. `plainMask` follows #920/#985/#1058: a note's ALPHABET is unbounded but its LENGTH is not, so a short note that IS the secret ('Gate code 4412') clears the #889 length floor while its plaintext space stays far below the suffix's 65 536 buckets — and unlike a customer name a note is nobody's join key, so the distinctness buys nothing to trade against that. DoorDash's own handoff vocabulary beside it (`title_text_view` = 'Leave it at the door', `step_title`, `step_description`) is app text, not customer text, and is deliberately kept raw so a replayed envelope still recognizes. ACCEPTED COLLATERAL: `description_text_view` is a GENERIC DoorDash id that carries chrome on other surfaces (dasher_rewards, pickup_steps) — on THIS rule's frames it is the instruction body, and masking it whole is fail-toward-privacy either way.",
           "find": {
             "hasIdSuffix": "description_text_view"
@@ -3706,6 +4186,26 @@
             ]
           },
           "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: a digit-bearing Building Name value plain-masks, ahead of the hash entry and the generic street shapes.",
+          "find": {
+            "all": [
+              {
+                "hasPrecedingSiblingText": "Building Name"
+              },
+              {
+                "hasTextMatchesRegex": "\\d"
+              }
+            ]
+          },
+          "plainMask": true
+        },
+        {
+          "comment": "#860/#1122/#1650: an all-letter Building Name value hash-masks.",
+          "find": {
+            "hasPrecedingSiblingText": "Building Name"
+          }
         },
         {
           "comment": "#1127: the 'Contact <FirstName L>' step title — the step card names the customer the dasher must try to reach. Id-scoped to `step_title` (the same row family renders the 'Take photo' / 'Add description' chrome, untouched by the prefix) with the chrome spellings ('Contact support', the 8.98.5 'Contact Customer', store/merchant variants) excluded by regex — the fable review of PR #1216 showed an exact `hasText` exclusion would hash 'Contact Customer' into a constant masquerading as a customer identity. keepPrefix keeps 'Contact ' for replay context; the remainder masks to ONE token, and normalize customerName keys the hex on the canonical first-token + second-token-initial form so it equals the first 4 hex of the `customerNameHash` the dropoff parses persist (#623/#733).",

@@ -410,11 +410,12 @@ class DropoffSheetRedactionParityTest {
         // Runs the COMPLETE compiled redact sequence of every rule that declares a Building Name entry,
         // so an unrelated earlier entry (the id-less street shape, say) that claimed and hashed the
         // value fails here — which is exactly what it caught on dropoff_pre_arrival_completion (r1).
-        val ruleIds = dropoffRedactEntries()
+        val withBuildingName = dropoffRedactEntries()
             .filter { (_, redact) -> redact.any { "Building Name" in precedingSiblingTextsIn(it["find"]!!) } }
-            .map { it.first }
-        assertTrue("the dropoff family declares Building Name entries", ruleIds.size >= 3)
-        for (id in ruleIds) {
+        assertTrue("the dropoff family declares Building Name entries", withBuildingName.size >= 3)
+        // A rule with an id-less catch-all (`dropoff_photo`) masks the label too: over-redaction, not a leak.
+        val idLessCatchAll = Json.parseToJsonElement("""{"hasNoId": true}""")
+        for ((id, redact) in withBuildingName) {
             val rule = screens.ruleById(id)!!
             fun valueAfterLabel(value: String): String =
                 rule.redact.apply(UiNode(className = "android.view.View", children = listOf(tv("Building Name"), tv(value))).restoreParents()).children[1].text!!
@@ -422,6 +423,7 @@ class DropoffSheetRedactionParityTest {
                 assertEquals("$id: digit-bearing '$v' plain-masks through the whole sequence", "[redacted]", valueAfterLabel(v))
             }
             assertTrue("$id: an alphabetic complex name keeps the distinctness hash", WHOLE_MASK_HEX.matches(valueAfterLabel("Maple Court Apartments")))
+            if (redact.any { it["find"] == idLessCatchAll }) continue
             assertEquals("$id: the label is chrome and stays raw", "Building Name",
                 rule.redact.apply(UiNode(className = "android.view.View", children = listOf(tv("Building Name"), tv("Bldg 7"))).restoreParents()).children[0].text)
         }
