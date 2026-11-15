@@ -1,33 +1,17 @@
 package cloud.trotter.log.gig.domain.census
 
+import cloud.trotter.census.contract.health.HealthReportSchema
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class HealthLedgerTest {
     private val key = HealthKey("2026-10-01", "doordash", "7.1.0")
-
-    @Test fun `HealthGrammar pins server version grammars`() {
-        for (version in listOf("8.99.20", "4.599.10004")) {
-            assertTrue(HealthGrammar.platformAppVersion.matches(version))
-        }
-        for (version in listOf("8.97.8|prod", "unknown", "")) {
-            assertFalse(HealthGrammar.platformAppVersion.matches(version))
-        }
-        for (version in listOf("dev", "corpus", "v1.2.3-rc1")) {
-            assertTrue(HealthGrammar.rulesetVersion.matches(version))
-        }
-        for (version in listOf("0.230.0+a41f0965", "1.2.3+nogit")) {
-            assertTrue(HealthGrammar.appVersion.matches(version))
-        }
-        assertFalse(HealthGrammar.appVersion.matches("0.230.0+zz"))
-    }
 
     @Test fun `record unknown and trip are immutable and maintain complete rule counts`() {
         val empty = HealthLedger()
@@ -92,26 +76,14 @@ class HealthLedgerTest {
         assertEquals(HealthRow(1, 2, 1, mapOf("doordash.screen.offer" to 1), 4), updated.rows[existing.toString()])
     }
 
-    @Test fun `wire JSON has only nine ordered keys and no receipt fields`() {
+    @Test fun `wire JSON is the contract's nine ordered keys with no receipt or parse fields`() {
         val row = HealthLedger().record(key, "doordash.screen.offer").record(key, null).trip(key).rows.getValue(key.toString())
         val raw = HealthLedger.reportJson(key, row, "1.2.3+abcdef0.dirty", "dev")
         assertEquals("""{"day":"2026-10-01","platform":"doordash","platformAppVersion":"7.1.0","appVersion":"1.2.3+abcdef0.dirty","rulesetVersion":"dev","admitted":1,"unknown":1,"trips":1,"ruleCounts":{"doordash.screen.offer":1}}""", raw)
         val json = Json.parseToJsonElement(raw).jsonObject
         assertEquals(listOf("day", "platform", "platformAppVersion", "appVersion", "rulesetVersion", "admitted", "unknown", "trips", "ruleCounts"), json.keys.toList())
         assertTrue(json.getValue("ruleCounts").jsonObject.values.sumOf { it.jsonPrimitive.int } <= json.getValue("admitted").jsonPrimitive.int)
-        assertTrue(HealthLedger.reportFits(raw))
-    }
-
-    @Test fun `reports refuse too many rules or too many UTF8 bytes without truncation`() {
-        val many = HealthRow(admitted = 600, ruleCounts = (1..600).associate { "a.r$it" to 1 })
-        val raw = HealthLedger.reportJson(key, many, "1.2.3", "dev")
-        assertTrue(raw.toByteArray().size < 8192)
-        assertFalse(HealthLedger.reportFits(raw))
-        val big = HealthLedger.reportJson(key, HealthRow(1, ruleCounts = mapOf("a.${"x".repeat(8500)}" to 1)), "1.2.3", "dev")
-        assertFalse(HealthLedger.reportFits(big))
-        val unicode = HealthLedger.reportJson(key, HealthRow(1, ruleCounts = mapOf("a.${"é".repeat(4100)}" to 1)), "1.2.3", "dev")
-        assertTrue(unicode.length < 8192)
-        assertFalse(HealthLedger.reportFits(unicode))
+        assertTrue(HealthReportSchema.fits(raw))
     }
 
     @Test fun `ledger including receipts and generation round trips as a JSON object`() {

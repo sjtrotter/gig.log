@@ -27,7 +27,7 @@ dependencies {
 // mirrors the root subprojects block (#841/#1093), which does not reach an included build
 tasks.withType<Test>().configureEach {
     maxHeapSize = "2g"
-    // #1547: NotificationFingerprintTest reads conformance/notification-vectors.jsonl off disk, an undeclared input.
+    // #1547: NotificationFingerprintTest and HealthReportSchemaTest read conformance/*.jsonl off disk, an undeclared input.
     outputs.doNotCacheIf("reads the conformance vectors as an undeclared input") { true }
     testLogging {
         events("failed")

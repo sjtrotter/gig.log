@@ -1,7 +1,7 @@
 package cloud.trotter.log.gig.core.data.census
 
+import cloud.trotter.census.contract.WireTokenGrammars
 import cloud.trotter.log.gig.domain.census.CensusUploadStats
-import cloud.trotter.log.gig.domain.census.HealthGrammar
 import cloud.trotter.log.gig.domain.census.HealthKey
 import cloud.trotter.log.gig.domain.census.HealthLedger
 import cloud.trotter.log.gig.domain.census.HealthSink
@@ -91,7 +91,7 @@ class PersistentHealthSink @Inject constructor(
                 stats.healthSkippedNoVersion.incrementAndGet()
                 return
             }
-            if (!HealthGrammar.platformAppVersion.matches(version)) {
+            if (!WireTokenGrammars.platformAppVersion.matches(version)) {
                 stats.healthSkippedBadVersion.incrementAndGet()
                 return
             }

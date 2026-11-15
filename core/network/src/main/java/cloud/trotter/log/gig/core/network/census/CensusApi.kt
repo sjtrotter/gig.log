@@ -5,6 +5,7 @@ import cloud.trotter.census.contract.auth.Bearer
 import cloud.trotter.census.contract.auth.CensusHeaders
 import cloud.trotter.census.contract.auth.RequestSigner
 import cloud.trotter.census.contract.contributor.SlotClass
+import cloud.trotter.census.contract.health.HealthReportRejection
 import cloud.trotter.log.gig.core.network.di.ClientProfile
 import cloud.trotter.log.gig.core.network.di.NetworkClientFactory
 import cloud.trotter.log.gig.domain.census.CensusEnrolRejectReason
@@ -578,7 +579,7 @@ class CensusApi(
 
         // Never pass arbitrary server strings into counters/logs. Unknown reasons collapse to one code.
         private val REASONS = SkeletonRejectionReason.entries.map { it.wire }.toSet() +
-            setOf("bad_count", "bad_rule_id") // Health report reasons share this bounded decoder.
+            HealthReportRejection.entries.map { it.wire } // Health report reasons share this bounded decoder.
 
         private fun reasons(json: JsonObject): Map<String, Int> {
             val result = sortedMapOf<String, Int>()

@@ -34,6 +34,17 @@ path-sorted record containing either its refusal reason or its fingerprint,
 sorted distinct hashes, and embedded skeleton. The server's ingest suite replays
 this golden; it contains no plaintext text slots.
 
+## Health report
+
+[`cloud.trotter.census.contract.health`](src/main/kotlin/cloud/trotter/census/contract/health/)
+owns the daily health report (`POST /v1/health` item): `HealthReportDto`, its bounds and its
+checks (`HealthReportSchema`), and the version and rule-id grammars (`WireTokenGrammars`). The
+phone encodes through `HealthReportSchema.encode` and refuses an oversized report with `fits`;
+the server accepts through `check`, passing its own day window and platform allowlist. The
+optional `parseShortfall` map (census#64) carries, per rule id, `shortfall` of `eligible`
+attempts; a report without it encodes exactly as before. `conformance/health-report-vectors.jsonl`
+pins the verdicts both sides must reach.
+
 ## Consuming from another build
 
 `census-contract/settings.gradle.kts` reads the version catalog at `../gradle/libs.versions.toml`, so the build must be included from a COMPLETE gig.log checkout (`includeBuild("<path>/DashBuddy/census-contract")`), never vendored as a bare directory. The `dashbuddy-census` server pins that checkout to a SHA in CI.

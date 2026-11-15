@@ -798,7 +798,8 @@ database or backup, never against the operator. §21's threat model states what 
   `census-contract/` included build (#1173), package `cloud.trotter.census.contract`, depends only
   on the JDK and kotlinx-serialization. Both the PolyForm-Shield app (`:domain` via `api`) and
   the AGPL `dashbuddy-census` server consume it by `includeBuild`. It owns the ONE `sha256OrNull`
-  (#362 SSOT), `AnonymousWrappers`, and the sensitive-marker DATA (`SensitiveMarkerData`);
+  (#362 SSOT), `AnonymousWrappers`, the sensitive-marker DATA (`SensitiveMarkerData`), and the
+  health report's wire DTO and bounds (`health.HealthReportSchema`, census#64);
   the phone's scan logic stays in `:core:pipeline` and `PiiShapes` stays in `:domain`.
   `UiNode` never imports the contract's WIRE types; it imports the anonymous-wrapper predicate
   from the contract build, which owns it (#1173).
@@ -1252,7 +1253,7 @@ once §12 to §21 ship.
 
 **Diagnostics, not work history** (#1571, census#64). No count of shifts, deliveries or active days leaves the phone;
 contributor eligibility is a yes or no (§15). The health report carries no count that reads as work done. Its `trips`
-field stays: it counts recognition-health alarm trips (`HealthLedger.kt:36`, `RecognitionHealthMonitor.kt:155-157`),
+field stays: it counts recognition-health alarm trips (`HealthLedger.kt:26`, `RecognitionHealthMonitor.kt:155-157`),
 not deliveries. It carries per-rule shortfall counts and
 their denominators, clipped to fixed bounds, with the rules generation. Skeletons are sampled once per layout variant
 per UTC day, as presence (§8).
