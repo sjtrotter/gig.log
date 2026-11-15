@@ -1,5 +1,6 @@
 package cloud.trotter.feed.contract
 
+import java.io.ByteArrayOutputStream
 import java.io.InputStream
 
 /**
@@ -36,7 +37,18 @@ object FeedLimits {
      */
     fun readBounded(input: InputStream, cap: Int): ByteArray? {
         require(cap >= 0)
-        val bytes = input.readNBytes(cap + 1)
-        return if (bytes.size > cap) null else bytes
+        // A plain read loop: InputStream.readNBytes is API 33 and the app's minSdk is 30.
+        val out = ByteArrayOutputStream(minOf(cap + 1, BUFFER_BYTES))
+        val buffer = ByteArray(BUFFER_BYTES)
+        var total = 0
+        while (total <= cap) {
+            val n = input.read(buffer, 0, minOf(buffer.size, cap + 1 - total))
+            if (n < 0) break
+            out.write(buffer, 0, n)
+            total += n
+        }
+        return if (total > cap) null else out.toByteArray()
     }
+
+    private const val BUFFER_BYTES = 8192
 }

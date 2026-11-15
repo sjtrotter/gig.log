@@ -65,4 +65,4 @@ object FeedKeys {
 }
 
 /** One pinned public key and its id. */
-class PinnedKey internal constructor(val keyId: String, internal val publicKey: PublicKey)
+internal class PinnedKey(val keyId: String, val publicKey: PublicKey)

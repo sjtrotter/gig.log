@@ -37,7 +37,7 @@ class FeedVerifierTest {
         assertEquals(FeedKeys.sha256Hex(manifestText.toByteArray()), m.digest)
         assertEquals(TestFeeds.NOW, m.candidate.sequence)
 
-        val file = (FeedVerifier.verifyFile(m, "prices", ByteArrayInputStream(prices.bytes)) as FeedResult.Ok).value
+        val file = (VerifiedFeedFile.verify(m, "prices", ByteArrayInputStream(prices.bytes)) as FeedResult.Ok).value
         assertEquals(Feed.FUEL, file.feed)
         assertEquals(FeedSources.GIG_LOG, file.sourceId)
         assertArrayEquals(prices.bytes, file.bytes())
@@ -80,7 +80,7 @@ class FeedVerifierTest {
         assertEquals(FeedRefusal.WrongFeed, refusal(verify(both, Feed.RULES, sharedFuel)))
         // And a verified fuel file says it is fuel.
         val m = verified(both, Feed.FUEL, sharedFuel)
-        val file = (FeedVerifier.verifyFile(m, "prices", ByteArrayInputStream(prices.bytes)) as FeedResult.Ok).value
+        val file = (VerifiedFeedFile.verify(m, "prices", ByteArrayInputStream(prices.bytes)) as FeedResult.Ok).value
         assertEquals(Feed.FUEL, file.feed)
     }
 
@@ -99,6 +99,26 @@ class FeedVerifierTest {
         // A custom key that writes "gig.log" into its manifest is refused under its own id.
         val claimsGigLog = envelope(manifest(Feed.FUEL, listOf(prices)), custom)
         assertEquals(FeedRefusal.WrongSource, refusal(verify(withPin, Feed.FUEL, claimsGigLog, source = customId)))
+    }
+
+    @Test
+    fun `a custom source's backup key verifies under the primary's source id`() {
+        val primary = keyPair()
+        val backup = keyPair()
+        val withPair = TestFeeds.trust(
+            userPins = listOf(UserPin(Feed.FUEL, TestFeeds.publicB64(primary), TestFeeds.publicB64(backup))),
+        )
+        val customId = FeedSources.custom(TestFeeds.keyId(primary))
+        val bySigner = { signer: java.security.KeyPair ->
+            verified(withPair, Feed.FUEL, envelope(manifest(Feed.FUEL, listOf(prices), source = customId), signer), source = customId)
+        }
+        assertEquals(TestFeeds.keyId(primary), bySigner(primary).keyId)
+        val byBackup = bySigner(backup)
+        assertEquals(customId, byBackup.source)
+        assertEquals(TestFeeds.keyId(backup), byBackup.keyId)
+        assertEquals(1L, byBackup.epoch)
+        // The backup is not a source of its own.
+        assertEquals(false, withPair.trusts(FeedSources.custom(TestFeeds.keyId(backup)), Feed.FUEL))
     }
 
     @Test
@@ -153,7 +173,7 @@ class FeedVerifierTest {
     @Test
     fun `a file must match its signed size and sha256 before it is returned`() {
         val m = verified(trust, Feed.FUEL, envelope(manifest(Feed.FUEL, listOf(prices)), fuelPrimary))
-        fun check(name: String, bytes: ByteArray) = refusal(FeedVerifier.verifyFile(m, name, ByteArrayInputStream(bytes)))
+        fun check(name: String, bytes: ByteArray) = refusal(VerifiedFeedFile.verify(m, name, ByteArrayInputStream(bytes)))
         assertEquals(FeedRefusal.FileNotInManifest, check("values", prices.bytes))
         assertEquals(FeedRefusal.SizeMismatch, check("prices", prices.bytes + byteArrayOf(1)))
         assertEquals(FeedRefusal.SizeMismatch, check("prices", prices.bytes.copyOf(prices.bytes.size - 1)))
@@ -195,17 +215,17 @@ class FeedVerifierTest {
     @Test
     fun `fuel and constants payloads take the depth-4 pre-pass and rules payloads go to the compiler`() {
         val m = verified(trust, Feed.FUEL, envelope(manifest(Feed.FUEL, listOf(prices)), fuelPrimary))
-        val file = (FeedVerifier.verifyFile(m, "prices", ByteArrayInputStream(prices.bytes)) as FeedResult.Ok).value
+        val file = (VerifiedFeedFile.verify(m, "prices", ByteArrayInputStream(prices.bytes)) as FeedResult.Ok).value
         assertTrue((FeedFiles.parsePayload(file) as FeedResult.Ok).value is JsonObject)
 
         val deep = Payload("prices", """{"a":{"b":{"c":{"d":{"e":1}}}}}""".toByteArray())
         val deepM = verified(trust, Feed.FUEL, envelope(manifest(Feed.FUEL, listOf(deep)), fuelPrimary))
-        val deepFile = (FeedVerifier.verifyFile(deepM, "prices", ByteArrayInputStream(deep.bytes)) as FeedResult.Ok).value
+        val deepFile = (VerifiedFeedFile.verify(deepM, "prices", ByteArrayInputStream(deep.bytes)) as FeedResult.Ok).value
         assertEquals(FeedRefusal.TooDeep, refusal(FeedFiles.parsePayload(deepFile)))
 
         val rule = Payload("alpha", """{"a":{"b":{"c":{"d":{"e":1}}}}}""".toByteArray())
         val rulesM = verified(trust, Feed.RULES, envelope(manifest(Feed.RULES, listOf(rule)), rulesPrimary))
-        val ruleFile = (FeedVerifier.verifyFile(rulesM, "alpha", ByteArrayInputStream(rule.bytes)) as FeedResult.Ok).value
+        val ruleFile = (VerifiedFeedFile.verify(rulesM, "alpha", ByteArrayInputStream(rule.bytes)) as FeedResult.Ok).value
         assertEquals(FeedRefusal.WrongFeed, refusal(FeedFiles.parsePayload(ruleFile)))
     }
 }

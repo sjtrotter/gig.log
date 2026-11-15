@@ -1,7 +1,8 @@
 # feed-contract/ — the signed feed format and its one verifier (#1563)
 
 This plain-JVM included build owns the format of every signed feed (fuel prices, yearly constants, recognition rules)
-and the code that checks it: the bounded reader, the pin registry (`FeedTrust`), the verifier, the acceptance
+and the code that checks it: the bounded reader, the pin registry (`FeedTrust`), the verifier (`VerifiedManifest.verify`
+and `VerifiedFeedFile.verify`, the only way to get either type), the acceptance
 function and the freshness label. The decision record is ADR-0013. No network code and no Android dependency live
 here; the transport, the cache and the consumers are the app's.
 
@@ -82,4 +83,6 @@ reads this path. One epoch per feed, keyed by the feed's wire name:
 
 Each entry needs both keys and they must differ. New trust for a gig.log feed comes only from an app release that
 changes this file; a manifest never names a successor key. The file ships with no keys until the developer creates
-them (#1562). User pins (custom sources) are filed under `custom:<key id>`, never under `gig.log` and never for rules.
+them (#1562). A user pin (a custom source) is a primary key and an optional backup, filed under `custom:<key id of the
+primary>`, never under `gig.log` and never for rules. The pin-file reader is private: production reads only the
+shipped file.

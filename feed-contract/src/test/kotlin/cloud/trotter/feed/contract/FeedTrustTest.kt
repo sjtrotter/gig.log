@@ -76,8 +76,23 @@ class FeedTrustTest {
     }
 
     @Test
+    fun `a custom backup key must be a different P-256 key`() {
+        val primary = publicB64(keyPair())
+        val same = UserPin(Feed.FUEL, primary, primary)
+        val badBackup = UserPin(Feed.CONSTANTS, primary, publicB64(keyPair("secp384r1")))
+        val trust = TestFeeds.trust(userPins = listOf(same, badBackup))
+        assertEquals(
+            listOf(
+                UserPinRejection(same, UserPinRejection.Reason.SAME_KEY_TWICE),
+                UserPinRejection(badBackup, UserPinRejection.Reason.NOT_A_P256_KEY),
+            ),
+            trust.rejectedUserPins,
+        )
+    }
+
+    @Test
     fun `the pin file is strict`() {
-        fun read(text: String) = TestFeeds.refusal(FeedTrust.fromPinFile(text.toByteArray(), emptyList()))
+        fun read(text: String) = TestFeeds.refusal(TestFeeds.fromPinFile(text.toByteArray(), emptyList()))
         val a = publicB64(keyPair())
         val b = publicB64(keyPair())
         assertNull(read("""{"format_version":1,"feeds":{"fuel":{"epoch":1,"primary":"$a","backup":"$b"}}}"""))

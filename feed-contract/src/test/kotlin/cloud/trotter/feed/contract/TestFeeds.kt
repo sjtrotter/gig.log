@@ -35,8 +35,20 @@ internal object TestFeeds {
         return """{"format_version":1,"feeds":{$feeds}}""".toByteArray()
     }
 
+    /**
+     * A registry from a generated pin file, through the same private reader the shipped file goes through. The reader
+     * is private in the main artifact, so tests reach it by reflection.
+     */
     fun trust(vararg epochs: Pair<Feed, Pair<KeyPair, KeyPair>>, userPins: List<UserPin> = emptyList()): FeedTrust =
-        (FeedTrust.fromPinFile(pinFile(*epochs), userPins) as FeedResult.Ok).value
+        (fromPinFile(pinFile(*epochs), userPins) as FeedResult.Ok).value
+
+    fun fromPinFile(pinFile: ByteArray, userPins: List<UserPin>): FeedResult<FeedTrust> {
+        val reader = FeedTrust.Companion::class.java
+            .getDeclaredMethod("fromPinFile", ByteArray::class.java, List::class.java)
+            .apply { isAccessible = true }
+        @Suppress("UNCHECKED_CAST")
+        return reader.invoke(FeedTrust.Companion, pinFile, userPins) as FeedResult<FeedTrust>
+    }
 
     class Payload(val name: String, val bytes: ByteArray) {
         val sha256: String get() = FeedKeys.sha256Hex(bytes)
@@ -63,7 +75,7 @@ internal object TestFeeds {
     }
 
     fun verify(trust: FeedTrust, feed: Feed, envelope: ByteArray, source: String = FeedSources.GIG_LOG) =
-        FeedVerifier.verifyEnvelope(trust, source, feed, ByteArrayInputStream(envelope))
+        VerifiedManifest.verify(trust, source, feed, ByteArrayInputStream(envelope))
 
     fun verified(trust: FeedTrust, feed: Feed, envelope: ByteArray, source: String = FeedSources.GIG_LOG): VerifiedManifest =
         (verify(trust, feed, envelope, source) as FeedResult.Ok).value
