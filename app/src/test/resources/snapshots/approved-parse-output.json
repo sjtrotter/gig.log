@@ -1764,6 +1764,12 @@
         "shape": null,
         "fields": {}
     },
+    "dropoff_help_menu/2026-11-13_18-12-59-716__doordash__accessibility.window__dropoff_help_menu__86581a.json": {
+        "ruleId": "doordash.screen.dropoff_help_menu",
+        "intent": "dropoff_help_menu",
+        "shape": null,
+        "fields": {}
+    },
     "dropoff_issue_menu/dropoff_issue_menu.json": {
         "ruleId": "doordash.screen.dropoff_issue_menu",
         "intent": "dropoff_issue_menu",
@@ -1807,6 +1813,18 @@
         "fields": {}
     },
     "dropoff_multi_order_confirm/2026-08-28_17-08-39-947__doordash__accessibility.window__dropoff_multi_order_confirm__18aa2a.json": {
+        "ruleId": "doordash.screen.dropoff_multi_order_confirm",
+        "intent": "dropoff_multi_order_confirm",
+        "shape": null,
+        "fields": {}
+    },
+    "dropoff_multi_order_confirm/2026-11-13_17-12-26-167__doordash__accessibility.window__dropoff_multi_order_confirm__5811d4.json": {
+        "ruleId": "doordash.screen.dropoff_multi_order_confirm",
+        "intent": "dropoff_multi_order_confirm",
+        "shape": null,
+        "fields": {}
+    },
+    "dropoff_multi_order_confirm/2026-11-13_17-27-06-804__doordash__accessibility.window__dropoff_multi_order_confirm__dfb0f9.json": {
         "ruleId": "doordash.screen.dropoff_multi_order_confirm",
         "intent": "dropoff_multi_order_confirm",
         "shape": null,
@@ -4738,6 +4756,18 @@
         "shape": null,
         "fields": {}
     },
+    "pickup_going_to_store_sheet/2026-11-13_14-25-21-371__doordash__accessibility.window__pickup_going_to_store_sheet__5d422d.json": {
+        "ruleId": "doordash.screen.pickup_going_to_store_sheet",
+        "intent": "pickup_going_to_store_sheet",
+        "shape": null,
+        "fields": {}
+    },
+    "pickup_going_to_store_sheet/2026-11-13_17-29-06-275__doordash__accessibility.window__pickup_going_to_store_sheet__688896.json": {
+        "ruleId": "doordash.screen.pickup_going_to_store_sheet",
+        "intent": "pickup_going_to_store_sheet",
+        "shape": null,
+        "fields": {}
+    },
     "pickup_issue_menu/2026-08-18_18-52-23-131__doordash__accessibility.window__pickup_issue_menu__2f1a45.json": {
         "ruleId": "doordash.screen.pickup_issue_menu",
         "intent": "pickup_issue_menu",
@@ -5950,6 +5980,12 @@
         "shape": null,
         "fields": {}
     },
+    "pickup_steps/2026-11-13_16-57-49-157__doordash__accessibility.window__pickup_steps__706fa5.json": {
+        "ruleId": "doordash.screen.pickup_steps",
+        "intent": "pickup_steps",
+        "shape": null,
+        "fields": {}
+    },
     "pickup_steps/gopuff_bin_scan_steps.json": {
         "ruleId": "doordash.screen.pickup_steps",
         "intent": "pickup_steps",
@@ -6131,6 +6167,24 @@
         }
     },
     "pickup_verify_items/2026-09-04_20-11-55-378__doordash__accessibility.window__pickup_verify_items__5ae1fb.json": {
+        "ruleId": "doordash.screen.pickup_verify_items",
+        "intent": "pickup_verify_items",
+        "shape": "task",
+        "fields": {
+            "arrivalConfirmed": false,
+            "customerAddressHash": null,
+            "customerNameHash": null,
+            "deadline": null,
+            "itemsRemaining": null,
+            "itemsShopped": null,
+            "phase": "PICKUP",
+            "redCardTotal": null,
+            "storeAddress": null,
+            "storeName": null,
+            "subFlow": "ARRIVED"
+        }
+    },
+    "pickup_verify_items/2026-11-13_16-57-45-659__doordash__accessibility.window__pickup_verify_items__bca3ec.json": {
         "ruleId": "doordash.screen.pickup_verify_items",
         "intent": "pickup_verify_items",
         "shape": "task",
@@ -7347,6 +7401,12 @@
         "fields": {}
     },
     "shopping_item_status/2026-09-28_17-03-44-761__doordash__accessibility.window__shopping_item_status__1605b1.json": {
+        "ruleId": "doordash.screen.shopping_item_status",
+        "intent": "shopping_item_status",
+        "shape": null,
+        "fields": {}
+    },
+    "shopping_item_status/2026-11-14_10-49-39-303__doordash__accessibility.window__shopping_item_status__2a037b.json": {
         "ruleId": "doordash.screen.shopping_item_status",
         "intent": "shopping_item_status",
         "shape": null,
