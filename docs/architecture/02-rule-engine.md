@@ -483,7 +483,7 @@ publishing run under one `Mutex`, so a load suspended in reconciliation cannot b
 generation live with the other's capabilities (`ActivationSerializationTest`). A `Prepared` carries its interpreter,
 the floor it was built on and the activation revision it saw; `activate` refuses it (false, with a WARN, live
 generation untouched) when any of them is no longer current, so a candidate prepared on an older floor, or before
-another generation went live, cannot replace a newer one. No network code exists yet (the rules feed is #640).
+another generation went live, cannot replace a newer one. Fetching rules through the feed channel (below) is #640.
 
 - **Generation.** `RuleGeneration` is one immutable set of screen, click and notification rulesets, and it is the
   redaction source (`ScreenRedactionSource`). `ObservationClassifier.classifyFrame` reads the live generation once
@@ -539,3 +539,55 @@ another generation went live, cannot replace a newer one. No network code exists
   their prose, the contract tables, the per-file caps) and pins it to the number, so a vocabulary change fails CI
   until it bumps the contract or re-pins it on purpose. The 1 MB per-file limit (`MAX_RULE_FILE_BYTES`) and
   `MAX_RULES_PER_FILE` hold for every source.
+
+
+## The feed channel: transport, cache and consent (#1565)
+
+One layer fetches, keeps and swaps every signed feed (fuel, constants, rules): `FeedClient` in `:core:network`
+(`network.feed`) and `FeedRepository` in `:core:data` (`data.feed`). Every check of the bytes is `feed-contract`'s;
+this layer re-implements none. It has no consumer yet: fuel is #1566, rules #640, constants #695. Nothing calls
+`refresh`, and gig.log's pin file holds no key, so this build sends no feed request.
+
+- **Transport.** `FeedClient` GETs `<feedsUrl><feed>/envelope.json`, then each payload at `<feed>/<sha256>.json`,
+  built from the signed hash under the envelope's own feed directory (a non-hex name is refused before any request).
+  https only for every source, checked before every request. Redirects off (`followRedirects`, `followSslRedirects`),
+  no cookie jar, no cache, and no header of ours but the fixed `User-Agent: gig.log-feeds/1`. `If-None-Match` goes
+  only to gig.log's own source (`FeedSource.GigLog`). A custom source gets no conditional request, and its ETag is
+  never handed back or stored, because an operator-chosen ETag could follow a phone across IP addresses (security
+  X8). A 404, 408, 429, 5xx or transport failure is retried twice, a minute apart (`RETRY_DELAY_MS`, injected in
+  tests), which covers an edge cache that holds the new envelope before its payloads. A 3xx or any other status is
+  final. Bodies are read bounded (`FeedLimits.readBounded`), and the client logs headers only, in debug builds
+  (`ClientProfile.Feed`).
+- **Consent.** `FeedPolicy` gives each feed's switch and source (`AppFeedPolicy`: fuel follows `isGasPriceAuto`;
+  constants and rules are off until their own switches exist; every feed reads gig.log's site until #1567). A
+  refresh checks the switch and the source before every request, retries included, and before staging, committing
+  and activating. A watcher cancels the work as soon as the switch turns off or the source changes. A
+  `OneShotGrant` (an explicit user act, such as "Resume auto") is one call's parameter, bound to its feed and source
+  id. It belongs to the coroutine that minted it and is spent by the one call that claims it, so a cancelled act,
+  another feed, another source or a second use is refused before any request. It is never stored, so a background
+  refresh cannot start from one.
+- **Cache.** `noBackupFilesDir/feeds/<source>/<feed>/gen-<sequence>/` holds each generation: payloads named by
+  sha256 and, once committed, `meta.json` (the envelope, so start-up re-verifies the signed manifest; the digest;
+  the high-water with the digest that set it; the consumer's carry, such as fuel anchors or retained constant
+  years; gig.log's ETag). The high-water and the carry live only there, never in DataStore. `FeedStore` writes
+  `meta.json`, then `PREVIOUS`, then `CURRENT`, each through an fsync and an atomic rename. The rename of `CURRENT`
+  is the commit. Only the current and the previous generation are kept. One mutex per (source, feed) serializes
+  start-up and every refresh.
+- **Stage, commit, activate.** The consumer's `FeedStager` checks the staged files (fuel and constants bounds; for
+  rules, the batch loader's `prepareGeneration`) and returns the value and the carry to commit, without activating.
+  Activation publishes `StateFlow<FeedState<T>>`, which holds anchors only (`value`, `period`, `issuedAt`,
+  `lastError`); the UI derives "current" or "old" from `FeedFreshness` and `rememberNow()`. A file already held with
+  the same sha256 is re-verified against the new manifest and not downloaded again.
+- **Start-up** (`start`) re-verifies the generation `CURRENT` names, through `VerifiedManifest.verify` and
+  `VerifiedFeedFile.verify`, then the one `PREVIOUS` names, with the high-water kept (`FeedCacheState.recoveredTo`),
+  then no feed value (the consumer's bundled baseline, or no feed price for fuel). The high-water is the largest
+  any readable committed `meta.json` records; a `CURRENT` whose `meta.json` cannot be read still counts its own
+  sequence, and a garbled `CURRENT` counts every generation on disk, so recovery never lowers it. A crash after
+  the commit re-activates from `CURRENT`; a crash before it leaves the old generation live, and the stage directory
+  is removed at the next start. `FeedRepositoryTest` holds the issue's acceptance list against an HTTPS fake
+  server that answers for the real host names, with feeds signed by generated keys as custom sources (gig.log's
+  pins come only from the shipped pin file, so no test seam widens `FeedTrust`).
+- **Logging** (tag `Feeds`): INFO only for an accepted generation (feed, sequence, source id); WARN when last-good
+  is kept for a refusal, a stage rejection or a storage failure, and for a start-up fallback; DEBUG for a fetch
+  failure, a denial or a cancellation. No `Feeds` line carries a URL, an address, a header or a body; the client's
+  debug-only HTTP log (VERBOSE) carries request lines and headers, never bodies.
