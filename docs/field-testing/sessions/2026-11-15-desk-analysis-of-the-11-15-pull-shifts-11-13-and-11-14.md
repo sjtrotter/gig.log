@@ -3,7 +3,7 @@
 - **Date:** 2026-11-15 (pull). Shifts on 11-13 (two) and 11-14 (one, short, during the census upload test), DoorDash 8.107.10 (new since the last pull's 8.106.9). Uber 4.604/4.605, offline throughout.
 - **Platform(s) tested:** DoorDash.
 - **Branch under test:** `0.231.0+96fa4a89.dirty` (as in the 11-12 log) until 11-14 09:20; then `0.233.1+5e856841.dirty` (`master` at `5e8568412`, post-#1647). Not on the phone: #1648 and #1649 (#1568, the rules batch loader). After the pull the phone got `0.233.1+e6a934d4.dirty` (post-#1649); its startup logged `Rules generation live: 2 bundled + 0 remote file(s)` with no error (desk only, not a dash).
-- **Field conditions:** three shifts. A 11-13 14:14–15:12, one offer accepted, one delivery, $18.20, ended at the offline home with no Dash summary. B 11-13 16:49–18:38, 2 of 2 offers, two jobs, four drops, $51.85. C 11-14 09:46–11:45, 1 of 6 offers accepted, one delivery, $43.18. Money reconciles to the cent on all three. DoorDash's "This week" read $111.43 after the 11-11 shifts and rose by $18.20 after shift A; adding shifts B and C gives a calculated $224.66 (no capture of the later figure).
+- **Field conditions:** three shifts. A 11-13 14:14–15:12, one offer accepted, one delivery, $18.20, ended at the offline home with no Dash summary. B 11-13 16:49–18:38, 2 of 2 offers, two jobs, four drops, $51.85. C 11-14 09:46–11:45, 1 of 6 offers accepted, one delivery, $43.18. Money reconciles to the cent on all three. DoorDash's "This week" read $111.43 after the 11-11 shifts; $111.43 plus the three recorded shifts is a calculated $224.66 (no capture shows a later weekly figure).
 
 ### Bugs
 
