@@ -3,7 +3,7 @@ package cloud.trotter.log.gig.core.data.feed
 import cloud.trotter.feed.contract.Feed
 import cloud.trotter.log.gig.core.data.settings.AppPreferencesRepository
 import cloud.trotter.log.gig.core.network.feed.FeedSource
-import kotlinx.coroutines.DisposableHandle
+import kotlinx.coroutines.CompletableJob
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
@@ -42,8 +42,8 @@ class AppFeedPolicy @Inject constructor(private val preferences: AppPreferencesR
  * "Resume auto") while the feature's switch is off. It is a parameter of one [FeedRepository.refresh] call and is never
  * stored, so a background refresh can never start from it.
  *
- * It dies with cancellation: it belongs to the coroutine that minted it and is dead once that coroutine is cancelled
- * or done, and it is spent by the one call that claims it, however that call ends.
+ * It dies with cancellation: it belongs to the coroutine that minted it and is dead from the moment that coroutine
+ * starts cancelling (or is done), and it is spent by the one call that claims it, however that call ends.
  */
 class OneShotGrant private constructor(val feed: Feed, val sourceId: String, private val owner: Job) {
     private val state = AtomicInteger(UNUSED)
@@ -56,7 +56,11 @@ class OneShotGrant private constructor(val feed: Feed, val sourceId: String, pri
 
     internal fun spend() = state.set(SPENT)
 
-    internal fun onOwnerDone(action: () -> Unit): DisposableHandle = owner.invokeOnCompletion { action() }
+    /**
+     * A child job of the owner. The owner's cancellation cancels it at once, before the owner itself finishes, so a
+     * refresh running in another scope can stop at that onset. The caller completes it when the call ends.
+     */
+    internal fun ownerChild(): CompletableJob = Job(owner)
 
     override fun toString(): String = "OneShotGrant(${feed.wire}, $sourceId)"
 

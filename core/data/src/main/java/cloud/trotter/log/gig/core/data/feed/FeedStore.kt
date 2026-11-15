@@ -4,6 +4,7 @@ import cloud.trotter.feed.contract.Feed
 import cloud.trotter.feed.contract.FeedLimits
 import cloud.trotter.feed.contract.FeedMark
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
@@ -12,10 +13,9 @@ import kotlinx.serialization.json.longOrNull
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
-import java.nio.channels.FileChannel
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
-import java.nio.file.StandardOpenOption
+import java.util.UUID
 
 /**
  * What a committed generation's `meta.json` holds: the envelope (the exact manifest string and its signature, so
@@ -32,41 +32,72 @@ internal class FeedMeta(
     val etag: String?,
 )
 
-/** A pointer file's state: absent, unreadable, or naming one generation. */
-internal sealed interface FeedPointer {
-    data object Absent : FeedPointer
-    data object Garbled : FeedPointer
-    data class Names(val generation: String, val sequence: Long) : FeedPointer
-}
+/** The pointer pair in `CURRENT`: the live generation and the one before it. */
+internal data class FeedPointers(val current: String, val previous: String?)
 
 /**
  * The cache of one (source, feed) under `noBackupFilesDir/feeds/<source>/<feed>/` (design-r3 § App client):
  *
- * - `gen-<sequence>/` holds one generation: each payload file named by its sha256, and `meta.json` once committed.
- * - `CURRENT` names the live generation and `PREVIOUS` the one before it. Each is replaced by an atomic rename after an
- *   fsync, so a crash leaves either the old pointer or the new one, never half of one.
+ * - `stage-<sequence>-<random>/` is a generation being written. It is never committed state, and start-up deletes
+ *   every one.
+ * - `gen-<sequence>/` is a committed generation: each payload named by its sha256, and `meta.json`. It exists only
+ *   after its `meta.json` was fsynced and its stage directory renamed to it, so its name alone is high-water evidence.
+ * - `CURRENT` holds the pointer pair (current, previous), replaced through an fsynced temp file and an atomic rename,
+ *   so a crash leaves the old pair or the new one, never half of one.
  *
- * Commit order: `meta.json`, then `PREVIOUS`, then `CURRENT`. The rename of `CURRENT` is the commit; a crash before it
- * leaves the old generation live and the staged directory is removed at the next start. Only the current and the
- * previous generation are kept. The caller serializes every call for one (source, feed).
+ * Each created directory and each rename is made durable through [sync]. A sync failure before `CURRENT` moves aborts
+ * the commit; after it, [commit] reports the commit as not proven durable and the commit stands. The caller serializes
+ * every call for one (source, feed).
  */
-internal class FeedStore(root: File, sourceId: String, feed: Feed) {
+internal class FeedStore(
+    root: File,
+    sourceId: String,
+    feed: Feed,
+    private val sync: DirectorySync,
+    private val crashPoints: CrashPoints = CrashPoints { },
+) {
     init {
         require(SOURCE_ID.matches(sourceId)) { "not a source id" }
     }
 
     val dir = File(File(root, sourceId), feed.wire)
 
-    fun pointer(name: String): FeedPointer {
-        val file = File(dir, name)
-        if (!file.exists()) return FeedPointer.Absent
-        val text = readBounded(file, POINTER_MAX_BYTES)?.toString(Charsets.UTF_8) ?: return FeedPointer.Garbled
-        val sequence = GENERATION.matchEntire(text)?.groupValues?.get(1)?.toLongOrNull() ?: return FeedPointer.Garbled
-        return FeedPointer.Names(text, sequence)
+    fun pointers(): FeedPointers? {
+        val bytes = readBounded(File(dir, CURRENT), POINTER_MAX_BYTES) ?: return null
+        return try {
+            val json = Json.parseToJsonElement(bytes.toString(Charsets.UTF_8)).jsonObject
+            val current = json.text("current")?.takeIf { GENERATION.matches(it) } ?: return null
+            FeedPointers(current, json.text("previous")?.takeIf { GENERATION.matches(it) })
+        } catch (_: IllegalArgumentException) {
+            null
+        }
     }
 
-    /** Every generation directory on disk, committed or not. */
-    fun generations(): List<String> = dir.listFiles().orEmpty().filter { it.isDirectory && GENERATION.matches(it.name) }.map { it.name }
+    /** Every committed generation on disk, newest first. */
+    fun generations(): List<String> = dir.listFiles().orEmpty()
+        .filter { it.isDirectory && GENERATION.matches(it.name) }
+        .map { it.name }
+        .sortedByDescending { sequenceOf(it) }
+
+    /**
+     * The high-water: the largest sequence any evidence on disk names. That is every `gen-` directory (its name counts
+     * even when its `meta.json` cannot be read), every readable `meta.json` and the pointer pair, so recovery never
+     * lowers it. The digest is the one a readable `meta.json` records for that sequence, else empty, so an
+     * equal-sequence candidate is then refused rather than taken as the same.
+     */
+    fun highWater(): FeedMark? {
+        val marks = ArrayList<FeedMark>()
+        for (generation in generations()) {
+            marks += FeedMark(sequenceOf(generation), "")
+            readMeta(generation)?.let { meta ->
+                marks += meta.highWater
+                if (meta.sequence == sequenceOf(generation)) marks += FeedMark(meta.sequence, meta.digest)
+            }
+        }
+        pointers()?.let { pair -> listOfNotNull(pair.current, pair.previous).forEach { marks += FeedMark(sequenceOf(it), "") } }
+        val top = marks.maxOfOrNull { it.sequence } ?: return null
+        return marks.firstOrNull { it.sequence == top && it.digest.isNotEmpty() } ?: FeedMark(top, "")
+    }
 
     fun readMeta(generation: String): FeedMeta? {
         val bytes = readBounded(File(File(dir, generation), META), META_MAX_BYTES) ?: return null
@@ -86,46 +117,85 @@ internal class FeedStore(root: File, sourceId: String, feed: Feed) {
         }
     }
 
-    /** A payload file of [generation] by its sha256, at most [size] bytes; the caller verifies it. */
+    /** A payload file of a committed generation by its sha256, at most [size] bytes; the caller verifies it. */
     fun readFile(generation: String, sha256: String, size: Int): ByteArray? =
         readBounded(File(File(dir, generation), sha256), size)
 
-    /** Writes [files] (sha256 to bytes) into a fresh `gen-<sequence>/`, each fsynced. Returns the generation's name. */
+    /** Deletes every stage directory and temp file: none of them is committed state. */
+    fun deleteStages() {
+        for (file in dir.listFiles().orEmpty()) {
+            if (file.name.startsWith(STAGE_PREFIX) || file.name.endsWith(TMP)) file.deleteRecursively()
+        }
+    }
+
+    /** Writes [files] (sha256 to bytes) into a new stage directory, each fsynced. Returns the stage's name. */
     @Throws(IOException::class)
     fun stage(sequence: Long, files: Map<String, ByteArray>): String {
-        val name = generationName(sequence)
-        val gen = File(dir, name)
-        if (gen.exists() && !gen.deleteRecursively()) throw IOException("stale stage")
-        if (!gen.mkdirs()) throw IOException("mkdir")
-        for ((sha256, bytes) in files) writeDurably(File(gen, sha256), bytes)
-        syncDirectory(gen)
+        makeDirectories(dir)
+        val name = "$STAGE_PREFIX$sequence-${UUID.randomUUID()}"
+        val stage = File(dir, name)
+        if (!stage.mkdir()) throw IOException("mkdir")
+        sync.sync(dir, published = false)
+        for ((sha256, bytes) in files) writeDurably(File(stage, sha256), bytes)
+        sync.sync(stage, published = false)
         return name
     }
 
     /**
-     * Commits [generation]: its `meta.json`, then `PREVIOUS` (the generation live until now, or none), then the atomic
-     * rename of `CURRENT`. Prunes every other generation afterwards.
+     * Commits [stage] as `gen-<sequence>`: its `meta.json`, the rename to its generation name, then the pointer pair
+     * (the new generation, [previous]). Returns false when the pointer moved but its directory sync failed; the commit
+     * stands. Throws, with the pointer pair unchanged, when anything before the pointer's rename fails.
      */
     @Throws(IOException::class)
-    fun commit(generation: String, meta: FeedMeta, previous: String?) {
-        replaceDurably(File(File(dir, generation), META), encode(meta))
-        val pointerPrevious = File(dir, PREVIOUS)
-        if (previous != null && previous != generation) replaceDurably(pointerPrevious, previous.toByteArray(Charsets.UTF_8))
-        else if (pointerPrevious.exists() && !pointerPrevious.delete()) throw IOException("previous pointer")
-        replaceDurably(File(dir, CURRENT), generation.toByteArray(Charsets.UTF_8))
-        prune(setOfNotNull(generation, previous))
-    }
-
-    /** Removes every generation directory and temp file not in [keep]. A failure leaves clutter, never a wrong pointer. */
-    fun prune(keep: Set<String>) {
-        for (file in dir.listFiles().orEmpty()) {
-            val stale = (file.isDirectory && GENERATION.matches(file.name) && file.name !in keep) || file.name.endsWith(TMP)
-            if (stale) file.deleteRecursively()
+    fun commit(stage: String, meta: FeedMeta, previous: String?): Boolean {
+        val stageDir = File(dir, stage)
+        writeDurably(File(stageDir, META), encode(meta))
+        sync.sync(stageDir, published = false)
+        val genDir = File(dir, generationName(meta.sequence))
+        try {
+            Files.move(stageDir.toPath(), genDir.toPath(), StandardCopyOption.ATOMIC_MOVE)
+            sync.sync(dir, published = false)
+        } catch (e: IOException) {
+            genDir.deleteRecursively()
+            throw e
+        }
+        crashPoints.reached(CrashPoint.RENAMED)
+        val pair = JsonObject(
+            mapOf("current" to JsonPrimitive(genDir.name), "previous" to (previous?.let(::JsonPrimitive) ?: JsonNull)),
+        )
+        val tmp = File(dir, CURRENT + TMP)
+        writeDurably(tmp, pair.toString().toByteArray(Charsets.UTF_8))
+        Files.move(tmp.toPath(), File(dir, CURRENT).toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+        return try {
+            sync.sync(dir, published = true)
+            true
+        } catch (_: IOException) {
+            false
         }
     }
 
-    fun discard(generation: String) {
-        File(dir, generation).deleteRecursively()
+    /**
+     * Removes every committed generation that is not in [keep] and not the newest on disk. The caller reads the
+     * high-water first; the generation that sets it is never removed.
+     */
+    fun prune(keep: Set<String>) {
+        val all = generations()
+        for (generation in all.drop(1)) {
+            if (generation !in keep) File(dir, generation).deleteRecursively()
+        }
+    }
+
+    fun discard(stage: String) {
+        File(dir, stage).deleteRecursively()
+    }
+
+    /** Creates [target] and each missing ancestor, syncing each new entry into its parent. */
+    private fun makeDirectories(target: File) {
+        val missing = generateSequence(target) { it.parentFile }.takeWhile { !it.exists() }.toList().asReversed()
+        for (directory in missing) {
+            if (!directory.mkdir() && !directory.isDirectory) throw IOException("mkdir")
+            sync.sync(directory.parentFile ?: throw IOException("no parent"), published = false)
+        }
     }
 
     private fun encode(meta: FeedMeta): ByteArray {
@@ -143,26 +213,10 @@ internal class FeedStore(root: File, sourceId: String, feed: Feed) {
         return JsonObject(fields).toString().toByteArray(Charsets.UTF_8)
     }
 
-    private fun replaceDurably(target: File, bytes: ByteArray) {
-        val tmp = File(target.parentFile, target.name + TMP)
-        writeDurably(tmp, bytes)
-        Files.move(tmp.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
-        syncDirectory(target.parentFile!!)
-    }
-
     private fun writeDurably(file: File, bytes: ByteArray) {
         FileOutputStream(file).use { out ->
             out.write(bytes)
             out.fd.sync()
-        }
-    }
-
-    /** Makes a rename durable. Best effort: not every filesystem lets a directory be opened for a sync. */
-    private fun syncDirectory(directory: File) {
-        try {
-            FileChannel.open(directory.toPath(), StandardOpenOption.READ).use { it.force(true) }
-        } catch (_: IOException) {
-        } catch (_: UnsupportedOperationException) {
         }
     }
 
@@ -178,11 +232,11 @@ internal class FeedStore(root: File, sourceId: String, feed: Feed) {
 
     companion object {
         const val CURRENT = "CURRENT"
-        const val PREVIOUS = "PREVIOUS"
         private const val META = "meta.json"
         private const val TMP = ".tmp"
+        private const val STAGE_PREFIX = "stage-"
         private const val META_VERSION = 1
-        private const val POINTER_MAX_BYTES = 64
+        private const val POINTER_MAX_BYTES = 256
 
         /** The envelope (at most 32 KB, escaped at most 6x as a JSON string) plus the carry. */
         private const val META_MAX_BYTES = 512_000
@@ -190,5 +244,7 @@ internal class FeedStore(root: File, sourceId: String, feed: Feed) {
         private val SOURCE_ID = Regex("[a-z0-9.:]{1,64}")
 
         fun generationName(sequence: Long): String = "gen-$sequence"
+
+        fun sequenceOf(generation: String): Long = GENERATION.matchEntire(generation)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
     }
 }

@@ -130,11 +130,34 @@ class FeedClientTest {
         assertEquals(0, server.requestCount)
 
         respond(404)
-        var asks = 0
-        val reply = client.payload(custom(), Feed.FUEL, sha, 2, FeedGate { asks++ == 0 })
+        val reply = client.payload(custom(), Feed.FUEL, sha, 2, FeedGate { server.requestCount == 0 })
         assertEquals(FeedReply.Denied, reply)
         assertEquals(1, server.requestCount)
+    }
+
+    @Test fun `a 503 with Retry-After 0 is never followed up by OkHttp, so the gate decides the retry`() = runTest {
+        server.enqueue(MockResponse.Builder().code(503).addHeader("Retry-After", "0").build())
+        respond(200, "{}")
+        val reply = client.payload(custom(), Feed.FUEL, sha, 2, FeedGate { server.requestCount == 0 })
+        assertEquals("revoked between the 503 and its retry", FeedReply.Denied, reply)
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test fun `only the client's own minute-spaced retries happen`() = runTest {
+        repeat(3) { server.enqueue(MockResponse.Builder().code(503).addHeader("Retry-After", "0").build()) }
+        respond(200, "{}")
+        assertEquals(FeedReply.Failed(FeedFetchFailure.HTTP_ERROR), client.payload(custom(), Feed.FUEL, sha, 2, open))
+        assertEquals(3, server.requestCount)
+        assertEquals(listOf(1, 2), delays)
+    }
+
+    @Test fun `the gate is asked again at every network exchange`() = runTest {
+        respond(200, "{}")
+        var asks = 0
+        val reply = client.payload(custom(), Feed.FUEL, sha, 2, FeedGate { ++asks == 1 })
+        assertEquals("the second ask is the exchange itself", FeedReply.Denied, reply)
         assertEquals(2, asks)
+        assertEquals(0, server.requestCount)
     }
 
     @Test fun `a body larger than its cap is refused`() = runTest {

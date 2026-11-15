@@ -5,17 +5,21 @@ import cloud.trotter.feed.contract.FeedRefusal
 import cloud.trotter.log.gig.core.network.feed.FeedClient
 import cloud.trotter.log.gig.core.network.feed.FeedFetchFailure
 import cloud.trotter.log.gig.core.network.feed.FeedSource
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -29,6 +33,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.io.IOException
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
@@ -58,7 +63,22 @@ class FeedRepositoryTest {
         feed: Feed = Feed.FUEL,
         policy: FeedPolicy = this.policy,
         crash: CrashPoints = CrashPoints { },
-    ) = FeedRepository(feed, TestStager(), client, policy, root(), clock, buildTimeMs = NOW - 30 * 24 * HOUR, bundled = null, crashPoints = crash)
+        stager: FeedStager<String> = TestStager(),
+        sync: DirectorySync = DirectorySync.FSYNC,
+    ) = FeedRepository(
+        feed, stager, client, policy, root(), clock, buildTimeMs = NOW - 30 * 24 * HOUR, bundled = null,
+        crashPoints = crash, directorySync = sync,
+    )
+
+    /** The pointer pair in `CURRENT`. */
+    private fun pointer(): Pair<String?, String?> {
+        val json = Json.parseToJsonElement(File(feedDir(), "CURRENT").readText()).jsonObject
+        return json["current"]?.jsonPrimitive?.contentOrNull to json["previous"]?.jsonPrimitive?.contentOrNull
+    }
+
+    private fun stages(): List<String> = feedDir().listFiles().orEmpty().map { it.name }.filter { it.startsWith("stage-") }
+
+    private fun gens(): Set<String> = feedDir().listFiles().orEmpty().map { it.name }.filter { it.startsWith("gen-") }.toSet()
 
     private fun feedDir(source: FeedSource = fuel.source, feed: Feed = Feed.FUEL) = File(root(), "${source.id}/${feed.wire}")
 
@@ -79,7 +99,7 @@ class FeedRepositoryTest {
         assertEquals(gen1.sequence - 7 * 24 * HOUR, state.period)
         assertNull(state.lastError)
         val dir = feedDir()
-        assertEquals("gen-${gen1.sequence}", File(dir, "CURRENT").readText())
+        assertEquals("gen-${gen1.sequence}" to null, pointer())
         val meta = Json.parseToJsonElement(File(dir, "gen-${gen1.sequence}/meta.json").readText()).jsonObject
         assertEquals(gen1.sequence, meta["high_water"]!!.jsonObject["sequence"]!!.jsonPrimitive.long)
         assertEquals("one", meta["carry"]!!.jsonObject["seen"]!!.jsonArray.single().jsonPrimitive.content)
@@ -110,12 +130,13 @@ class FeedRepositoryTest {
         dying.start()
         site.publish(Feed.FUEL, gen2)
         assertTrue(runCatching { dying.refresh() }.exceptionOrNull() is SimulatedDeath)
-        assertTrue("gen2 was staged", File(feedDir(), "gen-${gen2.sequence}").isDirectory)
+        assertEquals("gen2 was staged under a stage name only", 1, stages().size)
+        assertFalse(File(feedDir(), "gen-${gen2.sequence}").exists())
 
         val restarted = repo()
         restarted.start()
         assertEquals("one", restarted.state.value.value)
-        assertFalse("the uncommitted stage is cleared", File(feedDir(), "gen-${gen2.sequence}").exists())
+        assertEquals("the uncommitted stage is cleared", emptyList<String>(), stages())
         assertEquals("and gen2 is still a candidate", FeedRefresh.Accepted(gen2.sequence), restarted.refresh())
     }
 
@@ -144,7 +165,7 @@ class FeedRepositoryTest {
             assertEquals(FeedRefresh.Failed(FeedError.Refused(FeedRefusal.Rollback)), third.refresh())
         }
 
-    @Test fun `a garbled CURRENT pointer falls back to the previous generation and keeps the high-water`() = runBlocking {
+    @Test fun `a garbled CURRENT pointer falls through to the newest valid generation and keeps the high-water`() = runBlocking {
         val first = repo()
         first.start()
         accept(first, gen1)
@@ -152,7 +173,7 @@ class FeedRepositoryTest {
         File(feedDir(), "CURRENT").writeText("\u0000garbage")
         val second = repo()
         second.start()
-        assertEquals("one", second.state.value.value)
+        assertEquals("two", second.state.value.value)
         site.publish(Feed.FUEL, gen2)
         assertEquals(FeedRefresh.Unchanged, second.refresh())
     }
@@ -164,9 +185,8 @@ class FeedRepositoryTest {
         accept(repository, gen2)
         val gen3 = fuel.generation(NOW - HOUR, "three")
         accept(repository, gen3)
-        val held = feedDir().listFiles()!!.filter { it.isDirectory }.map { it.name }.toSet()
-        assertEquals(setOf("gen-${gen2.sequence}", "gen-${gen3.sequence}"), held)
-        assertEquals("gen-${gen2.sequence}", File(feedDir(), "PREVIOUS").readText())
+        assertEquals(setOf("gen-${gen2.sequence}", "gen-${gen3.sequence}"), gens())
+        assertEquals("gen-${gen3.sequence}" to "gen-${gen2.sequence}", pointer())
     }
 
     @Test fun `a file already held with the same verified sha256 is not downloaded again`() = runBlocking {
@@ -189,7 +209,7 @@ class FeedRepositoryTest {
         assertEquals(FeedRefresh.Failed(FeedError.Stage("out_of_bounds")), repository.refresh())
         assertEquals("one", repository.state.value.value)
         assertEquals(FeedError.Stage("out_of_bounds"), repository.state.value.lastError)
-        assertEquals("gen-${gen1.sequence}", File(feedDir(), "CURRENT").readText())
+        assertEquals("gen-${gen1.sequence}", pointer().first)
         assertEquals(1, feedDir().listFiles()!!.count { it.isDirectory })
     }
 
@@ -201,6 +221,145 @@ class FeedRepositoryTest {
         assertEquals(FeedRefresh.Failed(FeedError.Refused(FeedRefusal.ClockBehind)), repository.refresh())
         assertEquals("one", repository.state.value.value)
         assertEquals(FeedError.Refused(FeedRefusal.ClockBehind), repository.state.value.lastError)
+    }
+
+    // --- recovery edges ---
+
+    private val between = fuel.generation(NOW - 150 * 60 * 1000, "between")
+
+    @Test fun `a cancellation after the commit keeps the committed high-water on the same instance`() = runBlocking {
+        var commits = 0
+        val repository = repo(crash = CrashPoints { if (it == CrashPoint.COMMITTED && ++commits == 2) policy.enabled.value = false })
+        repository.start()
+        accept(repository, gen1)
+        site.publish(Feed.FUEL, gen2)
+        assertEquals(FeedRefresh.Cancelled, repository.refresh())
+        policy.enabled.value = true
+        site.publish(Feed.FUEL, between)
+        assertEquals(FeedRefresh.Failed(FeedError.Refused(FeedRefusal.Rollback)), repository.refresh())
+        assertTrue("the committed generation is kept", File(feedDir(), "gen-${gen2.sequence}").isDirectory)
+        assertEquals("and it is the one live", "two", repository.state.value.value)
+    }
+
+    @Test fun `a pointer naming a missing lower generation never lowers the high-water or prunes the newest`() = runBlocking {
+        val first = repo()
+        first.start()
+        accept(first, gen1)
+        accept(first, gen2)
+        val missing = "gen-${gen1.sequence - HOUR}"
+        File(feedDir(), "CURRENT").writeText("""{"current":"$missing","previous":"$missing"}""")
+        val second = repo()
+        second.start()
+        assertEquals("two", second.state.value.value)
+        assertTrue(File(feedDir(), "gen-${gen2.sequence}").isDirectory)
+        site.publish(Feed.FUEL, between)
+        assertEquals(FeedRefresh.Failed(FeedError.Refused(FeedRefusal.Rollback)), second.refresh())
+    }
+
+    @Test fun `an unreadable newest generation still counts by its directory name`() = runBlocking {
+        val first = repo()
+        first.start()
+        accept(first, gen1)
+        accept(first, gen2)
+        File(feedDir(), "gen-${gen2.sequence}/meta.json").delete()
+        File(feedDir(), "CURRENT").delete()
+        val second = repo()
+        second.start()
+        assertEquals("one", second.state.value.value)
+        site.publish(Feed.FUEL, between)
+        assertEquals(FeedRefresh.Failed(FeedError.Refused(FeedRefusal.Rollback)), second.refresh())
+    }
+
+    @Test fun `an interrupted commit keeps the previous generation as a fallback`() = runBlocking {
+        val first = repo()
+        first.start()
+        accept(first, gen1)
+        accept(first, gen2)
+        val gen3 = fuel.generation(NOW - HOUR, "three")
+        val dying = repo(crash = CrashPoints { if (it == CrashPoint.RENAMED) throw SimulatedDeath() })
+        dying.start()
+        site.publish(Feed.FUEL, gen3)
+        assertTrue(runCatching { dying.refresh() }.exceptionOrNull() is SimulatedDeath)
+        assertEquals("the pointer pair is untouched", "gen-${gen2.sequence}" to "gen-${gen1.sequence}", pointer())
+
+        val restarted = repo()
+        restarted.start()
+        assertEquals("the renamed generation is committed", "three", restarted.state.value.value)
+        assertTrue("the fallback survives", File(feedDir(), "gen-${gen1.sequence}").isDirectory)
+        File(feedDir(), "gen-${gen3.sequence}/${gen3.sha256}").writeText("x")
+        File(feedDir(), "gen-${gen2.sequence}/${gen2.sha256}").writeText("x")
+        val third = repo()
+        third.start()
+        assertEquals("one", third.state.value.value)
+    }
+
+    @Test fun `a first fetch that dies after staging leaves no stage behind`() = runBlocking {
+        val dying = repo(crash = CrashPoints { if (it == CrashPoint.STAGED) throw SimulatedDeath() })
+        dying.start()
+        site.publish(Feed.FUEL, gen1)
+        repeat(2) { assertTrue(runCatching { dying.refresh() }.exceptionOrNull() is SimulatedDeath) }
+        assertEquals(2, stages().size)
+        val restarted = repo()
+        restarted.start()
+        assertEquals(emptyList<String>(), stages())
+        assertNull(restarted.state.value.value)
+    }
+
+    @Test fun `a directory sync failure before the pointer moves aborts the commit`() = runBlocking {
+        val repository = repo(sync = DirectorySync { _, published -> if (!published) throw IOException("sync") })
+        repository.start()
+        site.publish(Feed.FUEL, gen1)
+        assertEquals(FeedRefresh.Failed(FeedError.Storage), repository.refresh())
+        assertNull(repository.state.value.value)
+        assertFalse(File(feedDir(), "CURRENT").exists())
+        assertEquals(emptySet<String>(), gens())
+        val restarted = repo()
+        restarted.start()
+        assertNull(restarted.state.value.value)
+    }
+
+    @Test fun `a directory sync failure after the pointer moves keeps the commit`() = runBlocking {
+        val repository = repo(sync = DirectorySync { _, published -> if (published) throw IOException("sync") })
+        repository.start()
+        accept(repository, gen1)
+        assertEquals("one", repository.state.value.value)
+        assertEquals("gen-${gen1.sequence}", pointer().first)
+    }
+
+    @Test fun `a cached generation of a contract this build cannot read is not restored, and the high-water stays`() =
+        runBlocking {
+            val first = repo()
+            first.start()
+            accept(first, gen1)
+            val newer = object : FeedStager<String> by TestStager() {
+                override val contracts: Set<Long> = setOf(2L)
+            }
+            val older = repo(stager = newer)
+            older.start()
+            assertNull(older.state.value.value)
+            site.publish(Feed.FUEL, gen1)
+            assertEquals("equal sequence and digest: nothing new", FeedRefresh.Unchanged, older.refresh())
+        }
+
+    @Test fun `a grant dies when its owner starts cancelling, not when the owner finishes`() = runBlocking {
+        policy.enabled.value = false
+        val repository = repo()
+        repository.start()
+        site.publish(Feed.FUEL, gen1)
+        site.hold("/feeds/fuel/${gen1.sha256}.json")
+        val minted = CompletableDeferred<OneShotGrant>()
+        val owner = launch {
+            launch { withContext(NonCancellable) { delay(3_000) } }
+            minted.complete(OneShotGrant.forUserAct(Feed.FUEL, fuel.source))
+            awaitCancellation()
+        }
+        val grant = minted.await()
+        val elsewhere = async(Dispatchers.Default) { repository.refresh(grant) }
+        assertTrue(withContext(Dispatchers.IO) { site.awaitHeld() })
+        owner.cancel()
+        assertEquals(FeedRefresh.Cancelled, withTimeout(1_000) { elsewhere.await() })
+        assertFalse(File(feedDir(), "CURRENT").exists())
+        owner.join()
     }
 
     // --- consent ---

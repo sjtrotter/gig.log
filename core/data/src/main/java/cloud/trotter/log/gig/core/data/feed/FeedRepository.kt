@@ -51,10 +51,14 @@ import java.util.concurrent.ConcurrentHashMap
  * - **One mutex per (source, feed).** Start-up and every refresh of that pair run under it.
  * - **Consent and source before every step:** before each request (retries included), before staging, committing
  *   and activating. While the work runs, turning the feature off or changing the source cancels it.
- * - **Stage, commit, activate** ([FeedStore]): the files are written and checked by [stager] without activating; the
- *   commit writes `meta.json` and renames `CURRENT`; activation publishes [state].
- * - **Start-up** ([start]) re-verifies `CURRENT` through the same verifier, then `PREVIOUS` with the high-water kept,
- *   then no feed value (the consumer's bundled baseline, or no feed price for fuel).
+ * - **Stage, commit, activate** ([FeedStore]): the files are written to a stage and checked by [stager] without
+ *   activating; the commit renames the stage to its generation and moves the `CURRENT` pointer pair; activation
+ *   publishes [state].
+ * - **The disk decides.** Every acceptance decision reads the high-water fresh from disk under the mutex, never from
+ *   memory, so a generation committed but never activated (a cancellation or a crash after the commit) still counts.
+ * - **Start-up** ([start]) deletes every stage, then activates the newest generation that re-verifies through the
+ *   same verifier and carries a contract this build reads, else no feed value (the consumer's bundled baseline, or no
+ *   feed price for fuel). The high-water never drops.
  * - **The high-water and the carry live only in `meta.json`.**
  *
  * @param root `noBackupFilesDir/feeds`.
@@ -72,6 +76,7 @@ class FeedRepository<T> internal constructor(
     private val buildTimeMs: Long,
     private val bundled: FeedMark?,
     private val crashPoints: CrashPoints,
+    private val directorySync: DirectorySync,
 ) {
     constructor(
         feed: Feed,
@@ -82,7 +87,7 @@ class FeedRepository<T> internal constructor(
         clock: Clock,
         buildTimeMs: Long,
         bundled: FeedMark? = null,
-    ) : this(feed, stager, client, policy, root, clock, buildTimeMs, bundled, CrashPoints { })
+    ) : this(feed, stager, client, policy, root, clock, buildTimeMs, bundled, CrashPoints { }, DirectorySync.FSYNC)
 
     private val _state = MutableStateFlow(FeedState<T>())
     val state: StateFlow<FeedState<T>> = _state.asStateFlow()
@@ -90,13 +95,16 @@ class FeedRepository<T> internal constructor(
     private val locks = ConcurrentHashMap<String, Mutex>()
     private val publishing = Mutex()
 
-    /** What is live for the source last loaded: its cache state, generation, carry and (gig.log only) ETag. */
+    /**
+     * What is live for the source last loaded: the active generation (null for the baseline), its carry and
+     * (gig.log only) ETag, and the newest generation on disk when it was loaded.
+     */
     private class Live(
         val sourceId: String,
-        val cache: FeedCacheState,
         val generation: String?,
         val carry: JsonObject?,
         val etag: String?,
+        val newestSeen: String?,
     )
 
     @Volatile private var live: Live? = null
@@ -133,7 +141,10 @@ class FeedRepository<T> internal constructor(
         return FeedRefresh.Denied
     }
 
-    /** Runs [work] and cancels it the moment the feature turns off, the source changes, or the grant's owner ends. */
+    /**
+     * Runs [work] and cancels it the moment the feature turns off, the source changes, or the grant's owner starts
+     * cancelling (a child job of the owner is cancelled at that onset, before the owner finishes).
+     */
     private suspend fun watched(source: FeedSource, grant: OneShotGrant?, work: suspend () -> FeedRefresh): FeedRefresh =
         coroutineScope {
             val job = async { work() }
@@ -143,7 +154,8 @@ class FeedRepository<T> internal constructor(
                     .firstOrNull { allowed -> !allowed } ?: return@launch
                 job.cancel(Revoked())
             }
-            val owner = grant?.onOwnerDone { job.cancel(Revoked()) }
+            val ownerChild = grant?.ownerChild()
+            val ownerWatch = ownerChild?.invokeOnCompletion { job.cancel(Revoked()) }
             try {
                 job.await()
             } catch (e: CancellationException) {
@@ -152,7 +164,8 @@ class FeedRepository<T> internal constructor(
                 FeedRefresh.Cancelled
             } finally {
                 watcher.cancel()
-                owner?.dispose()
+                ownerWatch?.dispose()
+                ownerChild?.complete()
             }
         }
 
@@ -166,8 +179,13 @@ class FeedRepository<T> internal constructor(
         if (!allowed(source, grant)) throw Revoked()
     }
 
+    private fun store(source: FeedSource) = FeedStore(root, source.id, feed, directorySync, crashPoints)
+
     private suspend fun fetch(source: FeedSource, grant: OneShotGrant?): FeedRefresh {
-        val current = live?.takeIf { it.sourceId == source.id } ?: load(source)
+        val store = store(source)
+        val newest = withContext(Dispatchers.IO) { store.generations().firstOrNull() }
+        // A generation committed but never activated (or a source not loaded yet) is loaded before anything else.
+        val current = live?.takeIf { it.sourceId == source.id && it.newestSeen == newest } ?: load(source)
         val trust = when (val built = FeedTrust.shipped(listOfNotNull(source.userPin))) {
             is FeedResult.Ok -> built.value
             is FeedResult.Refused -> return fail(source, FeedError.Refused(built.reason))
@@ -186,8 +204,9 @@ class FeedRepository<T> internal constructor(
             is FeedResult.Ok -> verified.value
             is FeedResult.Refused -> return fail(source, FeedError.Refused(verified.reason))
         }
+        val cache = FeedCacheState(committed = withContext(Dispatchers.IO) { store.highWater() }, bundled = bundled)
         val request = FeedRequest(source.id, feed, clock.millis(), buildTimeMs, stager.contracts)
-        val decision = when (val decided = FeedAcceptance.decide(current.cache, manifest.candidate, request)) {
+        val decision = when (val decided = FeedAcceptance.decide(cache, manifest.candidate, request)) {
             is FeedDecision.Accept -> decided
             is FeedDecision.NoOp -> return unchanged(source, current, envelope.etag)
             is FeedDecision.Refuse -> return fail(source, FeedError.Refused(decided.reason))
@@ -195,7 +214,7 @@ class FeedRepository<T> internal constructor(
 
         val files = ArrayList<VerifiedFeedFile>()
         for (file in FeedFiles.select(manifest, stager::readsFile)) {
-            val kept = held(source, current, manifest, file)
+            val kept = held(store, manifest, file)
             if (kept != null) {
                 files += kept
                 continue
@@ -213,8 +232,7 @@ class FeedRepository<T> internal constructor(
         }
 
         step(source, grant)
-        val store = FeedStore(root, source.id, feed)
-        val generation = try {
+        val stage = try {
             withContext(Dispatchers.IO) { store.stage(manifest.sequence, files.associate { it.sha256 to it.bytes() }) }
         } catch (_: IOException) {
             return fail(source, FeedError.Storage)
@@ -225,7 +243,7 @@ class FeedRepository<T> internal constructor(
             FeedStage.Rejected("stager_failed")
         }
         if (staged !is FeedStage.Ready) {
-            withContext(Dispatchers.IO) { store.discard(generation) }
+            withContext(Dispatchers.IO) { store.discard(stage) }
             return fail(source, FeedError.Stage((staged as FeedStage.Rejected).reason))
         }
         crashPoints.reached(CrashPoint.STAGED)
@@ -234,36 +252,40 @@ class FeedRepository<T> internal constructor(
         val highWater = FeedMark(decision.highWater, manifest.digest)
         val etag = envelope.etag.takeIf { source is FeedSource.GigLog }
         val meta = FeedMeta(envelope.bytes, manifest.digest, manifest.sequence, highWater, staged.carry, etag)
-        try {
-            withContext(Dispatchers.IO) { store.commit(generation, meta, previous = current.generation) }
+        val generation = FeedStore.generationName(manifest.sequence)
+        val durable = try {
+            withContext(Dispatchers.IO) {
+                store.commit(stage, meta, previous = current.generation).also {
+                    store.prune(setOfNotNull(generation, current.generation))
+                }
+            }
         } catch (_: IOException) {
-            withContext(Dispatchers.IO) { store.discard(generation) }
+            withContext(Dispatchers.IO) { store.discard(stage) }
             return fail(source, FeedError.Storage)
         }
+        if (!durable) Timber.tag(TAG).w("feed commit not proven durable feed=%s source=%s", feed.wire, source.id)
         crashPoints.reached(CrashPoint.COMMITTED)
 
-        // Committed: a crash or a revocation from here on re-activates from CURRENT at the next start.
+        // Committed: a crash or a revocation from here on activates it from disk at the next load.
         step(source, grant)
-        val next = Live(source.id, current.cache.copy(committed = highWater), generation, staged.carry, etag)
+        val next = Live(source.id, generation, staged.carry, etag, newestSeen = generation)
         publish(next, FeedState(staged.value, staged.period, decision.issuedAt, lastError = null))
         Timber.tag(TAG).i("feed accepted feed=%s sequence=%d source=%s", feed.wire, manifest.sequence, source.id)
         return FeedRefresh.Accepted(manifest.sequence)
     }
 
-    /** A file a held generation already has with the same sha256, re-verified against the new manifest. */
-    private suspend fun held(source: FeedSource, current: Live, manifest: VerifiedManifest, file: ManifestFile): VerifiedFeedFile? {
-        val store = FeedStore(root, source.id, feed)
-        val generations = listOfNotNull(current.generation, (store.pointer(FeedStore.PREVIOUS) as? FeedPointer.Names)?.generation)
-        for (generation in generations.distinct()) {
-            val bytes = withContext(Dispatchers.IO) { store.readFile(generation, file.sha256, file.size) } ?: continue
-            val verified = VerifiedFeedFile.verify(manifest, file.name, ByteArrayInputStream(bytes))
-            if (verified is FeedResult.Ok) return verified.value
+    /** A file a committed generation already has with the same sha256, re-verified against the new manifest. */
+    private suspend fun held(store: FeedStore, manifest: VerifiedManifest, file: ManifestFile): VerifiedFeedFile? =
+        withContext(Dispatchers.IO) {
+            store.generations().firstNotNullOfOrNull { generation ->
+                store.readFile(generation, file.sha256, file.size)?.let { bytes ->
+                    (VerifiedFeedFile.verify(manifest, file.name, ByteArrayInputStream(bytes)) as? FeedResult.Ok)?.value
+                }
+            }
         }
-        return null
-    }
 
     private suspend fun unchanged(source: FeedSource, current: Live, etag: String?): FeedRefresh {
-        val kept = Live(current.sourceId, current.cache, current.generation, current.carry, etag.takeIf { source is FeedSource.GigLog })
+        val kept = Live(current.sourceId, current.generation, current.carry, etag.takeIf { source is FeedSource.GigLog }, current.newestSeen)
         publish(kept, _state.value.copy(lastError = null))
         return FeedRefresh.Unchanged
     }
@@ -292,62 +314,70 @@ class FeedRepository<T> internal constructor(
 
     private fun lockFor(source: FeedSource): Mutex = locks.computeIfAbsent(source.id) { Mutex() }
 
-    // --- start-up recovery ---
+    // --- loading committed state ---
 
     private suspend fun load(source: FeedSource): Live {
-        val restored = withContext(Dispatchers.IO) { recover(source) }
-        publish(restored.first, restored.second)
-        return restored.first
+        val (next, state) = withContext(Dispatchers.IO) { recover(source) }
+        publish(next, state)
+        return next
     }
 
     private fun recover(source: FeedSource): Pair<Live, FeedState<T>> {
-        val store = FeedStore(root, source.id, feed)
+        val store = store(source)
+        store.deleteStages()
+        val cache = FeedCacheState(committed = store.highWater(), bundled = bundled)
         val trust = (FeedTrust.shipped(listOfNotNull(source.userPin)) as? FeedResult.Ok)?.value
-        val current = store.pointer(FeedStore.CURRENT)
-        val previous = store.pointer(FeedStore.PREVIOUS)
-
-        // The high-water is the largest one any committed generation still records. A garbled CURRENT may have named
-        // any generation on disk, so then every readable one counts: recovery never lowers it.
-        val marks = ArrayList<FeedMark>()
-        if (current is FeedPointer.Names) marks += store.readMeta(current.generation)?.highWater ?: FeedMark(current.sequence, "")
-        if (previous is FeedPointer.Names) store.readMeta(previous.generation)?.highWater?.let { marks += it }
-        if (current is FeedPointer.Garbled) store.generations().forEach { gen -> store.readMeta(gen)?.highWater?.let { marks += it } }
-        var cache = FeedCacheState(committed = marks.maxByOrNull { it.sequence }, bundled = bundled)
-        if (current is FeedPointer.Names) store.prune(setOfNotNull(current.generation, (previous as? FeedPointer.Names)?.generation))
-
-        for (pointer in listOf(current, previous).filterIsInstance<FeedPointer.Names>().distinct()) {
-            val generation = trust?.let { restore(store, it, source, pointer.generation, cache) } ?: continue
-            cache = cache.recoveredTo(FeedMark(generation.manifest.sequence, generation.manifest.digest))
-            if (pointer != current) {
-                Timber.tag(TAG).w("feed fell back feed=%s source=%s to=previous", feed.wire, source.id)
+        val generations = store.generations()
+        var skipped: FeedError? = null
+        for (generation in generations) {
+            when (val restored = trust?.let { restore(store, it, source, generation, cache) } ?: Restore.Skip(FeedError.Storage)) {
+                is Restore.Skip -> skipped = skipped ?: restored.error
+                is Restore.Ok -> {
+                    if (generation != generations.first()) {
+                        Timber.tag(TAG).w("feed fell back feed=%s source=%s to=older", feed.wire, source.id)
+                    }
+                    val live = Live(source.id, generation, restored.meta.carry, restored.meta.etag, generations.first())
+                    return live to FeedState(restored.ready.value, restored.ready.period, restored.manifest.issuedAt, skipped)
+                }
             }
-            val live = Live(source.id, cache, pointer.generation, generation.meta.carry, generation.meta.etag)
-            return live to FeedState(generation.ready.value, generation.ready.period, generation.manifest.issuedAt)
         }
-        val held = current != FeedPointer.Absent
-        if (held) Timber.tag(TAG).w("feed fell back feed=%s source=%s to=baseline", feed.wire, source.id)
-        return Live(source.id, cache, null, null, null) to FeedState(lastError = if (held) FeedError.Storage else null)
+        if (generations.isNotEmpty()) Timber.tag(TAG).w("feed fell back feed=%s source=%s to=baseline", feed.wire, source.id)
+        return Live(source.id, null, null, null, generations.firstOrNull()) to FeedState(lastError = skipped)
     }
 
-    private class Restored<T>(val manifest: VerifiedManifest, val meta: FeedMeta, val ready: FeedStage.Ready<T>)
+    private sealed interface Restore<out T> {
+        class Ok<T>(val manifest: VerifiedManifest, val meta: FeedMeta, val ready: FeedStage.Ready<T>) : Restore<T>
+        class Skip(val error: FeedError) : Restore<Nothing>
+    }
 
-    /** One committed generation through the same verifier a download uses, or null when any check fails. */
-    private fun restore(store: FeedStore, trust: FeedTrust, source: FeedSource, generation: String, cache: FeedCacheState): Restored<T>? {
-        val meta = store.readMeta(generation) ?: return null
-        val manifest = (VerifiedManifest.verify(trust, source.id, feed, ByteArrayInputStream(meta.envelope)) as? FeedResult.Ok)?.value
-            ?: return null
-        if (manifest.digest != meta.digest || manifest.sequence != meta.sequence) return null
-        if (!cache.keepsCommittedGeneration(manifest.sequence)) return null
+    /** One committed generation through the same verifier a download uses, or why it cannot run. */
+    private fun restore(store: FeedStore, trust: FeedTrust, source: FeedSource, generation: String, cache: FeedCacheState): Restore<T> {
+        val unreadable = Restore.Skip(FeedError.Storage)
+        val meta = store.readMeta(generation) ?: return unreadable
+        val manifest = when (val verified = VerifiedManifest.verify(trust, source.id, feed, ByteArrayInputStream(meta.envelope))) {
+            is FeedResult.Ok -> verified.value
+            is FeedResult.Refused -> return Restore.Skip(FeedError.Refused(verified.reason))
+        }
+        if (manifest.digest != meta.digest || manifest.sequence != meta.sequence) return unreadable
+        if (FeedStore.generationName(manifest.sequence) != generation) return unreadable
+        if (manifest.contract !in stager.contracts) return Restore.Skip(FeedError.Refused(FeedRefusal.UnsupportedContract))
+        if (!cache.keepsCommittedGeneration(manifest.sequence)) return Restore.Skip(FeedError.Refused(FeedRefusal.Rollback))
         val files = FeedFiles.select(manifest, stager::readsFile).map { file ->
-            val bytes = store.readFile(generation, file.sha256, file.size) ?: return null
-            (VerifiedFeedFile.verify(manifest, file.name, ByteArrayInputStream(bytes)) as? FeedResult.Ok)?.value ?: return null
+            val bytes = store.readFile(generation, file.sha256, file.size) ?: return unreadable
+            when (val verified = VerifiedFeedFile.verify(manifest, file.name, ByteArrayInputStream(bytes))) {
+                is FeedResult.Ok -> verified.value
+                is FeedResult.Refused -> return Restore.Skip(FeedError.Refused(verified.reason))
+            }
         }
         val ready = try {
-            stager.restore(files, meta.carry) as? FeedStage.Ready
+            stager.restore(files, meta.carry)
         } catch (_: Exception) {
-            null
-        } ?: return null
-        return Restored(manifest, meta, ready)
+            FeedStage.Rejected("stager_failed")
+        }
+        return when (ready) {
+            is FeedStage.Ready -> Restore.Ok(manifest, meta, ready)
+            is FeedStage.Rejected -> Restore.Skip(FeedError.Stage(ready.reason))
+        }
     }
 
     private companion object {

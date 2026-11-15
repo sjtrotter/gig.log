@@ -4,6 +4,10 @@ import cloud.trotter.feed.contract.FeedRefusal
 import cloud.trotter.feed.contract.VerifiedFeedFile
 import cloud.trotter.log.gig.core.network.feed.FeedFetchFailure
 import kotlinx.serialization.json.JsonObject
+import java.io.File
+import java.io.IOException
+import java.nio.channels.FileChannel
+import java.nio.file.StandardOpenOption
 
 /**
  * What a feed consumer reads: anchors only (Reactive UI rule 2). [value] is the live generation's content, or null
@@ -74,9 +78,25 @@ sealed interface FeedStage<out T> {
     data class Rejected(val reason: String) : FeedStage<Nothing>
 }
 
-/** Where a test kills the process: after staging (before the commit) and after the commit (before activation). */
-internal enum class CrashPoint { STAGED, COMMITTED }
+/**
+ * Where a test kills the process: after staging (before the commit), after the generation's rename (before the pointer
+ * moves), and after the commit (before activation).
+ */
+internal enum class CrashPoint { STAGED, RENAMED, COMMITTED }
 
 internal fun interface CrashPoints {
     fun reached(point: CrashPoint)
+}
+
+/**
+ * Makes a directory's entries durable. [published] is true for the sync after the pointer moved: a failure there is
+ * logged and the commit stands; any earlier failure aborts the commit.
+ */
+internal fun interface DirectorySync {
+    @Throws(IOException::class)
+    fun sync(dir: File, published: Boolean)
+
+    companion object {
+        val FSYNC = DirectorySync { dir, _ -> FileChannel.open(dir.toPath(), StandardOpenOption.READ).use { it.force(true) } }
+    }
 }

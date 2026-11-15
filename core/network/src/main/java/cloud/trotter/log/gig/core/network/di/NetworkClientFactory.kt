@@ -11,7 +11,10 @@ import retrofit2.Retrofit
 import timber.log.Timber
 import java.util.concurrent.TimeUnit
 
-/** Census and Feed log headers only, never bodies (#1565: a feed body is never logged); Census connects in ten seconds. */
+/**
+ * Census logs headers only and connects in ten seconds. Feed logs nothing over HTTP (#1565): a request line carries the
+ * source's URL, and a custom source's URL is the dasher's choice.
+ */
 enum class ClientProfile { Default, Census, Feed }
 
 /**
@@ -21,7 +24,7 @@ enum class ClientProfile { Default, Census, Feed }
  * [Retrofit.Builder], and the two copies had already diverged on the #348 security
  * hardening (one redacted the `api_key` query param and set timeouts, the other did
  * neither). Centralizing the assembly here makes the secure path the *default* path:
- * any provider that calls [okHttpClient] gets debug-gated, Timber-piped logging (Census and Feed headers only, other clients BODY)
+ * any provider that calls [okHttpClient] gets debug-gated, Timber-piped logging (Census headers only, Feed nothing, other clients BODY)
  * **with secret redaction and standard timeouts baked in** — there is no longer a
  * per-module step to remember.
  *
@@ -53,12 +56,12 @@ object NetworkClientFactory {
     /**
      * A [OkHttpClient] with the #348 hardening baked in as the default:
      *  - **Debug-only** Timber-piped [HttpLoggingInterceptor] (release gets no HTTP
-     *    logging at all): Census and Feed headers only, otherwise BODY, with bearer/signature headers
+     *    logging at all): Census headers only, Feed none, otherwise BODY, with bearer/signature headers
      *    and [redactedQueryParams] stripped so secrets never reach logs.
      *  - Standard connect/read/write timeouts.
      *
      * @param logTag Timber tag for the HTTP log lines (debug builds only).
-     * @param profile Census and Feed suppress bodies; Census uses a ten-second connect timeout.
+     * @param profile Census suppresses bodies and uses a ten-second connect timeout; Feed gets no HTTP logging.
      * @param redactedQueryParams query-param names to redact from logs; defaults to the
      *   shared secret list (`api_key`). Pass a superset if the upstream carries more secrets.
      */
@@ -69,7 +72,7 @@ object NetworkClientFactory {
     ): OkHttpClient = OkHttpClient.Builder()
         .apply {
             // Debug builds only — release gets no HTTP logging at all (#348).
-            if (BuildConfig.DEBUG) {
+            if (BuildConfig.DEBUG && profile != ClientProfile.Feed) {
                 val timberLogger = HttpLoggingInterceptor.Logger { message ->
                     Timber.tag(logTag).v(message)
                 }
@@ -77,8 +80,8 @@ object NetworkClientFactory {
                     HttpLoggingInterceptor(timberLogger).apply {
                         // Census bodies contain skeletons / enrollment IDs. Never log bodies,
                         // even at VERBOSE; signatures and the bearer are secrets too.
-                        level = if (profile == ClientProfile.Default) HttpLoggingInterceptor.Level.BODY
-                            else HttpLoggingInterceptor.Level.HEADERS
+                        level = if (profile == ClientProfile.Census) HttpLoggingInterceptor.Level.HEADERS
+                            else HttpLoggingInterceptor.Level.BODY
                         redactHeader(CensusHeaders.AUTHORIZATION)
                         redactHeader(CensusHeaders.SIGNATURE)
                         redactedQueryParams.forEach { redactQueryParams(it) }

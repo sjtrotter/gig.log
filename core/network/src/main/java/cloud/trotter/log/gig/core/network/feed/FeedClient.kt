@@ -3,6 +3,7 @@ package cloud.trotter.log.gig.core.network.feed
 import cloud.trotter.feed.contract.Feed
 import cloud.trotter.feed.contract.FeedLimits
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.Call
 import okhttp3.Callback
@@ -69,7 +70,8 @@ sealed interface FeedReply {
  *   across IP addresses, so a custom source gets no conditional request and its ETag is dropped.
  * - **Two retries a minute apart** ([RETRY_DELAY_MS]) on a 404, a 408, a 429, a 5xx or a transport failure, which
  *   covers an edge cache that has the new envelope before its payloads. A redirect or any other status is final.
- * - [FeedGate] is asked before every request, retries included.
+ * - [FeedGate] is asked before every request, retries included, and again inside every network exchange, so no
+ *   follow-up OkHttp makes on its own runs without it.
  *
  * @param retryDelay waits before retry `n` (1 or 2); tests pass one that does not wait.
  */
@@ -83,7 +85,17 @@ class FeedClient(
         .cookieJar(CookieJar.NO_COOKIES)
         .cache(null)
         .retryOnConnectionFailure(false)
+        .addNetworkInterceptor { chain ->
+            // Every exchange asks the gate again (fail closed), so no follow-up OkHttp makes on its own skips it, and
+            // Retry-After is dropped so OkHttp never replays a 503 itself: the only retries are this client's.
+            val gate = chain.request().tag(FeedGate::class.java)
+            if (gate == null || !runBlocking { gate.allows() }) throw GateClosed()
+            val response = chain.proceed(chain.request())
+            if (response.header(RETRY_AFTER) == null) response else response.newBuilder().removeHeader(RETRY_AFTER).build()
+        }
         .build()
+
+    private class GateClosed : IOException("feed gate closed")
 
     /** `GET <feedsUrl><feed>/envelope.json`, conditional on [etag] only when [source] is gig.log's. */
     suspend fun envelope(source: FeedSource, feed: Feed, etag: String?, gate: FeedGate): FeedReply {
@@ -109,7 +121,7 @@ class FeedClient(
         var retry = 0
         while (true) {
             if (!gate.allows()) return FeedReply.Denied
-            val attempt = once(url, cap, etag, keepEtag)
+            val attempt = once(url, cap, etag, keepEtag, gate)
             if (!attempt.retryable || retry == MAX_RETRIES) return attempt.reply
             retry++
             retryDelay(retry)
@@ -118,8 +130,8 @@ class FeedClient(
 
     private class Attempt(val reply: FeedReply, val retryable: Boolean)
 
-    private suspend fun once(url: HttpUrl, cap: Int, etag: String?, keepEtag: Boolean): Attempt {
-        val request = Request.Builder().url(url).header("User-Agent", USER_AGENT).get()
+    private suspend fun once(url: HttpUrl, cap: Int, etag: String?, keepEtag: Boolean, gate: FeedGate): Attempt {
+        val request = Request.Builder().url(url).header("User-Agent", USER_AGENT).get().tag(FeedGate::class.java, gate)
             .apply { if (etag != null) header("If-None-Match", etag) }
             .build()
         return suspendCancellableCoroutine { continuation ->
@@ -127,7 +139,9 @@ class FeedClient(
             continuation.invokeOnCancellation { call.cancel() }
             call.enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
-                    continuation.resume(Attempt(FeedReply.Failed(FeedFetchFailure.TRANSPORT), retryable = true))
+                    val reply = if (e is GateClosed) Attempt(FeedReply.Denied, retryable = false)
+                    else Attempt(FeedReply.Failed(FeedFetchFailure.TRANSPORT), retryable = true)
+                    continuation.resume(reply)
                 }
 
                 override fun onResponse(call: Call, response: Response) {
@@ -164,6 +178,7 @@ class FeedClient(
         const val RETRY_DELAY_MS = 60_000L
         const val MAX_RETRIES = 2
         private const val ENVELOPE = "envelope.json"
+        private const val RETRY_AFTER = "Retry-After"
         private val SHA256_HEX = Regex("[0-9a-f]{64}")
     }
 }
