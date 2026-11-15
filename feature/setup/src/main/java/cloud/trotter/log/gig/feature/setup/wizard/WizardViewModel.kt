@@ -2,6 +2,7 @@ package cloud.trotter.log.gig.feature.setup.wizard
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import cloud.trotter.log.gig.core.data.feed.RulesFeedSwitch
 import cloud.trotter.log.gig.core.data.fuel.FuelPriceRepository
 import cloud.trotter.log.gig.core.data.settings.AppPreferencesRepository
 import cloud.trotter.log.gig.core.data.state.AppStateRepository
@@ -55,6 +56,8 @@ class WizardViewModel @Inject constructor(
     private val vehicleRepository: VehicleRepository,
     private val gasPriceRepository: FuelPriceRepository,
     private val garageRepository: GarageRepository,
+    /** #640: "Keep recognition rules up to date", asked in setup and saved with the rest. */
+    private val rulesFeedSwitch: RulesFeedSwitch,
     /** Stamps a lookup's figure (#1478); the app binds the system clock. */
     private val clock: Clock = Clock.systemUTC(),
 ) : ViewModel() {
@@ -113,6 +116,7 @@ class WizardViewModel @Inject constructor(
             val currentFuelType =
                 activeProfile?.gasFuel ?: appPreferencesRepository.fuelType.first()
             val currentGasAuto = appPreferencesRepository.isGasPriceAuto.first()
+            val currentKeepRules = rulesFeedSwitch.current()
             val currentGasPrice = appPreferencesRepository.gasPrice.first() ?: WizardState().gasPrice
             val currentGasFetchedAt = appPreferencesRepository.gasPriceFetchedAt.first()
 
@@ -141,6 +145,7 @@ class WizardViewModel @Inject constructor(
                 currentState.copy(
                     fuelType = currentFuelType,
                     isGasPriceAuto = currentGasAuto,
+                    keepRulesUpToDate = currentKeepRules,
                     gasPrice = currentGasPrice,
                     gasPriceSource = GasPriceSource.stored(currentGasAuto, currentGasFetchedAt),
                     strategy = currentStrategy,
@@ -425,8 +430,12 @@ class WizardViewModel @Inject constructor(
         _saveStatus.value = SaveStatus.Saving
         val finalState = _state.value
         val vehicle = vehicleDraft.state.value
+        // #640: an off answer turns the rules feed off now, before any write, and is saved first; an on answer is
+        // saved last, so a write that fails or never finishes can never leave the feed on.
+        if (!finalState.keepRulesUpToDate) rulesFeedSwitch.forgetNow()
         viewModelScope.launch {
             _saveStatus.value = try {
+                if (!finalState.keepRulesUpToDate) saveRulesChoice(false)
                 val vehicleSaved = saveVehicle(finalState, vehicle)
                 saveSettings(finalState, vehicle)
                 if (vehicleSaved) SaveStatus.Saved else SaveStatus.Failed(SaveFailure.VEHICLE)
@@ -438,6 +447,15 @@ class WizardViewModel @Inject constructor(
                 SaveStatus.Failed(SaveFailure.SETTINGS)
             }
         }
+    }
+
+    /** #640: the rules question's answer; saved by [save], so Skip leaves the switch as it was. */
+    fun setKeepRulesUpToDate(on: Boolean) {
+        _state.update { it.copy(keepRulesUpToDate = on) }
+    }
+
+    private suspend fun saveRulesChoice(on: Boolean) {
+        check(rulesFeedSwitch.set(on)) { "rules updates choice not saved" }
     }
 
     /** The dasher closed a failure to go back to setup; their answers are still in [state]. */
@@ -519,6 +537,7 @@ class WizardViewModel @Inject constructor(
         }
 
         strategyRepository.updateRules(updatedRules)
+        if (finalState.keepRulesUpToDate) saveRulesChoice(true)
         appStateRepository.setFirstRunComplete()
     }
 }

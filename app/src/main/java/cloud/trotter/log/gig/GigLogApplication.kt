@@ -19,7 +19,9 @@ import cloud.trotter.log.gig.core.state.StateManagerV2
 import cloud.trotter.log.gig.core.data.census.CensusDataDeletion
 import cloud.trotter.log.gig.core.data.census.CensusUploadPlanner
 import cloud.trotter.log.gig.domain.di.ApplicationScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.launch
 import cloud.trotter.log.gig.worker.DailyGasPriceWorker
 import cloud.trotter.log.gig.worker.WeeklyPlanWorker
@@ -76,6 +78,12 @@ class GigLogApplication : Application(), Configuration.Provider {
 
     @Inject
     lateinit var jsonRuleInterpreter: JsonRuleInterpreter
+
+    @Inject
+    lateinit var rulesFeed: cloud.trotter.log.gig.feed.RulesFeed
+
+    @Inject
+    lateinit var platformForegrounds: cloud.trotter.log.gig.core.pipeline.accessibility.input.PlatformForegrounds
 
     @Inject
     lateinit var ruleCapabilityRepository: cloud.trotter.log.gig.core.data.capability.RuleCapabilityRepository
@@ -210,6 +218,25 @@ class GigLogApplication : Application(), Configuration.Provider {
                 .onSuccess { if (it) Timber.tag("Strategy").i("Purged dead automation keys (#1113)") }
                 .onFailure { Timber.tag("Strategy").w(it, "Dead automation key purge failed; rules load anyway") }
             jsonRuleInterpreter.loadDefaults()
+            // #640: the rules feed builds on the bundled floor, so it starts once the bundled rules are live, and checks
+            // for new rules only when a delivery app comes to the front (at most hourly, with the switch on). The
+            // foreground stream is conflated so a running check never holds back the accessibility event stream.
+            try {
+                rulesFeed.start()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                Timber.tag("Feeds").e(t, "rules feed start failed; the bundled rules stay")
+            }
+            platformForegrounds.events.conflate().collect {
+                try {
+                    rulesFeed.onPlatformForeground()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (t: Throwable) {
+                    Timber.tag("Feeds").e(t, "rules foreground check failed")
+                }
+            }
         }
 
         // 3. Initialize State

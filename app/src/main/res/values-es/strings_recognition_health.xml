@@ -16,4 +16,12 @@
     <string name="recognition_field_total_earnings">total</string>
     <string name="recognition_field_other">algunos datos</string>
     <string name="recognition_home_since_format">Desde hace %1$s</string>
+    <string name="recognition_action_check">Buscar reglas nuevas</string>
+    <string name="recognition_action_keep_updated">Mantener reglas al día</string>
+    <string name="recognition_no_update_title_format">Aún no hay novedades para %1$s</string>
+    <string name="recognition_no_update_text">gig.log sigue registrando las pantallas que puede leer.</string>
+    <string name="recognition_rules_updated_title">Reglas de reconocimiento nuevas en uso</string>
+    <string name="recognition_rules_updated_text_format">Inicio lo muestra hasta que vuelvan a leerse las pantallas de %1$s.</string>
+    <string name="recognition_check_failed_title">No se pudieron buscar reglas nuevas</string>
+    <string name="recognition_check_failed_text">Las reglas actuales siguen en uso.</string>
 </resources>

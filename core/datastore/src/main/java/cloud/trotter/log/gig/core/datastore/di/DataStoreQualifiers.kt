@@ -53,3 +53,8 @@ annotation class RecognitionNoticePreferences
 @Qualifier
 @Retention(AnnotationRetention.BINARY)
 annotation class ContributorPreferences
+
+/** #640 — the rules feed's switch and its last foreground check; device-local, excluded from backup and transfer. */
+@Qualifier
+@Retention(AnnotationRetention.BINARY)
+annotation class RulesFeedPreferences

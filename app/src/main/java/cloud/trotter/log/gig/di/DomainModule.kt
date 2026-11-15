@@ -1,6 +1,8 @@
 package cloud.trotter.log.gig.di
 
+import android.os.SystemClock
 import cloud.trotter.log.gig.domain.evaluation.OfferEvaluator
+import cloud.trotter.log.gig.domain.time.ElapsedRealtime
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -29,6 +31,11 @@ object DomainModule {
     @Provides
     @Singleton
     fun provideClock(): Clock = Clock.systemUTC()
+
+    /** #640: elapsed time since boot, counting sleep; intervals measured with it survive a wall-clock correction. */
+    @Provides
+    @Singleton
+    fun provideElapsedRealtime(): ElapsedRealtime = ElapsedRealtime { SystemClock.elapsedRealtime() }
 
     // Future Note: As you build more pure Domain classes (like UseCases),
     // you will just add more @Provides functions to this exact file.

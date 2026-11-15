@@ -78,4 +78,7 @@
     <string name="vehicle_type_scooter">Scooter or moped</string>
     <string name="vehicle_type_e_bike">E-bike</string>
     <string name="vehicle_type_bicycle">Bicycle</string>
+    <!-- #640: the setup question for "Keep recognition rules up to date"; the toggle and its disclosure are Settings'. -->
+    <string name="wizard_title_rules">Recognition rules</string>
+    <string name="wizard_desc_rules">gig.log can download new rules when a delivery app changes its screens.</string>
 </resources>

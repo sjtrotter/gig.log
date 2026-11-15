@@ -1,5 +1,6 @@
 package cloud.trotter.log.gig.ui.main.setup.wizard
 
+import cloud.trotter.log.gig.core.data.feed.RulesFeedSwitch
 import cloud.trotter.log.gig.core.data.fuel.FuelPriceRepository
 import cloud.trotter.log.gig.core.data.settings.AppPreferencesRepository
 import cloud.trotter.log.gig.core.data.state.AppStateRepository
@@ -12,9 +13,11 @@ import cloud.trotter.log.gig.domain.model.vehicle.FuelType
 import cloud.trotter.log.gig.domain.model.vehicle.Vehicle
 import cloud.trotter.log.gig.domain.model.vehicle.VehicleProfile
 import cloud.trotter.log.gig.feature.setup.wizard.WizardViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import org.mockito.kotlin.any
+import org.mockito.kotlin.doReturn
 import org.mockito.kotlin.isNull
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.whenever
@@ -31,12 +34,17 @@ internal fun wizardViewModelForTest(): WizardViewModel {
     val vehicleRepository: VehicleRepository = mock()
     val gasPriceRepository: FuelPriceRepository = mock()
     val garageRepository: GarageRepository = mock()
+    val rulesFeedSwitch: RulesFeedSwitch = mock {
+        on { enabled } doReturn MutableStateFlow(false)
+        on { current() } doReturn false
+        on { set(any()) } doReturn true
+    }
     stubWizardRepositories(
         strategyRepository, appPreferencesRepository, vehicleRepository, gasPriceRepository, garageRepository,
     )
     return WizardViewModel(
         strategyRepository, appPreferencesRepository, appStateRepository,
-        vehicleRepository, gasPriceRepository, garageRepository,
+        vehicleRepository, gasPriceRepository, garageRepository, rulesFeedSwitch,
     )
 }
 

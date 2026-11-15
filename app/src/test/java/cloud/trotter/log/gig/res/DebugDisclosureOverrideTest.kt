@@ -53,7 +53,7 @@ class DebugDisclosureOverrideTest {
         for (key in listOf("accessibility_service_description", "perm_a11y_where")) {
             val main = appMain.getValue(key)
             val debug = appDebug.getValue(key)
-            assertTrue("$key (main) states it sends nothing itself", "sends nothing it reads off your phone" in main)
+            assertTrue("$key (main) states it sends nothing itself", "sends nothing it reads from your screens" in main)
             assertFalse("$key (debug) must not claim that: census upload sends", "sends nothing" in debug)
             for (text in listOf(main, debug)) {
                 assertTrue("$key names the speech engine", "text-to-speech engine, which may use the network" in text)

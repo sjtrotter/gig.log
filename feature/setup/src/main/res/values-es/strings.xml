@@ -47,4 +47,6 @@
     <string name="wizard_gas_price_source_saved">Precio guardado</string>
     <string name="wizard_gas_price_retry">Reintentar</string>
     <string name="wizard_bottom_bar_saving">Guardando</string>
+    <string name="wizard_title_rules">Reglas de reconocimiento</string>
+    <string name="wizard_desc_rules">gig.log puede descargar reglas nuevas cuando una app de reparto cambia sus pantallas.</string>
 </resources>

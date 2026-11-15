@@ -159,4 +159,18 @@
     </plurals>
     <string name="census_review_status_shift">Vous pourrez répondre à la fin de votre service.</string>
     <string name="census_review_status_not_open">La vérification s\'ouvre à un téléphone qui participe au recensement depuis %1$d jours, a enregistré %2$d services et a eu un service sur %3$d des %4$d derniers jours.</string>
+    <!-- #640 Paramètres > Règles de reconnaissance. -->
+    <string name="rules_updates_title">Règles de reconnaissance</string>
+    <string name="rules_updates_settings_subtitle">Mises à jour des écrans que lit gig.log, désactivées par défaut</string>
+    <string name="rules_updates_toggle">Garder les règles de reconnaissance à jour</string>
+    <string name="rules_updates_disclosure">Les règles de reconnaissance indiquent à gig.log comment lire les écrans de chaque app de livraison. Quand cette option est activée, gig.log recherche de nouvelles règles quand vous ouvrez une app de livraison ou y revenez, au plus une fois par heure. Les règles se téléchargent depuis le site de gig.log sur GitHub. GitHub et son fournisseur réseau, Fastly, voient l\'adresse IP de ce téléphone et l\'heure de chaque recherche, et peuvent donc savoir quand ce téléphone ouvre une app de livraison. Une recherche n\'envoie aucun compte, aucun identifiant d\'installation ni aucune position. Quand cette option est désactivée, les règles utilisées restent : celles intégrées à l\'app, ou les dernières que gig.log a téléchargées. gig.log ne recherche alors que si vous touchez Rechercher, ou Rechercher de nouvelles règles sur un avis de reconnaissance.</string>
+    <string name="rules_updates_in_use_label">Règles utilisées</string>
+    <string name="rules_updates_in_use_built_in">Intégrées</string>
+    <string name="rules_updates_last_check_label">Dernière recherche</string>
+    <string name="rules_updates_last_check_format">%1$s, %2$s</string>
+    <string name="rules_updates_outcome_updated">nouvelles règles utilisées</string>
+    <string name="rules_updates_outcome_no_update">pas de nouveauté</string>
+    <string name="rules_updates_outcome_failed">recherche impossible</string>
+    <string name="rules_updates_check_now">Rechercher</string>
+    <string name="rules_updates_checking">Recherche</string>
 </resources>

@@ -22,6 +22,9 @@ data class WizardState(
     /** The latest lookup returned nothing for the selected fuel; [gasPrice] and [gasPriceSource] are kept. */
     val gasPriceLookupFailed: Boolean = false,
 
+    /** #640: "Keep recognition rules up to date"; off unless the dasher turned it on. */
+    val keepRulesUpToDate: Boolean = false,
+
     // Personal Economy v2 — operating cost components (#145)
     val wear: WearProfile = WearProfile(
         tireSetCost = VehicleClass.SEDAN.tireSetCost,

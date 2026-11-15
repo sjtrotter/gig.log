@@ -3,6 +3,7 @@ package cloud.trotter.log.gig.core.pipeline.rules
 import cloud.trotter.log.gig.domain.capability.RuleCapability
 import cloud.trotter.log.gig.domain.model.accessibility.UiNode
 import cloud.trotter.log.gig.domain.model.notification.RawNotificationData
+import cloud.trotter.log.gig.domain.state.Platform
 
 /**
  * One complete, compiled rule set (#1568): the screen, click and notification rulesets that go live
@@ -36,8 +37,13 @@ sealed class RuleFile(val source: String, internal val json: String) {
     /** A file shipped in the APK's `assets/rules/`; only the interpreter reads these. */
     class Bundled internal constructor(source: String, json: String) : RuleFile(source, json)
 
-    /** A downloaded file; only a passing signature check can produce its [VerifiedRulesetBytes]. */
-    class Remote(verified: VerifiedRulesetBytes) : RuleFile(verified.source, verified.json)
+    /**
+     * A downloaded file; only a passing signature check can produce its [VerifiedRulesetBytes]. [platform] is the
+     * platform its feed file is named for; a file whose `platform_id` names another platform rejects the generation.
+     */
+    class Remote(verified: VerifiedRulesetBytes) : RuleFile(verified.source, verified.json) {
+        internal val platform: Platform = verified.platform
+    }
 }
 
 /** The outcome of [JsonRuleInterpreter.prepareGeneration]. */

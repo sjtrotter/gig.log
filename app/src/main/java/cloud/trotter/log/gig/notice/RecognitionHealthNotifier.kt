@@ -2,6 +2,14 @@ package cloud.trotter.log.gig.notice
 
 import android.app.NotificationManager
 import android.content.Context
+import androidx.core.app.NotificationCompat
+import cloud.trotter.feed.contract.Feed
+import cloud.trotter.feed.contract.FeedResult
+import cloud.trotter.feed.contract.FeedSources
+import cloud.trotter.feed.contract.FeedTrust
+import cloud.trotter.log.gig.R
+import cloud.trotter.log.gig.core.data.feed.RulesCheckOutcome
+import cloud.trotter.log.gig.core.data.feed.RulesFeedSwitch
 import cloud.trotter.log.gig.domain.pipeline.RecognitionHealthReporter
 import cloud.trotter.log.gig.domain.pipeline.RecognitionIncident
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -23,8 +31,9 @@ import javax.inject.Singleton
  * by the platform wire, so two platforms' notices coexist and a close withdraws only its own. The notice
  * is posted once per incident and not updated when causes join; Home's card shows every cause.
  *
- * **The #640 seam.** This is the one place the notice is built. The "Check for new rules" / "Keep rules
- * up to date" actions #640 adds go here, beside the copy, so the `:domain` contract stays data only.
+ * **Rules actions (#640).** This is the one place the notice is built, so its buttons are added here:
+ * "Check for new rules", and "Keep rules up to date" while that switch is off ([RulesNoticeActionReceiver]). The
+ * answer to a tap replaces the notice through [onRulesCheck]; the `:domain` contract stays data only.
  *
  * **Stateless by design.** The incident, its one-notice gate and the once-a-day limit live in
  * `RecognitionHealthMonitor` (`:core:pipeline`); duplicating a gate here would be a second source of
@@ -41,19 +50,74 @@ import javax.inject.Singleton
 class RecognitionHealthNotifier @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val notificationManager: NotificationManager,
+    private val rulesSwitch: RulesFeedSwitch,
 ) : RecognitionHealthReporter {
 
-    override fun onIncidentNotice(incident: RecognitionIncident) {
-        try {
-            AppNoticeChannel.postNotice(
-                context = context,
-                notificationManager = notificationManager,
-                notificationId = AppNoticeChannel.Ids.RECOGNITION_HEALTH,
-                requestCode = REQUEST_CODE,
-                title = RecognitionNoticeCopy.title(context.resources, incident),
-                text = RecognitionNoticeCopy.text(context.resources, incident),
-                tag = incident.platformWire,
+    override fun onIncidentNotice(incident: RecognitionIncident) = posting {
+        post(
+            incident,
+            RecognitionNoticeCopy.title(context.resources, incident),
+            RecognitionNoticeCopy.text(context.resources, incident),
+            rulesActions(incident),
+        )
+    }
+
+    /**
+     * #640: the answer to a rules action, in place of the incident's notice. New rules in use posts no buttons; no
+     * update and a failed check keep "Check for new rules".
+     */
+    fun onRulesCheck(incident: RecognitionIncident, outcome: RulesCheckOutcome) = posting {
+        val res = context.resources
+        when (outcome) {
+            RulesCheckOutcome.UPDATED -> post(
+                incident,
+                res.getString(R.string.recognition_rules_updated_title),
+                RecognitionNoticeCopy.rulesUpdatedText(res, incident),
+                emptyList(),
             )
+            RulesCheckOutcome.NO_UPDATE -> post(
+                incident,
+                RecognitionNoticeCopy.noUpdateTitle(res, incident),
+                res.getString(R.string.recognition_no_update_text),
+                rulesActions(incident),
+            )
+            RulesCheckOutcome.FAILED -> post(
+                incident,
+                res.getString(R.string.recognition_check_failed_title),
+                res.getString(R.string.recognition_check_failed_text),
+                rulesActions(incident),
+            )
+        }
+    }
+
+    /** None until this build pins a gig.log rules key (#641): a check could only fail. */
+    private fun rulesActions(incident: RecognitionIncident): List<NotificationCompat.Action> =
+        if (rulesFeedTrusted) {
+            RulesNoticeActionReceiver.actions(context, incident, offerKeepUpdated = !rulesSwitch.enabled.value)
+        } else {
+            emptyList()
+        }
+
+    private val rulesFeedTrusted: Boolean by lazy {
+        (FeedTrust.shipped() as? FeedResult.Ok)?.value?.trusts(FeedSources.GIG_LOG, Feed.RULES) == true
+    }
+
+    private fun post(incident: RecognitionIncident, title: String, text: String, actions: List<NotificationCompat.Action>) {
+        AppNoticeChannel.postNotice(
+            context = context,
+            notificationManager = notificationManager,
+            notificationId = AppNoticeChannel.Ids.RECOGNITION_HEALTH,
+            requestCode = REQUEST_CODE,
+            title = title,
+            text = text,
+            tag = incident.platformWire,
+            actions = actions,
+        )
+    }
+
+    private inline fun posting(build: () -> Unit) {
+        try {
+            build()
         } catch (t: Throwable) {
             // Deliberately broad and NOT rethrown (#909): a refused notice costs a log line.
             Timber.tag(TAG).e(t, "Recognition notice could not be posted (#1560)")

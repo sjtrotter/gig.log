@@ -45,6 +45,7 @@ class WizardGasPriceSourceTest {
     private val vehicleRepository: VehicleRepository = mock()
     private val gasPriceRepository: FuelPriceRepository = mock()
     private val garageRepository: GarageRepository = mock()
+    private val rulesFeedSwitch = rulesFeedSwitchStub()
     private val clock = Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC)
     private val gasFuels = FuelType.entries.filter { it != FuelType.ELECTRICITY }
 
@@ -74,7 +75,7 @@ class WizardGasPriceSourceTest {
         whenever(vehicleRepository.getYears()).thenReturn(emptyList())
         lookupFails()
         val vm = WizardViewModel(strategyRepository, appPreferencesRepository, appStateRepository,
-            vehicleRepository, gasPriceRepository, garageRepository, clock)
+            vehicleRepository, gasPriceRepository, garageRepository, rulesFeedSwitch, clock)
         testScheduler.advanceUntilIdle()
         return vm
     }

@@ -185,17 +185,18 @@ A tap you make yourself on the floating card (Accept / Decline) is your own acti
 
 ## 6. What leaves the device
 
-There is no account, no analytics SDK, no advertising identifier. Gas-price refresh is off by default on new installs; an existing setting is kept. Setup vehicle lookup asks first and saves the choice; other app-managed network features require separate opt-in.
+There is no account, no analytics SDK, no advertising identifier. Gas-price refresh is off by default on new installs; an existing setting is kept. Recognition rules updates are off by default in every build. Setup vehicle lookup asks first and saves the choice; other app-managed network features require separate opt-in.
 
 Every connection the app makes is HTTPS (#1620). The app's network security config
 (`app/src/main/res/xml/network_security_config.xml`, referenced from the manifest of every build) refuses cleartext
 traffic for every host with no exception, and `HttpsEndpointGuardTest` checks that every URL in shipped source is
-`https`: the census server, `api.eia.gov` and `fueleconomy.gov`.
+`https`: the census server, gig.log's feed site, `api.eia.gov` and `fueleconomy.gov`.
 
 | Feature | Default | Where it goes | What is sent |
 |---|---|---|---|
 | Gas-price refresh (`isGasPriceAuto`, `AppPreferencesDataSource`) | **off by default on new installs; an existing setting is kept**; tap the bubble gas price for manual mode, or disable daily updates in setup and save | the U.S. EIA public price API (`api.eia.gov`, `core/network/.../eia`), after Android's `Geocoder` resolves your state from your location rounded to about 11 km, never the exact fix (§2.4) | a request for the regional price for your fuel type; no account, no identifier. The API key is never logged (#348). |
 | Vehicle list in the setup wizard (`EpaVehicleDataSource`) | asks first (#1258): off until "Look up my vehicle" is tapped; choice is saved | the U.S. EPA public vehicle API (`fueleconomy.gov`) | vehicle-list request after opt-in, including on later setup visits; selected year, make, model and vehicle ID as the user chooses, to retrieve MPG; no account or install ID |
+| Recognition rules updates (#640; "Keep recognition rules up to date", Settings > Recognition rules and the setup wizard, `RulesFeedSwitch`; the rules client `RulesFeed`) | **off in every build**; with it off, the rules in use stay (the built-in ones or the last downloaded set) and a request goes only when the dasher taps Check now, or Check for new rules on the recognition notice, one fetch per tap; the notice's Keep rules up to date only opens Settings | gig.log's site on GitHub Pages (`https://gig.log.trotter.cloud/feeds/rules/`), served through GitHub's CDN, Fastly (`FeedClient`, `FeedSource.GigLog`) | a GET of the signed rules envelope, then of each rules file it names by its sha256; no account, install ID, location or cookie; the only headers of gig.log's own are a fixed `User-Agent` and, once the site has answered, the `If-None-Match` tag it gave (gig.log's own site only, #1565); every phone downloads the same bytes. GitHub and Fastly see the phone's IP address, its user agent and the time of each request. **Timing:** with the switch on, a check runs when the dasher opens or returns to a delivery app they turned on: the first accessibility event from that app after 10 minutes with none, by elapsed time (`PlatformForegrounds`; active use never counts again, and no window is read for it), at most once an hour by elapsed time, a stored last check in the future counting as just now (`RulesFeedSwitch.claimForegroundCheck`, persisted), so GitHub and Fastly can tell when this phone's IP address opens a delivery app; the switch's copy and the accessibility service description say so. A downloaded generation is checked against the pinned gig.log rules key and the batch loader before it is used (`VerifiedRulesetBytes.fromFeedFile`); its tap capabilities land undecided. Nothing is uploaded. |
 | Google MPG search | manual button press | Google in the user's browser (`VehicleCard`) | entered vehicle year, make and model plus `mpg`; browser cookies/account settings apply |
 | Text-to-speech (`TtsEffectHandler`) | used for spoken offers | your phone's text-to-speech engine | the offer sentence; the engine may use the network under its own terms |
 | UNKNOWN screen/notification census (every build: Play, sideload and debug, #1620; see "The census opt-in" and "When the census uploads" below) | off | gig.log's census server, built into the app (§2.1); turning the census on enrols the install | a **skeleton** of an admitted UNKNOWN screen or platform notification: screen view classes/ids, or a grammar-bounded notification channel id and five filtered slots; text slots carry coarse kinds or hashes under a k-anonymity gate, never source text — see `docs/adr/ADR-0011-unknown-census-privacy-model.md` — plus daily recognition-health counts per platform and app version, sent with this install's ID. Once the server lists `uinode.skeleton.v2` (and `notification.skeleton.v2`) as accepted, a skeleton also carries: for a money figure, 12-hour clock time, distance, minute count or item count, its format with the digits removed, from a closed list (`$#.##`, `#:## AM/PM`, `#.# mi`, `# min(s)`, `# item(s)`; AM and PM are one class, and the value never leaves); each node's click and visibility flags; and a notification's action labels as filtered slots of the same kinds as any text slot (a hash of a short chrome-like label, a coarse kind such as `digits` or `mixed`, a format template, or `withheld`; never the label). The skeleton's day is the UTC day. At most one skeleton of each layout and format is kept a UTC day, and only from the delivery apps the census choices cover (below). |
@@ -454,7 +455,8 @@ store (`datastore/rule_capability_grants.preferences_pb`) and the Screen-events 
 (`app.log`, `shareable.log`, `shareable.log.1`, and rotations under `logs/`), captures, census files, census
 credentials, the developer-settings store (the census switch, its consent receipt and choices, capture sharing, the server policy cache, the next daily census time and a census deletion request), the screen-review record
 (`datastore/census_contributor.preferences_pb`, #1625), the recognition
-notice store (`datastore/recognition_notices.preferences_pb`, #1560) and the wipe commitment (`wipe_committed`, #1579) are also excluded from both backup and transfer (`app/src/main/res/xml/backup_rules.xml`,
+notice store (`datastore/recognition_notices.preferences_pb`, #1560), the rules updates choice and its last foreground
+check time (`datastore/rules_feed.preferences_pb`, #640) and the wipe commitment (`wipe_committed`, #1579) are also excluded from both backup and transfer (`app/src/main/res/xml/backup_rules.xml`,
 `data_extraction_rules.xml`; #1236, dev ruling 2026-10-07).
 
 ## 7. Where your data lives, and how long
@@ -656,6 +658,13 @@ under `core/pipeline/`, the consent model under `docs/design/rule-capability-con
 
 ## Revision history
 
+- **r27 (2026-11-15)** — §6: recognition rules updates (#640): off in every build; the setup wizard asks; with the
+  switch off a request goes only on the dasher's tap (Check now, or Check for new rules on the recognition notice), one
+  fetch per tap; with it on, a check when the dasher opens or returns to a delivery app (after 10 minutes with no event from it), at most once an hour, so GitHub and its
+  CDN, Fastly, can tell when this phone's IP address opens a delivery app; the requests carry no account, install ID
+  or location; a downloaded generation is verified against the pinned gig.log rules key and its capabilities land
+  undecided. The rules choice is excluded from backup and transfer. The in-app Privacy page's "What leaves your phone",
+  the switch's own text and the accessibility service description and disclosure state the timing. Receipts created under r26 retain that revision.
 - **r26 (2026-11-14)** — §6: Ask the developer (#1627): the quarantine request and what its artifact holds (the
   outbound skeleton, confirmations as hashes, labels, and only words whose gate answered open in the same request),
   the closed note list, sealed to the developer's key, deleted after 3 days, never counted, the phone's hash check,

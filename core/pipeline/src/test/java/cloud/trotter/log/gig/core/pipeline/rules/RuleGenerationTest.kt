@@ -24,7 +24,6 @@ import org.mockito.kotlin.mock
  */
 class RuleGenerationTest {
 
-    private val signingKey = TestRulesetSigning.keyPair()
     private val interpreter = JsonRuleInterpreter(mock<Context>(), mock<RuleCapabilityGrants>())
 
     private fun file(vararg screens: String, platform: String = "doordash.driver") = """
@@ -49,7 +48,7 @@ class RuleGenerationTest {
     private val bundledIdle = rule("doordash.screen.idle_map", 10, "Dash Now")
     private val bundledFile = RuleFile.Bundled("rules/doordash.json", file(known, catchall, bundledIdle))
 
-    private fun remote(json: String) = RuleFile.Remote(TestRulesetSigning.verified(json, "test:rules", signingKey))
+    private fun remote(json: String, wire: String = "doordash") = RuleFile.Remote(TestRulesFeed.verified(json, wire))
 
     private fun assemble(files: Array<out RuleFile>) =
         RuleGenerationAssembler.assemble(files.filterIsInstance<RuleFile.Bundled>(), files.filterIsInstance<RuleFile.Remote>())
@@ -74,13 +73,13 @@ class RuleGenerationTest {
     @Test
     fun `a generation with one compile-isolated rule is rejected and the last good one stays live`() = runTest {
         interpreter.loadBundled(listOf(bundledFile))
-        interpreter.load(TestRulesetSigning.verified(file(known, bundledIdle), "test:rules", signingKey))
+        interpreter.load(TestRulesFeed.verified(file(known, bundledIdle)))
         val live = interpreter.generation
         assertNotNull(live)
 
         val typo = """{ "id": "doordash.screen.typo", "priority": 20, "overridable": true,
             "require": { "exists": { "hasText": "x" } } }"""
-        interpreter.load(TestRulesetSigning.verified(file(known, bundledIdle, typo), "test:rules", signingKey))
+        interpreter.load(TestRulesFeed.verified(file(known, bundledIdle, typo)))
 
         assertSame("the rejected generation never went live", live, interpreter.generation)
         assertTrue(rejected(remote(file(known, bundledIdle, typo))).contains("doordash.screen.typo"))
@@ -130,7 +129,7 @@ class RuleGenerationTest {
     @Test
     fun `a remote preparation before the bundled floor exists is rejected`() = runTest {
         assertTrue(interpreter.prepareGeneration(listOf(remote(file(known)))) is GenerationResult.Rejected)
-        interpreter.load(TestRulesetSigning.verified(file(known), "test:rules", signingKey))
+        interpreter.load(TestRulesFeed.verified(file(known)))
         assertNull(interpreter.generation)
     }
 
@@ -235,8 +234,14 @@ class RuleGenerationTest {
 
     @Test
     fun `a remote platform without a sensitive rule is refused`() {
-        val reason = rejected(remote(file(rule("uber.screen.idle", 10, "Go online"), platform = "uber.driver")))
+        val reason = rejected(remote(file(rule("uber.screen.idle", 10, "Go online"), platform = "uber.driver"), wire = "uber"))
         assertTrue(reason, reason.contains("uber"))
+    }
+
+    @Test
+    fun `a remote file whose platform_id is not the platform it is named for is refused`() {
+        val reason = rejected(remote(file(rule("uber.screen.sensitive.known", 0, "x", "sensitive", overrideable = false), platform = "uber.driver")))
+        assertTrue(reason, reason.contains("named for"))
     }
 
     @Test
@@ -246,7 +251,7 @@ class RuleGenerationTest {
             "require": { "exists": { "hasText": "Accept" } } }"""
         val result = RuleGenerationAssembler.assemble(listOf(bundledFile), listOf(remote(file(offer))))
         val capabilities = (result as GenerationResult.Prepared).capabilities
-        assertEquals(listOf("test:rules"), capabilities.map { it.source }.distinct())
+        assertEquals(listOf("feed:gig.log/doordash"), capabilities.map { it.source }.distinct())
     }
 
     // ── Customer fields ────────────────────────────────────────────────

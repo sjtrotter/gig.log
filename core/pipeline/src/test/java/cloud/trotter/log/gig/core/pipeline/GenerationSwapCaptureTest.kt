@@ -4,7 +4,7 @@ import android.content.Context
 import cloud.trotter.log.gig.core.pipeline.accessibility.TreeSnapshot
 import cloud.trotter.log.gig.core.pipeline.rules.JsonRuleInterpreter
 import cloud.trotter.log.gig.core.pipeline.rules.TestBundledFloor
-import cloud.trotter.log.gig.core.pipeline.rules.TestRulesetSigning
+import cloud.trotter.log.gig.core.pipeline.rules.TestRulesFeed
 import cloud.trotter.log.gig.domain.capability.RuleCapabilityGrants
 import cloud.trotter.log.gig.domain.capture.CaptureBus
 import cloud.trotter.log.gig.domain.capture.ReplayMetadata
@@ -37,7 +37,6 @@ class GenerationSwapCaptureTest {
         ): String? { envelopes += envelopeJson; return captureId }
     }
 
-    private val signingKey = TestRulesetSigning.keyPair()
     private val interpreter = JsonRuleInterpreter(mock<Context>(), mock<RuleCapabilityGrants>())
     private val classifier = ObservationClassifier(
         interpreter,
@@ -74,7 +73,7 @@ class GenerationSwapCaptureTest {
 
     private suspend fun goLive(withRedact: Boolean) {
         if (!interpreter.isLoaded) interpreter.loadBundled(listOf(TestBundledFloor.uber))
-        interpreter.load(TestRulesetSigning.verified(generation(withRedact), "test:rules", signingKey))
+        interpreter.load(TestRulesFeed.verified(generation(withRedact)))
     }
 
     private val note = UiNode(viewIdResourceName = "com.doordash.driverapp:id/order_note", text = "Zebra42")

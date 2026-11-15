@@ -1439,8 +1439,9 @@ it, from label maps keyed by shape and shape field (never by platform or rule id
 cause, one closing line for every cause ("Other screens may still record."), and no percentage (the
 percentage stays in the #937 WARN). Home shows one card per open incident (`RecognitionIncidentCard`,
 "For 2h 5m" at minute grain from `openedAt`) in every non-loading state, the permission gate included,
-so a muted or denied notice still reaches the dasher. `RecognitionHealthNotifier` is the #640 seam: the
-"Check for new rules" actions go there. Log lines (tag `RecognitionHealth`, PII-free): WARN on a rot
+so a muted or denied notice still reaches the dasher. `RecognitionHealthNotifier` carries the #640 rules
+actions: "Check for new rules" (one check per tap) and "Keep rules up to date", which opens Settings > Recognition
+rules (`02-rule-engine.md` § The rules client). Log lines (tag `RecognitionHealth`, PII-free): WARN on a rot
 trip, INFO on a clear, a notice and a close, one WARN per process for a failed load or save.
 
 ## Carried from the CLAUDE.md summary (trim v4)

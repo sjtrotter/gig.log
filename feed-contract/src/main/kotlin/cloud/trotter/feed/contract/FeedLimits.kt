@@ -5,7 +5,7 @@ import java.io.InputStream
 
 /**
  * Every bound of the feed format, one owner each. Byte caps count the decompressed stream. The 1 MB rules file cap is
- * also the rule compiler's file cap and `RulesetCrypto.MAX_BUNDLE_BYTES`; both reference [MAX_RULES_FILE_BYTES].
+ * also the rule compiler's file cap, which references [MAX_RULES_FILE_BYTES].
  */
 object FeedLimits {
     const val MAX_ENVELOPE_BYTES = 32_000

@@ -24,4 +24,16 @@
     <string name="recognition_field_other">some values</string>
     <!-- Home card: how long the incident has been open, "For 2h 5m". -->
     <string name="recognition_home_since_format">For %1$s</string>
+    <!-- #640: the recognition notice's rules actions and their answers. "No update yet" posts at most once per
+         incident. None of these promises a fix. -->
+    <string name="recognition_action_check">Check for new rules</string>
+    <string name="recognition_action_keep_updated">Keep rules up to date</string>
+    <!-- "No update yet for DoorDash" -->
+    <string name="recognition_no_update_title_format">No update yet for %1$s</string>
+    <string name="recognition_no_update_text">gig.log keeps recording the screens it can read.</string>
+    <string name="recognition_rules_updated_title">New recognition rules in use</string>
+    <!-- "Home shows this until DoorDash screens read again." -->
+    <string name="recognition_rules_updated_text_format">Home shows this until %1$s screens read again.</string>
+    <string name="recognition_check_failed_title">Couldn\'t check for new rules</string>
+    <string name="recognition_check_failed_text">The current rules stay in use.</string>
 </resources>

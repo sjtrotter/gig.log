@@ -27,23 +27,26 @@ interface FeedPolicy {
 }
 
 /**
- * The app's switches. Fuel uses the existing auto gas price switch. Constants and rules stay off until their own
- * switches exist (#695, #640; both default off). Every feed reads gig.log's site until the custom source setting
- * (#1567).
+ * The app's switches, one per feed. Fuel uses the existing auto gas price switch; rules use "Keep recognition rules up
+ * to date" ([RulesFeedSwitch], #640), whose value turns off at the instant it is saved. Constants stay off until their
+ * own switch exists (#695, default off). Every feed reads gig.log's site until the custom source setting (#1567).
  */
 @Singleton
 class AppFeedPolicy @Inject constructor(
     preferences: AppPreferencesRepository,
+    rules: RulesFeedSwitch,
     @ApplicationScope scope: CoroutineScope,
 ) : FeedPolicy {
     /** Off until the stored switch is read (fail closed). */
     private val fuel: StateFlow<Boolean> = preferences.isGasPriceAuto.stateIn(scope, SharingStarted.Eagerly, false)
+    private val rulesOn: StateFlow<Boolean> = rules.enabled
     private val off: StateFlow<Boolean> = MutableStateFlow(false)
     private val gigLog: StateFlow<FeedSource> = MutableStateFlow(FeedSource.GigLog)
 
     override fun enabled(feed: Feed): StateFlow<Boolean> = when (feed) {
         Feed.FUEL -> fuel
-        Feed.CONSTANTS, Feed.RULES -> off
+        Feed.RULES -> rulesOn
+        Feed.CONSTANTS -> off
     }
 
     override fun source(feed: Feed): StateFlow<FeedSource> = gigLog

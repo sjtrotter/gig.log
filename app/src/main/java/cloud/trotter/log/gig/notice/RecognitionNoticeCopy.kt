@@ -15,8 +15,9 @@ import cloud.trotter.log.gig.domain.state.Platform
  * several causes get a shared title and list every cause in the text. Every incident ends with the same
  * conditional line, "Other screens may still record."
  *
- * The copy never states a percentage, an update, a fix, a rule or a wire: the dasher gets which screens
- * stopped reading and which values went missing, nothing to decode. PII-free by construction — a
+ * The incident copy never states a percentage, an update, a fix, a rule or a wire: the dasher gets which
+ * screens stopped reading and which values went missing, nothing to decode. Only the answers to the rules
+ * actions (#640) speak of rules, and none promises a fix. PII-free by construction — a
  * platform's display name and our own labels.
  */
 internal object RecognitionNoticeCopy {
@@ -47,6 +48,14 @@ internal object RecognitionNoticeCopy {
         val stillOther = res.getString(R.string.recognition_still_other)
         return if (lines.size == 1) stillOther else (lines + stillOther).joinToString("\n")
     }
+
+    /** #640: "No update yet for DoorDash", the answer when a check found no new rules. */
+    fun noUpdateTitle(res: Resources, incident: RecognitionIncident): String =
+        res.getString(R.string.recognition_no_update_title_format, platformName(res, incident.platformWire))
+
+    /** #640: the line under "New recognition rules in use". */
+    fun rulesUpdatedText(res: Resources, incident: RecognitionIncident): String =
+        res.getString(R.string.recognition_rules_updated_text_format, platformName(res, incident.platformWire))
 
     /** The UNKNOWN cause first, then each rotted rule in rule-id order. */
     private fun causeLines(res: Resources, incident: RecognitionIncident): List<String> {

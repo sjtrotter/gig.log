@@ -17,6 +17,7 @@ class BackupRulesGuardTest {
         "file" to "datastore/rule_capability_grants.preferences_pb",
         "file" to "datastore/consent_event_receipt.preferences_pb",
         "file" to "datastore/recognition_notices.preferences_pb",
+        "file" to "datastore/rules_feed.preferences_pb",
         "file" to "census/",
         "file" to "wipe_committed",
     ) + listOf("file", "external").flatMap { domain ->

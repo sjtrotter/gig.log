@@ -33,6 +33,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import cloud.trotter.log.gig.BuildConfig
 import cloud.trotter.log.gig.R
+import cloud.trotter.log.gig.core.data.feed.RulesCheckOutcome
+import cloud.trotter.log.gig.core.data.feed.RulesFeedStatus
 import cloud.trotter.log.gig.core.designsystem.R as DesignR
 import cloud.trotter.log.gig.domain.analytics.RecordsStatus
 import cloud.trotter.log.gig.core.data.chat.ChatRepository
@@ -68,6 +70,7 @@ import cloud.trotter.log.gig.feature.settings.CensusPlatformRow
 import cloud.trotter.log.gig.feature.settings.CensusUiState
 import cloud.trotter.log.gig.feature.settings.ContributorContent
 import cloud.trotter.log.gig.feature.settings.ContributorReviewContent
+import cloud.trotter.log.gig.feature.settings.RulesUpdatesContent
 import cloud.trotter.log.gig.feature.settings.WaitingReview
 import cloud.trotter.log.gig.feature.settings.ContributorUiState
 import cloud.trotter.log.gig.domain.census.contributor.ContributorEntry
@@ -228,6 +231,27 @@ class ScreenshotsTest(private val theme: String) {
         SettingsHomeContent(
             isDevUnlocked = false, garage = ScreenshotData.garage, userEconomy = ScreenshotData.userEconomy,
             onNavigate = {}, onBack = {}, onDeleteEverything = {},
+        )
+    }
+
+    /** #640: Settings > Recognition rules, off by default: built-in rules, no check yet. */
+    @Test fun settingsRulesUpdatesOff() = render("settings/rules-updates-off", assertion = {
+        text(string(SettingsR.string.rules_updates_toggle)).assertExists()
+        text(string(SettingsR.string.rules_updates_in_use_built_in)).assertExists()
+    }) {
+        RulesUpdatesContent(enabled = false, status = RulesFeedStatus(), onToggle = {}, onCheckNow = {}, onBack = {})
+    }
+
+    /** #640: the switch on, downloaded rules in use, and the last check's answer. */
+    @Test fun settingsRulesUpdatesOn() = render("settings/rules-updates-on", assertion = {
+        text(string(SettingsR.string.rules_updates_last_check_label)).assertExists()
+    }) {
+        RulesUpdatesContent(
+            enabled = true,
+            status = RulesFeedStatus(
+                liveIssuedAt = 1_794_700_800_000L, lastCheckAt = 1_794_704_400_000L, lastOutcome = RulesCheckOutcome.NO_UPDATE,
+            ),
+            onToggle = {}, onCheckNow = {}, onBack = {},
         )
     }
 

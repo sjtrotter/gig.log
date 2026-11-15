@@ -88,4 +88,10 @@ object DataStoreModule {
     @ContributorPreferences
     fun provideContributorDataStore(@ApplicationContext context: Context): DataStore<Preferences> =
         PreferenceDataStoreFactory.create { context.preferencesDataStoreFile("census_contributor") }
+
+    @Provides
+    @Singleton
+    @RulesFeedPreferences
+    fun provideRulesFeedDataStore(@ApplicationContext context: Context): DataStore<Preferences> =
+        PreferenceDataStoreFactory.create { context.preferencesDataStoreFile("rules_feed") }
 }

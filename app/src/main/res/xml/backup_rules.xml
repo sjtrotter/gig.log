@@ -17,6 +17,7 @@
     <exclude domain="file" path="datastore/consent_event_receipt.preferences_pb" />
     <!-- #1560: this phone's recognition notice timing, never restored onto another phone. -->
     <exclude domain="file" path="datastore/recognition_notices.preferences_pb" />
+    <exclude domain="file" path="datastore/rules_feed.preferences_pb" />
     <!-- #1214/#1236: debug logs, including the internal-storage fallback, are device-local. -->
     <exclude domain="external" path="app.log" />
     <exclude domain="external" path="shareable.log" />

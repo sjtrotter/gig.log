@@ -215,8 +215,8 @@ rule-only, corpus-neutral fix made from the phone runs PR CI and one Sol round b
 - **Old installs.** After a key compromise, installs that have not updated trust the old epoch; clock admission,
   freshness and plausibility bound what it can do.
 - **Network metadata.** GitHub and its CDN (Fastly) see each phone's IP address and user agent, and the rules
-  foreground check tells them when the phone opens a delivery app. PRIVACY.md's network row states it when #640
-  lands.
+  foreground check tells them when the phone opens a delivery app. PRIVACY.md's network row and the switch's own
+  text state it (#640).
 - **Freshness trusts the wall clock.** A phone set far ahead shows every feed as old. Admission uses
   `max(wall clock, BuildConfig.BUILD_TIME_MS)`, so a manifest issued more than a day after that time is refused with
   `ClockBehind`: a phone set back is held to its build time, not refused outright.

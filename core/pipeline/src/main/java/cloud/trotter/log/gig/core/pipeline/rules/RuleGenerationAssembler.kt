@@ -48,6 +48,9 @@ internal object RuleGenerationAssembler {
             val platform = Platform.fromWire(compiled!!.platformId.substringBefore('.'))
                 ?.takeUnless { it == Platform.Unknown }
                 ?: return rejected("remote '${file.source}': platform_id names no known platform")
+            if (platform != file.platform) {
+                return rejected("remote '${file.source}': platform_id is not the platform the file is named for")
+            }
             remote += RemoteFile(file.source, platform, compiled)
         }
         val acceptedBundled = dropCollidingRules(bundledCompiled)
