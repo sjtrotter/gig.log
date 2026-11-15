@@ -55,6 +55,7 @@ class WizardSaveStatusTest {
     private val vehicleRepository: VehicleRepository = mock()
     private val gasPriceRepository: FuelPriceRepository = mock()
     private val garageRepository: GarageRepository = mock()
+    private val rulesFeedSwitch = rulesFeedSwitchStub()
     private val garageFlow = MutableStateFlow(Garage(emptyList(), null, true))
 
     @After
@@ -87,7 +88,7 @@ class WizardSaveStatusTest {
         whenever(strategyRepository.scoringRules).thenReturn(flowOf(emptyList()))
         whenever(vehicleRepository.getYears()).thenReturn(emptyList())
         val vm = WizardViewModel(strategyRepository, appPreferencesRepository, appStateRepository,
-            vehicleRepository, gasPriceRepository, garageRepository)
+            vehicleRepository, gasPriceRepository, garageRepository, rulesFeedSwitch)
         testScheduler.advanceUntilIdle()
         return vm
     }

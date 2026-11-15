@@ -2,7 +2,9 @@
 
 Dev-side helpers for signing a canonical ruleset bundle so a running app instance
 can verify it before compiling (the hard prerequisite for the CDN matchers split,
-#192). The on-device gate is `RulesetVerifier` in `:core:pipeline`.
+#192). On the phone the feed contract (`feed-contract/`) verifies the signed rules feed, and
+`VerifiedRulesetBytes.fromFeedFile` in `:core:pipeline` is the only way a downloaded rules file reaches the loader
+(#640).
 
 ## Scheme
 

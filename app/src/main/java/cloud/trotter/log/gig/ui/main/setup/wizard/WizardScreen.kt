@@ -2,6 +2,14 @@ package cloud.trotter.log.gig.ui.main.setup.wizard
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.unit.dp
+import cloud.trotter.log.gig.feature.settings.RulesUpdatesToggle
+import cloud.trotter.log.gig.feature.setup.wizard.components.WizardCardHeader
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
@@ -267,6 +275,22 @@ fun WizardScreen(
                             onValueChange = viewModel::updateTargetHourly,
                             footerText = if (isCherryPicker) hourlyFooterAuto else hourlyFooterFlag
                         )
+                    }
+
+                    WizardStep.RULES_UPDATES -> {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState())
+                                .padding(24.dp),
+                        ) {
+                            WizardCardHeader(currentStep)
+                            Spacer(modifier = Modifier.height(32.dp))
+                            RulesUpdatesToggle(
+                                enabled = state.keepRulesUpToDate,
+                                onToggle = viewModel::setKeepRulesUpToDate,
+                            )
+                        }
                     }
 
                     WizardStep.MAX_DISTANCE -> {

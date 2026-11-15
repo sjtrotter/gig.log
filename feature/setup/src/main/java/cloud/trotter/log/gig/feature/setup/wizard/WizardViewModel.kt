@@ -2,6 +2,7 @@ package cloud.trotter.log.gig.feature.setup.wizard
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import cloud.trotter.log.gig.core.data.feed.RulesFeedSwitch
 import cloud.trotter.log.gig.core.data.fuel.FuelPriceRepository
 import cloud.trotter.log.gig.core.data.settings.AppPreferencesRepository
 import cloud.trotter.log.gig.core.data.state.AppStateRepository
@@ -55,6 +56,8 @@ class WizardViewModel @Inject constructor(
     private val vehicleRepository: VehicleRepository,
     private val gasPriceRepository: FuelPriceRepository,
     private val garageRepository: GarageRepository,
+    /** #640: "Keep recognition rules up to date", asked in setup and saved with the rest. */
+    private val rulesFeedSwitch: RulesFeedSwitch,
     /** Stamps a lookup's figure (#1478); the app binds the system clock. */
     private val clock: Clock = Clock.systemUTC(),
 ) : ViewModel() {
@@ -113,6 +116,7 @@ class WizardViewModel @Inject constructor(
             val currentFuelType =
                 activeProfile?.gasFuel ?: appPreferencesRepository.fuelType.first()
             val currentGasAuto = appPreferencesRepository.isGasPriceAuto.first()
+            val currentKeepRules = rulesFeedSwitch.current()
             val currentGasPrice = appPreferencesRepository.gasPrice.first() ?: WizardState().gasPrice
             val currentGasFetchedAt = appPreferencesRepository.gasPriceFetchedAt.first()
 
@@ -141,6 +145,7 @@ class WizardViewModel @Inject constructor(
                 currentState.copy(
                     fuelType = currentFuelType,
                     isGasPriceAuto = currentGasAuto,
+                    keepRulesUpToDate = currentKeepRules,
                     gasPrice = currentGasPrice,
                     gasPriceSource = GasPriceSource.stored(currentGasAuto, currentGasFetchedAt),
                     strategy = currentStrategy,
@@ -440,6 +445,11 @@ class WizardViewModel @Inject constructor(
         }
     }
 
+    /** #640: the rules question's answer; saved by [save], so Skip leaves the switch as it was. */
+    fun setKeepRulesUpToDate(on: Boolean) {
+        _state.update { it.copy(keepRulesUpToDate = on) }
+    }
+
     /** The dasher closed a failure to go back to setup; their answers are still in [state]. */
     fun dismissSaveFailure() {
         if (_saveStatus.value is SaveStatus.Failed) _saveStatus.value = SaveStatus.Idle
@@ -519,6 +529,8 @@ class WizardViewModel @Inject constructor(
         }
 
         strategyRepository.updateRules(updatedRules)
+        // Through the switch's owner, which turns the feed off in memory before it saves.
+        check(rulesFeedSwitch.set(finalState.keepRulesUpToDate)) { "rules updates choice not saved" }
         appStateRepository.setFirstRunComplete()
     }
 }

@@ -1,0 +1,162 @@
+package cloud.trotter.log.gig.core.data.feed
+
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.preferencesOf
+import cloud.trotter.feed.contract.Feed
+import cloud.trotter.log.gig.core.data.settings.AppPreferencesRepository
+import cloud.trotter.log.gig.core.datastore.feed.RulesFeedDataSource
+import cloud.trotter.log.gig.core.network.feed.FeedClient
+import cloud.trotter.log.gig.core.network.feed.FeedGate
+import cloud.trotter.log.gig.core.network.feed.FeedReply
+import cloud.trotter.log.gig.core.network.feed.FeedSource
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Rule
+import org.junit.Test
+import org.junit.rules.TemporaryFolder
+import org.mockito.kotlin.doReturn
+import org.mockito.kotlin.mock
+import java.time.Clock
+import java.time.Instant
+
+/**
+ * #640: "Keep recognition rules up to date" is the rules feed's own consent. Its in-memory value, the one every
+ * `RefreshGate` check reads, turns off at the instant the dasher turns it off: no store write, and no collector of the
+ * store, stands between the tap and a closed gate.
+ */
+class RulesFeedSwitchTest {
+    @get:Rule val tmp = TemporaryFolder()
+
+    private val scope = CoroutineScope(Dispatchers.Unconfined)
+    private val fake = FeedTestServer()
+    private val client = FeedClient(fake.client) { }
+
+    @After fun tearDown() {
+        scope.cancel()
+        fake.close()
+    }
+
+    private val enabledKey = booleanPreferencesKey("rules_updates_enabled")
+    private val lastCheckKey = longPreferencesKey("last_foreground_check_at")
+
+    private fun switchOn(store: MemoryPreferences = MemoryPreferences(preferencesOf(enabledKey to true))) =
+        RulesFeedSwitch(RulesFeedDataSource(store), scope)
+
+    private fun policy(switch: RulesFeedSwitch) =
+        AppFeedPolicy(mock<AppPreferencesRepository> { on { isGasPriceAuto } doReturn MutableStateFlow(true) }, switch, scope)
+
+    @Test fun `off by default, and read once from the store`() = runBlocking {
+        assertFalse(RulesFeedSwitch(RulesFeedDataSource(MemoryPreferences()), scope).current())
+        assertTrue(switchOn().current())
+    }
+
+    @Test fun `turned off with the store held back, the next exchange is refused and nothing reaches the server`() = runBlocking {
+        val store = MemoryPreferences(preferencesOf(enabledKey to true))
+        val switch = switchOn(store)
+        assertTrue(switch.current())
+        val policy = policy(switch)
+        val gate = RefreshGate(Feed.RULES, policy, FeedSource.GigLog, grant = null)
+        assertTrue(gate.isOpen())
+
+        store.holdWrites()
+        val saving = launch(start = CoroutineStart.UNDISPATCHED) { switch.set(false) }
+        assertTrue("the save is still held", saving.isActive)
+
+        assertFalse(switch.enabled.value)
+        assertFalse(gate.isOpen())
+        assertEquals(FeedReply.Denied, client.envelope(FeedSource.GigLog, Feed.RULES, etag = null, gate = gate))
+        val repository = FeedRepository(Feed.RULES, OneFileStager(), client, policy, tmp.root, Clock.systemUTC(), buildTimeMs = 0L)
+        assertEquals(FeedRefresh.Denied, repository.refresh())
+        assertEquals(0, fake.server.requestCount)
+
+        store.releaseWrites()
+        saving.join()
+        assertEquals(false, store.current[enabledKey])
+    }
+
+    @Test fun `turned off between a request's check and its exchange, the exchange is refused`() = runBlocking {
+        val switch = switchOn()
+        assertTrue(switch.current())
+        val gate = RefreshGate(Feed.RULES, policy(switch), FeedSource.GigLog, grant = null)
+        val offBetween = object : FeedGate {
+            override suspend fun allows(): Boolean = gate.allows().also { switch.forgetNow() }
+            override fun isOpen(): Boolean = gate.isOpen()
+        }
+        assertEquals(FeedReply.Denied, client.envelope(FeedSource.GigLog, Feed.RULES, etag = null, gate = offBetween))
+        assertEquals(0, fake.server.requestCount)
+    }
+
+    @Test fun `a choice made before the stored one is read wins over it`() = runBlocking {
+        val store = MemoryPreferences(preferencesOf(enabledKey to true))
+        store.holdReads()
+        val switch = switchOn(store)
+        switch.forgetNow()
+        store.releaseReads()
+        assertFalse(switch.current())
+    }
+
+    @Test fun `turning on counts once saved, and a refused save leaves it off`() = runBlocking {
+        val store = MemoryPreferences()
+        val switch = RulesFeedSwitch(RulesFeedDataSource(store), scope)
+        store.failWrites = true
+        assertFalse(switch.set(true))
+        assertFalse(switch.enabled.value)
+        store.failWrites = false
+        assertTrue(switch.set(true))
+        assertTrue(switch.enabled.value)
+        assertEquals(true, store.current[enabledKey])
+    }
+
+    @Test fun `an off that lands while an on is saving stays off`() = runBlocking {
+        val store = MemoryPreferences()
+        val switch = RulesFeedSwitch(RulesFeedDataSource(store), scope)
+        assertFalse(switch.current())
+        store.holdWrites()
+        val on = launch(start = CoroutineStart.UNDISPATCHED) { switch.set(true) }
+        val off = launch(start = CoroutineStart.UNDISPATCHED) { switch.set(false) }
+        assertFalse(switch.enabled.value)
+        store.releaseWrites()
+        on.join()
+        off.join()
+        assertFalse(switch.enabled.value)
+        assertEquals(false, store.current[enabledKey])
+    }
+
+    @Test fun `a foreground check runs at most once an hour, and the limit survives a restart`() = runBlocking {
+        val store = MemoryPreferences(preferencesOf(enabledKey to true))
+        val switch = switchOn(store)
+        val t = Instant.parse("2026-11-15T12:00:00Z").toEpochMilli()
+        assertTrue(switch.claimForegroundCheck(t))
+        assertFalse(switch.claimForegroundCheck(t + 59 * 60_000L))
+        assertTrue(switch.claimForegroundCheck(t + 60 * 60_000L))
+        assertEquals(t + 60 * 60_000L, store.current[lastCheckKey])
+
+        val restarted = switchOn(store)
+        assertFalse(restarted.claimForegroundCheck(t + 61 * 60_000L))
+        assertTrue(restarted.claimForegroundCheck(t + 120 * 60_000L))
+    }
+
+    @Test fun `with the switch off no foreground check is claimed`() = runBlocking {
+        val switch = RulesFeedSwitch(RulesFeedDataSource(MemoryPreferences()), scope)
+        assertFalse(switch.claimForegroundCheck(Instant.parse("2026-11-15T12:00:00Z").toEpochMilli()))
+    }
+
+    /** Never reached in these tests: every refresh is refused before a request. */
+    private class OneFileStager : FeedStager<String> {
+        override val contracts: Set<Long> = setOf(1L)
+        override fun stage(files: List<cloud.trotter.feed.contract.VerifiedFeedFile>, carry: kotlinx.serialization.json.JsonObject?) =
+            FeedStage.Rejected("unused")
+        override fun restore(files: List<cloud.trotter.feed.contract.VerifiedFeedFile>, carry: kotlinx.serialization.json.JsonObject?) =
+            FeedStage.Rejected("unused")
+    }
+}

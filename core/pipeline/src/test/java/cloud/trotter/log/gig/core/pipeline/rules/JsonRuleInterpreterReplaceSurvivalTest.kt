@@ -22,12 +22,10 @@ class JsonRuleInterpreterReplaceSurvivalTest {
 
     private val interpreter = JsonRuleInterpreter(mock<Context>(), mock<RuleCapabilityGrants>())
 
-    // #416: load() now only accepts signature-verified bytes. Tests sign their own
-    // bundles with a runtime keypair (no committed private key) and mint through the
-    // real RulesetVerifier — exercising the whole gate.
-    private val signingKey = TestRulesetSigning.keyPair()
-    private fun load(json: String, source: String) =
-        TestRulesetSigning.verified(json, source, signingKey)
+    // load() only accepts a VerifiedRulesetBytes: the test rules feed signs with the build's test-only
+    // gig.log key and mints through the feed verifier and VerifiedRulesetBytes.fromFeedFile (#640).
+    private fun load(json: String) =
+        TestRulesFeed.verified(json)
 
     /** A single-child tree carrying [text] (exists/hasText searches the subtree). */
     private fun screen(text: String) = UiNode(children = listOf(UiNode(text = text)))
@@ -68,7 +66,7 @@ class JsonRuleInterpreterReplaceSurvivalTest {
     @Test
     fun `a replacement that omits sensitive rules is rejected and the previous block survives`() = runTest {
         interpreter.loadBundled(listOf(TestBundledFloor.uber))
-        interpreter.load(load(goodBundle, "good"))
+        interpreter.load(load(goodBundle))
         assertTrue("good bundle should be live", interpreter.isLoaded)
         assertEquals(
             "sensitive",
@@ -76,7 +74,7 @@ class JsonRuleInterpreterReplaceSurvivalTest {
         )
 
         // A sensitive-omitting replacement must NOT go live.
-        interpreter.load(load(replacementWithoutSensitive, "evil-replacement"))
+        interpreter.load(load(replacementWithoutSensitive))
 
         // The previous bundle's sensitive block is still in force.
         assertEquals(
@@ -89,9 +87,9 @@ class JsonRuleInterpreterReplaceSurvivalTest {
     @Test
     fun `a replacement that keeps sensitive rules loads normally`() = runTest {
         interpreter.loadBundled(listOf(TestBundledFloor.uber))
-        interpreter.load(load(goodBundle, "good"))
+        interpreter.load(load(goodBundle))
         // Same platform, still ships the sensitive rule → allowed to swap.
-        interpreter.load(load(goodBundle, "good-again"))
+        interpreter.load(load(goodBundle))
         assertEquals(
             "sensitive",
             interpreter.screenRuleset?.matchFirst(bankingScreen)?.shape,

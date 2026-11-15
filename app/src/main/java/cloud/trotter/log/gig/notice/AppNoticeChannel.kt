@@ -61,6 +61,7 @@ object AppNoticeChannel {
      * @param tag posts under `(tag, notificationId)` so one id can carry one notice per key (#1560:
      *   the recognition notice, one per platform wire). Null posts with the id alone, as every other
      *   notice does.
+     * @param actions buttons under the text (#640: the recognition notice's rules actions).
      */
     fun postNotice(
         context: Context,
@@ -70,6 +71,7 @@ object AppNoticeChannel {
         title: String,
         text: String,
         tag: String? = null,
+        actions: List<NotificationCompat.Action> = emptyList(),
     ) {
         ensure(context, notificationManager)
 
@@ -89,6 +91,7 @@ object AppNoticeChannel {
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setContentIntent(contentIntent)
             .setAutoCancel(true)
+            .apply { actions.forEach(::addAction) }
             .build()
 
         if (tag == null) {

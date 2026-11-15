@@ -159,4 +159,18 @@
     </plurals>
     <string name="census_review_status_shift">Puedes responder cuando termine tu turno.</string>
     <string name="census_review_status_not_open">La revisión se abre a un teléfono que lleva %1$d días en el censo, registró %2$d turnos y tuvo un turno en %3$d de los últimos %4$d días.</string>
+    <!-- #640 Ajustes > Reglas de reconocimiento. -->
+    <string name="rules_updates_title">Reglas de reconocimiento</string>
+    <string name="rules_updates_settings_subtitle">Actualizaciones de las pantallas que lee gig.log, desactivadas de forma predeterminada</string>
+    <string name="rules_updates_toggle">Mantener al día las reglas de reconocimiento</string>
+    <string name="rules_updates_disclosure">Las reglas de reconocimiento le indican a gig.log cómo leer las pantallas de cada app de reparto. Con esta opción activada, cuando se abre una app de reparto, gig.log busca reglas nuevas, como máximo una vez por hora. Las reglas se descargan del sitio de gig.log en GitHub. GitHub y su proveedor de red, Fastly, ven la dirección IP de este teléfono y la hora de cada búsqueda, así que pueden saber cuándo este teléfono abre una app de reparto. Una búsqueda no envía ninguna cuenta, ID de instalación ni ubicación. Con esta opción desactivada, gig.log usa las reglas incluidas en la app y solo busca cuando tocas Buscar ahora.</string>
+    <string name="rules_updates_in_use_label">Reglas en uso</string>
+    <string name="rules_updates_in_use_built_in">Incluidas</string>
+    <string name="rules_updates_last_check_label">Última búsqueda</string>
+    <string name="rules_updates_last_check_format">%1$s, %2$s</string>
+    <string name="rules_updates_outcome_updated">reglas nuevas en uso</string>
+    <string name="rules_updates_outcome_no_update">sin novedades</string>
+    <string name="rules_updates_outcome_failed">no se pudo buscar</string>
+    <string name="rules_updates_check_now">Buscar ahora</string>
+    <string name="rules_updates_checking">Buscando</string>
 </resources>

@@ -53,11 +53,9 @@ class LoadAtomicityTest {
     private fun interpreter(grants: RuleCapabilityGrants) =
         JsonRuleInterpreter(context = mock<Context>(), capabilityGrants = grants)
 
-    // #416: load() only accepts signature-verified bytes. Sign with a runtime keypair
-    // (no committed private key) and mint through the real RulesetVerifier.
-    private val signingKey = TestRulesetSigning.keyPair()
-    private fun verified(json: String, source: String) =
-        TestRulesetSigning.verified(json, source, signingKey)
+    // load() only accepts a VerifiedRulesetBytes, minted through the test rules feed (#640).
+    private fun verified(json: String) =
+        TestRulesFeed.verified(json)
 
     // --- Rule-file builders (minimal valid doordash bundles) ---------------------
 
@@ -112,7 +110,7 @@ class LoadAtomicityTest {
         val grants = RecordingGrants()
         val interp = onFloor(grants)
         val floor = interp.generation
-        interp.load(verified(dupIdFile, "cdn:rules/doordash"))
+        interp.load(verified(dupIdFile))
 
         assertSame("a rejected file must not go live", floor, interp.generation)
         assertEquals(
@@ -126,7 +124,7 @@ class LoadAtomicityTest {
         val grants = RecordingGrants()
         val interp = onFloor(grants)
         val floor = interp.generation
-        interp.load(verified(noSensitiveFile, "cdn:rules/doordash"))
+        interp.load(verified(noSensitiveFile))
 
         assertSame("a coverage-rejected file must not go live", floor, interp.generation)
         assertEquals("reconcile ran despite the sensitive-coverage reject", 1, grants.reconcileCalls.size)
@@ -136,7 +134,7 @@ class LoadAtomicityTest {
     fun `a valid file goes live and reconciles exactly once (positive control)`() = runTest {
         val grants = RecordingGrants()
         val interp = onFloor(grants)
-        interp.load(verified(validFile, "cdn:rules/doordash"))
+        interp.load(verified(validFile))
 
         assertNotNull("a valid bundle must go live", interp.screenRuleset?.ruleById("doordash.screen.sensitive"))
         assertEquals("valid load reconciles exactly once", 2, grants.reconcileCalls.size)
@@ -147,12 +145,12 @@ class LoadAtomicityTest {
         val grants = RecordingGrants()
         val interp = onFloor(grants)
 
-        interp.load(verified(validFile, "cdn:rules/doordash"))
+        interp.load(verified(validFile))
         val goodRuleset = interp.screenRuleset
         assertEquals(2, grants.reconcileCalls.size)
 
         // The failing load must be a no-op on the live state.
-        interp.load(verified(dupIdFile, "cdn:rules/doordash"))
+        interp.load(verified(dupIdFile))
 
         assertTrue("previous good bundle must remain live", interp.isLoaded)
         assertEquals("live ruleset must be unchanged by the rejected load", goodRuleset, interp.screenRuleset)
@@ -163,7 +161,7 @@ class LoadAtomicityTest {
     fun `a remote file before any bundled generation is refused`() = runTest {
         val grants = RecordingGrants()
         val interp = interpreter(grants)
-        interp.load(verified(validFile, "cdn:rules/doordash"))
+        interp.load(verified(validFile))
 
         assertFalse("no remote generation without the bundled floor", interp.isLoaded)
         assertTrue(grants.reconcileCalls.isEmpty())

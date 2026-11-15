@@ -407,6 +407,9 @@ dependencies {
     implementation(libs.reorderable)
     testImplementation(libs.androidx.work.testing)
     testImplementation(libs.okhttp)
+    // #640: the rules feed acceptance tests fetch from an HTTPS fake server, as :core:data's feed tests do.
+    testImplementation(libs.okhttp.mockwebserver)
+    testImplementation(libs.okhttp.tls)
     testImplementation(libs.robolectric)
     // #1463: Roborazzi captures the key-screen screenshots (ScreenshotsTest, run only with -PscreenShots=true).
     testImplementation(libs.roborazzi)
@@ -507,4 +510,12 @@ val censusReleaseClasspath = tasks.register<CensusReleaseClasspath>("censusRelea
 
 tasks.withType<Test>().configureEach {
     dependsOn(censusReleaseClasspath)
+}
+
+// #640: the test-only gig.log rules pin (root `feedTestPins`, see the root build file) goes first on the unit-test
+// classpath, ahead of feed-contract's shipped pin file. Prepended at execution so AGP's own classpath wiring stays as is.
+val feedTestPins = files(rootProject.layout.buildDirectory.dir("feed-test-pins"))
+tasks.withType<Test>().configureEach {
+    dependsOn(":feedTestPins")
+    doFirst { classpath = feedTestPins + classpath }
 }

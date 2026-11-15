@@ -17,6 +17,39 @@ tasks.register("feedContractTest") {
     dependsOn(gradle.includedBuild("feed-contract").task(":test"))
 }
 
+// #640: a test-only gig.log rules pin. The shipped pin file (feed-contract/pins/feed-pins.json) holds no rules key yet,
+// and FeedTrust takes gig.log's keys only from the classpath file `/feed-pins.json`, with no call that takes a key. So
+// the unit tests of :core:pipeline and :app put this generated pin file AHEAD of the shipped one on their test
+// classpath and sign rules feeds with its private keys: the real verifier path, through FeedTrust.shipped(). The keys
+// are generated here, once per clean build, never committed, and never reach an APK (a test classpath only).
+abstract class FeedTestPins : DefaultTask() {
+    @get:OutputDirectory
+    abstract val outDir: DirectoryProperty
+
+    @TaskAction
+    fun run() {
+        val generator = java.security.KeyPairGenerator.getInstance("EC").apply {
+            initialize(java.security.spec.ECGenParameterSpec("secp256r1"))
+        }
+        val primary = generator.generateKeyPair()
+        val backup = generator.generateKeyPair()
+        val b64 = java.util.Base64.getEncoder()
+        val out = outDir.get().asFile
+        out.deleteRecursively()
+        File(out, "feed-test-keys").mkdirs()
+        File(out, "feed-pins.json").writeText(
+            """{"format_version":1,"feeds":{"rules":{"epoch":1,"primary":"${b64.encodeToString(primary.public.encoded)}",""" +
+                """"backup":"${b64.encodeToString(backup.public.encoded)}"}}}""",
+        )
+        File(out, "feed-test-keys/rules-primary.pk8").writeText(b64.encodeToString(primary.private.encoded))
+        File(out, "feed-test-keys/rules-backup.pk8").writeText(b64.encodeToString(backup.private.encoded))
+    }
+}
+tasks.register<FeedTestPins>("feedTestPins") {
+    description = "Generates the test-only gig.log rules pin and its keys for unit tests (#640)."
+    outDir.set(layout.buildDirectory.dir("feed-test-pins"))
+}
+
 // Warnings-as-errors gate (#841): every Kotlin compilation in every module fails on ANY
 // warning — hand-written or KSP-generated. A deliberate exception (e.g. the minSdk-30
 // areBubblesAllowed fallback) gets a site-local @Suppress with a justifying comment, never

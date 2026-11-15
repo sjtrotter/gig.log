@@ -21,6 +21,7 @@ import cloud.trotter.log.gig.domain.model.vehicle.vehicleType
 import cloud.trotter.log.gig.ui.components.vehicle.vehicleTypeLabel
 import cloud.trotter.log.gig.ui.components.vehicle.displayName
 import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.AttachMoney
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.ChevronRight
@@ -126,6 +127,12 @@ fun SettingsHomeContent(
                     title = stringResource(R.string.settings_home_item_gig_apps_title),
                     subtitle = stringResource(R.string.settings_home_item_gig_apps_subtitle),
                     onClick = { onNavigate(Screen.PlatformSettings.route) }
+                )
+                SettingsNavItem(
+                    icon = Icons.Default.Sync,
+                    title = stringResource(SettingsR.string.rules_updates_title),
+                    subtitle = stringResource(SettingsR.string.rules_updates_settings_subtitle),
+                    onClick = { onNavigate(Screen.RulesUpdates.route) }
                 )
             }
 

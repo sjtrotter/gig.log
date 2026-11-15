@@ -458,15 +458,21 @@ match time is bounded by construction rather than by a watchdog, an evaluation f
 exception each boundary answers safely (redaction masks the whole node, never ships it raw), the Perl classes
 translated at compile so device class semantics are approximated rather than silently narrowed to ASCII (residual
 differences listed in #1053 / ADR-0010), fail-closed validation, and, for any remote rule source, signature and
-integrity verification before compile. `RulesetVerifier` (ECDSA P-256/SHA-256, no new crypto dependency) gates
-`JsonRuleInterpreter.load`, which accepts only a `VerifiedRulesetBytes` that only a passing signature check can mint,
-so compiling remote bytes is structurally unreachable without verification against the configured source's pinned
-key. Bundled assets are exempt (the APK signature covers them). Signing tooling: `matchers/tools/`.
+integrity verification before compile. The loader (`JsonRuleInterpreter.prepareGeneration`, `load`) accepts only a
+`VerifiedRulesetBytes`, and since #640 its one mint is `VerifiedRulesetBytes.fromFeedFile(file)`: a `VerifiedFeedFile`
+exists only after the feed contract verified its manifest (ECDSA P-256/SHA-256, no new crypto dependency) against the
+epoch pinned for gig.log's rules feed and its bytes matched that manifest, and the mint takes only `feed == rules`,
+only from gig.log in v1 (custom rules sources are #1570), named for a platform through `Platform.fromWire` (never
+`Unknown`), strict UTF-8 and under the compiler's file cap. A file whose `platform_id` names another platform than its
+name rejects the generation. Compiling remote bytes is therefore structurally unreachable without verification
+against gig.log's pinned key. Bundled assets are exempt (the APK signature covers them). Signing tooling:
+`matchers/tools/`. History: #416 built `RulesetVerifier` (`verify`, `fromConfig`, per-source pinned keys) and its
+comments still said `asset:` sources auto-grant; neither call ever had a production caller, auto-grant ended with #843,
+and #640 deleted both with the stale comments, keeping only `VerifiedRulesetBytes`.
 
-The signed feed format that the rules feed (#640) will deliver through, and its one verifier, live in the Apache-2.0
+The signed feed format the rules feed delivers through, and its one verifier, live in the Apache-2.0
 `feed-contract/` included build (#1563, ADR-0013 §9). It owns the 1 MB rules file cap,
-`FeedLimits.MAX_RULES_FILE_BYTES`; the compiler's `MAX_RULE_FILE_BYTES` and `RulesetCrypto.MAX_BUNDLE_BYTES` reference
-it. A rules payload keeps the compiler's bounds (`parseBoundedJson`, depth 64), not the feed reader's depth-4 bound,
+`FeedLimits.MAX_RULES_FILE_BYTES`; the compiler's `MAX_RULE_FILE_BYTES` references it. A rules payload keeps the compiler's bounds (`parseBoundedJson`, depth 64), not the feed reader's depth-4 bound,
 and `FeedRulesPayloadBoundsTest` holds the shipped rules to the feed's per-file and per-generation caps.
 
 
@@ -483,7 +489,8 @@ publishing run under one `Mutex`, so a load suspended in reconciliation cannot b
 generation live with the other's capabilities (`ActivationSerializationTest`). A `Prepared` carries its interpreter,
 the floor it was built on and the activation revision it saw; `activate` refuses it (false, with a WARN, live
 generation untouched) when any of them is no longer current, so a candidate prepared on an older floor, or before
-another generation went live, cannot replace a newer one. Fetching rules through the feed channel (below) is #640.
+another generation went live, cannot replace a newer one. The rules client (below, #640) fetches rules through the
+feed channel and goes through `prepareGeneration` and `activate`.
 
 - **Generation.** `RuleGeneration` is one immutable set of screen, click and notification rulesets, and it is the
   redaction source (`ScreenRedactionSource`). `ObservationClassifier.classifyFrame` reads the live generation once
@@ -545,8 +552,8 @@ another generation went live, cannot replace a newer one. Fetching rules through
 
 One layer fetches, keeps and swaps every signed feed (fuel, constants, rules): `FeedClient` in `:core:network`
 (`network.feed`) and `FeedRepository` in `:core:data` (`data.feed`). Every check of the bytes is `feed-contract`'s;
-this layer re-implements none. It has no consumer yet: fuel is #1566, rules #640, constants #695. Nothing calls
-`refresh`, and gig.log's pin file holds no key, so this build sends no feed request.
+this layer re-implements none. Its first consumer is the rules client (#640, below); fuel is #1566, constants #695.
+gig.log's pin file holds no key yet (#641 pins the rules key), so this build sends no feed request.
 
 - **Transport.** `FeedClient` GETs `<feedsUrl><feed>/envelope.json`, then each payload at `<feed>/<sha256>.json`,
   built from the signed hash under the envelope's own feed directory (a non-hex name is refused before any request).
@@ -570,8 +577,9 @@ this layer re-implements none. It has no consumer yet: fuel is #1566, rules #640
   Residual (open, #1566): the fuel switch's `StateFlow` mirrors DataStore through a collector, so for the moment
   between the stored switch turning off and that collector running, both checks still read on and one request can
   start. #1566 closes it at the owner: the code that saves the fuel switch also sets the in-memory value at once.
-  Each feed has its own switch: the fuel switch never gates rules or constants, and rules get their own consent with
-  the rules client (#640). A `OneShotGrant` (an explicit user act, such as "Resume auto") is one call's parameter, bound to its feed and source
+  Each feed has its own switch: the fuel switch never gates rules or constants, and the rules switch (#640, below)
+  gates the rules feed only. The rules switch has no such window: its in-memory value turns off at the instant it is
+  saved. A `OneShotGrant` (an explicit user act, such as "Resume auto") is one call's parameter, bound to its feed and source
   id. It is dead from the moment the coroutine that minted it starts cancelling: the refresh holds a child job of
   that owner, which is cancelled at the onset, before the owner finishes. One call spends it, so a cancelled act,
   another feed, another source or a second use is refused before any request. It is never stored, so a background
@@ -612,3 +620,56 @@ this layer re-implements none. It has no consumer yet: fuel is #1566, rules #640
   is kept for a refusal, a stage rejection or a storage failure, for a start-up fallback, and for a commit whose
   final directory sync failed; DEBUG for a fetch failure, a denial or a cancellation. No `Feeds` line carries a URL,
   an address, a header or a body.
+
+## The rules client (#640)
+
+`RulesFeed` (`:app` `feed/`) is the rules feed's consumer: a `FeedRepository<RulesCandidate>` for `Feed.RULES` with
+`RulesFeedStager`, cached under `noBackupFilesDir/feeds` (`RulesFeedModule`). Before #640 the bundled rules were the
+only rules and nothing fetched; ADR-0013, design-r3 § App client and plan-r7 § Track C (C2) record the design.
+
+- **Stage, commit, activate.** The stager mints each fetched file through `VerifiedRulesetBytes.fromFeedFile` and
+  prepares the whole generation with `prepareGeneration` on the bundled floor, without activating; a rejected
+  generation is `FeedError.Stage("generation_rejected")` and nothing changes. After the channel commits, `RulesFeed`
+  hands the prepared generation to `activate`; one prepared on a generation that is no longer live is prepared again
+  on the current one. A file named for no platform this build carries is never fetched (`readsFile`). A refused or
+  rejected generation, or a crash, keeps the rules in use: the last good generation, else the bundled rules.
+  Start-up runs after `loadDefaults` (the floor), re-verifies the cache and activates it with no network. The APK's
+  own generation mark (`FEED_SEQUENCE`, `FEED_DIGEST`) comes with the publishing half (#641); until then
+  `FeedRepository` has no bundled mark for rules.
+- **When it checks.** On a delivery app coming to the front (`PlatformForegrounds`, `:core:pipeline`: each
+  `TYPE_WINDOW_STATE_CHANGED` from a package the platform registry resolves; the listener already admits only the
+  platforms the dasher turned on), at most once an hour (`RulesFeedSwitch.claimForegroundCheck`, stamped at the
+  start and persisted, so a restart buys no extra check), and only with the switch on; and on the dasher's tap. The
+  foreground stream is conflated so a running check never holds back the accessibility event stream. There is no
+  worker and no other caller of `refresh`.
+- **The switch.** "Keep recognition rules up to date" (`RulesFeedSwitch`, `:core:data`, stored in
+  `datastore/rules_feed.preferences_pb`, excluded from backup and transfer), off by default in every build;
+  `AppFeedPolicy` gives it to the rules feed only. Its in-memory `StateFlow` is the value every `RefreshGate` check
+  reads, and it turns off at the instant the switch is saved: `set(false)` sets it before anything suspends, then
+  saves, on every path that saves the switch (Settings > Recognition rules, the setup wizard's question, the notice
+  action and the phone wipe, which calls `forgetNow` just before Android clears storage). No collector mirrors the
+  store: it is read once at start, and a choice made before that read lands wins. Turning on counts once saved, and an
+  "off" that lands while an "on" is saving stays off. `RulesFeedSwitchTest` turns it off with the store's write held
+  back and shows the next exchange refused with no request at the server. This closes the #1565 consent window for
+  rules; the fuel switch's own window stays open until #1566.
+- **Taps.** "Check now" (Settings) and the notice's "Check for new rules" run `checkNow`: with the switch off, on a
+  `OneShotGrant` minted in the tap's coroutine (the Settings screen's scope, or one application-scope coroutine per
+  notice tap), so a tap allows one fetch; with it on, a plain refresh that skips the hourly limit. The notice's "Keep
+  rules up to date" (`enableAndCheck`) saves the switch on, then checks at once.
+- **The notice actions** (`RecognitionHealthNotifier`, `RulesNoticeActionReceiver`, `RulesNoticeActionHandler`). Every
+  recognition notice carries "Check for new rules", plus "Keep rules up to date" while the switch is off, but only in
+  a build whose pin file trusts a gig.log rules key; before #641 a check could only fail, so no button is shown. The
+  answer replaces the notice under its platform tag while the incident it was posted for is still open: "New
+  recognition rules in use", "Couldn't check for new rules", or "No update yet for <platform>", which posts at most
+  once per incident (the incident's wire and `openedAt`, in memory, as incidents are).
+- **Capabilities.** A remote rule's capabilities are stamped `feed:gig.log/<wire>` and reconciled before the generation
+  goes live; like every capability they land undecided (#843).
+- **Tests.** Gig.log's pins come only from the shipped pin file, which holds no rules key, and `FeedTrust` takes no key
+  from outside. So the root task `feedTestPins` generates a test-only gig.log rules epoch (`feed-pins.json`) and its
+  private keys into the root build directory, once per clean build and never committed, and the unit-test tasks of
+  `:core:pipeline` and `:app` put it first on their classpath: the tests sign with those keys and verify through
+  `FeedTrust.shipped()` and the real verifier. `TestRulesFeed` (`:core:pipeline` test fixtures) builds signed rules
+  feeds. `RulesFeedTest` holds the #640 acceptance list against an HTTPS fake server answering for gig.log's host.
+- **Logging** (tag `Feeds`): INFO when a rules generation goes live (sequence, file count), when the switch is saved
+  and for a notice check's outcome; WARN when a generation cannot go live, a rules file is refused (tag `Rules`) or the
+  switch cannot be read or saved. No line carries a URL, an address or file content.

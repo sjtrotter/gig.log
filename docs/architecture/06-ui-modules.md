@@ -23,7 +23,7 @@ path — a ViewModel that injects `:app`/`:core:state` machinery (`DashboardView
 doctrine), and a multi-consumer string/color is duplicated by choice into a module with the `:app`
 copy authoritative, documented at both sites (`common_content_desc_back` #99, `@color/white` #854).
 
-Shipped: `:feature:settings` (#99); `:feature:setup` (#98 — wizard VM/model/step cards; #1359 slice A made `wizard/vehicle/VehicleDraft` +
+Shipped: `:feature:settings` (#99; #640 added Settings > Recognition rules, `RulesUpdatesScreen`, whose `RulesUpdatesToggle` the `:app`-hosted wizard step `RULES_UPDATES` renders too, so the switch and its timing disclosure have one owner; the wizard keeps the answer in `WizardState.keepRulesUpToDate` and saves it through `RulesFeedSwitch` with the rest); `:feature:setup` (#98 — wizard VM/model/step cards; #1359 slice A made `wizard/vehicle/VehicleDraft` +
 `VehicleDraftState` the vehicle form's one owner — the EPA lookup cascade, type/class/powertrain and EV-trim changes, and the
 five vehicle-shaped user-set fields — rendered by `VehicleCard(step, draft, actions, …)`, hosted by the wizard and by the
 `:app` Garage editor (`ui/main/settings/garage/`, #1359 slice B); the Garage list is an Android two-part row

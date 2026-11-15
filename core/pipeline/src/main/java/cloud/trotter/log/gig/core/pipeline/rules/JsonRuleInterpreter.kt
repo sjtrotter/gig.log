@@ -106,13 +106,14 @@ class JsonRuleInterpreter @Inject constructor(
     }
 
     /**
-     * Prepare one **signature-verified** remote file on the bundled floor and make the result live
-     * (the side-load path today; the rules feed, #640, later).
+     * Prepare one **signature-verified** remote file on the bundled floor and make the result live.
+     * The rules feed (#640) goes through [prepareGeneration] and [activate] instead, so it can commit
+     * a generation between the two.
      *
      * Fail-closed BY CONSTRUCTION (#416): a remote file is a [RuleFile.Remote], built only from a
-     * [VerifiedRulesetBytes], which [RulesetVerifier] mints ONLY after a detached signature over the
-     * exact bytes verifies against the configured source's pinned public key. Bundled asset files
-     * skip this: they load via [loadDefaults], already covered by the APK signature.
+     * [VerifiedRulesetBytes], which only [VerifiedRulesetBytes.fromFeedFile] mints, from a file the
+     * feed contract verified against the pinned key. Bundled asset files skip this: they load via
+     * [loadDefaults], already covered by the APK signature.
      */
     suspend fun load(verified: VerifiedRulesetBytes) {
         activation.withLock {

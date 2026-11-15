@@ -63,6 +63,8 @@ dependencies {
     implementation(project(":domain"))
     // #1160 review AD4: the test-fixture DiagnosticSkeletonBuilder reads the domain model.
     testFixturesImplementation(project(":domain"))
+    // #640: TestRulesFeed builds signed rules feeds for this module's tests and :app's.
+    testFixturesImplementation(libs.kotlinx.serialization.json)
 
     ksp(libs.hilt.compiler)
 
@@ -238,4 +240,12 @@ androidComponents {
             ReviewRuleWords::outDir,
         )
     }
+}
+
+// #640: the test-only gig.log rules pin (root `feedTestPins`, see the root build file) goes first on the unit-test
+// classpath, ahead of feed-contract's shipped pin file. Prepended at execution so AGP's own classpath wiring stays as is.
+val feedTestPins = files(rootProject.layout.buildDirectory.dir("feed-test-pins"))
+tasks.withType<Test>().configureEach {
+    dependsOn(":feedTestPins")
+    doFirst { classpath = feedTestPins + classpath }
 }

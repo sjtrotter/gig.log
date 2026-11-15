@@ -43,9 +43,8 @@ class ActivationSerializationTest {
         override suspend fun setGranted(key: String, granted: Boolean) = Unit
     }
 
-    private val signingKey = TestRulesetSigning.keyPair()
 
-    private fun offerFile(name: String) = TestRulesetSigning.verified(
+    private fun offerFile(name: String) = TestRulesFeed.verified(
         """
         { "format_version": 2, "platform_id": "doordash.driver", "screens": [
           { "id": "doordash.screen.sensitive.known", "priority": 0, "overrideable": false,
@@ -54,8 +53,6 @@ class ActivationSerializationTest {
             "bind": { "acceptButton": { "find": { "hasText": "Accept" } } },
             "require": { "exists": { "hasText": "Accept" } } } ] }
         """.trimIndent(),
-        "test:rules",
-        signingKey,
     )
 
     @Test

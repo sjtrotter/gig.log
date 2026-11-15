@@ -114,6 +114,8 @@ sealed class Screen(val route: String) {
     data object GeneralSettings : Screen("settings/general")
     data object DeveloperSettings : Screen("settings/developer")
     data object PlatformSettings : Screen("settings/platforms")
+    /** #640 — "Keep recognition rules up to date" and Check now. */
+    data object RulesUpdates : Screen("settings/rules")
 
     companion object {
         /**
@@ -131,7 +133,7 @@ sealed class Screen(val route: String) {
             CensusReviewer.route,
             Garage.route, VehicleAdd.route,
             EconomySettings.route, GeneralSettings.route, DeveloperSettings.route,
-            PlatformSettings.route,
+            PlatformSettings.route, RulesUpdates.route,
         ) }
 
         /**

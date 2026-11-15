@@ -17,6 +17,7 @@ import cloud.trotter.log.gig.feature.settings.DeveloperSettingsScreen
 import cloud.trotter.log.gig.feature.settings.EvidenceSettingsScreen
 import cloud.trotter.log.gig.feature.settings.GeneralSettingsScreen
 import cloud.trotter.log.gig.feature.settings.PlatformSettingsScreen
+import cloud.trotter.log.gig.feature.settings.RulesUpdatesScreen
 import cloud.trotter.log.gig.feature.settings.PrivacyScreen
 import cloud.trotter.log.gig.feature.settings.StrategySettingsScreen
 import cloud.trotter.log.gig.ui.main.analytics.AnalyticsScreen
@@ -146,5 +147,6 @@ private fun MainScreen(route: String, actions: MainNavActions) {
         Screen.GeneralSettings.route -> GeneralSettingsScreen(onBack = actions::back)
         Screen.DeveloperSettings.route -> DeveloperSettingsScreen(onBack = actions::back)
         Screen.PlatformSettings.route -> PlatformSettingsScreen(onBack = actions::back)
+        Screen.RulesUpdates.route -> RulesUpdatesScreen(onBack = actions::back)
     }
 }

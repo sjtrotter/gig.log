@@ -11,7 +11,9 @@ import cloud.trotter.log.gig.core.data.census.CensusSpool
 import cloud.trotter.log.gig.core.data.census.CensusUploadLock
 import cloud.trotter.log.gig.core.data.census.KeystoreSealer
 import cloud.trotter.log.gig.core.data.census.PersistentHealthSink
+import cloud.trotter.log.gig.core.data.feed.RulesFeedSwitch
 import cloud.trotter.log.gig.core.data.settings.DevSettingsRepository
+import cloud.trotter.log.gig.core.datastore.feed.RulesFeedDataSource
 import cloud.trotter.log.gig.core.datastore.settings.DevSettingsDataSource
 import cloud.trotter.log.gig.core.network.census.CensusApiFactory
 import cloud.trotter.log.gig.core.network.census.CensusSentObserver
@@ -26,6 +28,7 @@ import cloud.trotter.log.gig.domain.capture.CensusEnvelopeSink
 import cloud.trotter.log.gig.domain.census.CensusDeletion
 import cloud.trotter.log.gig.domain.census.CensusUploadScheduler
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
@@ -60,6 +63,8 @@ import java.io.File
 @OptIn(ExperimentalCoroutinesApi::class)
 class PhoneWipeTest {
     @get:Rule val tmp = TemporaryFolder()
+
+    private val rulesFeed = RulesFeedSwitch(RulesFeedDataSource(MemoryPreferences()), CoroutineScope(Dispatchers.Unconfined))
 
     private class MemoryPreferences : DataStore<Preferences> {
         override val data = MutableStateFlow(emptyPreferences())
@@ -135,7 +140,7 @@ class PhoneWipeTest {
             },
             backgroundScope, "test",
         )
-        return PhoneWipe(credentials, deletion, preferences, lock, sealer, clearer, intent(), backgroundScope)
+        return PhoneWipe(credentials, deletion, preferences, lock, sealer, clearer, intent(), backgroundScope, rulesFeed)
     }
 
     /** The wipe runs on the background (application) scope, which advanceUntilIdle does not wait for. */

@@ -39,7 +39,6 @@ class FeedRulesPayloadBoundsTest {
             assertNotNull("${file.name} is not a platform wire", Platform.fromWire(file.nameWithoutExtension))
         }
         assertTrue(files.sumOf { it.length() } <= Feed.RULES.maxGenerationBytes)
-        assertEquals("one owner of the 1 MB cap", FeedLimits.MAX_RULES_FILE_BYTES, RulesetCrypto.MAX_BUNDLE_BYTES)
         assertEquals(FeedLimits.MAX_RULES_FILE_BYTES, MAX_RULE_FILE_BYTES)
     }
 

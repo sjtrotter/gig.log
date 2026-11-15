@@ -7,6 +7,7 @@ import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.LocalGasStation
 import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.TrackChanges
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -68,5 +69,13 @@ enum class WizardStep(
         titleRes = R.string.wizard_title_distance,
         descriptionRes = R.string.wizard_desc_distance,
         icon = Icons.Default.DirectionsCar
+    ),
+
+    // #640: one question, off by default. Its toggle and disclosure are Settings' own (RulesUpdatesToggle).
+    RULES_UPDATES(
+        phase = WizardPhase.STRATEGY,
+        titleRes = R.string.wizard_title_rules,
+        descriptionRes = R.string.wizard_desc_rules,
+        icon = Icons.Default.Sync
     )
 }

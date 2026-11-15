@@ -3,9 +3,19 @@ package cloud.trotter.log.gig.notice
 import android.app.Notification
 import android.app.NotificationManager
 import androidx.core.app.NotificationCompat
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.emptyPreferences
+import cloud.trotter.log.gig.core.data.feed.RulesCheckOutcome
+import cloud.trotter.log.gig.core.data.feed.RulesFeedSwitch
+import cloud.trotter.log.gig.core.datastore.feed.RulesFeedDataSource
 import cloud.trotter.log.gig.domain.pipeline.ParseRotCause
 import cloud.trotter.log.gig.domain.pipeline.RecognitionIncident
 import cloud.trotter.log.gig.domain.state.Platform
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -14,6 +24,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.mockito.kotlin.any
 import org.mockito.kotlin.argumentCaptor
+import org.mockito.kotlin.atLeastOnce
 import org.mockito.kotlin.doThrow
 import org.mockito.kotlin.eq
 import org.mockito.kotlin.mock
@@ -40,10 +51,26 @@ class RecognitionHealthNotifierTest {
         notificationManager = mock()
     }
 
+    private val rulesStore = object : DataStore<Preferences> {
+        override val data = MutableStateFlow(emptyPreferences())
+        override suspend fun updateData(transform: suspend (Preferences) -> Preferences): Preferences =
+            transform(data.value).also { data.value = it }
+    }
+    private val rulesSwitch = RulesFeedSwitch(RulesFeedDataSource(rulesStore), CoroutineScope(Dispatchers.Unconfined))
+
     private fun notifier() = RecognitionHealthNotifier(
         context = RuntimeEnvironment.getApplication(),
         notificationManager = notificationManager,
+        rulesSwitch = rulesSwitch,
     )
+
+    private fun posted(): Notification {
+        val cap = argumentCaptor<Notification>()
+        verify(notificationManager, atLeastOnce()).notify(any<String>(), any<Int>(), cap.capture())
+        return cap.lastValue
+    }
+
+    private fun Notification.actionTitles(): List<String> = actions.orEmpty().map { it.title.toString() }
 
     private fun unrecognized(wire: String) =
         RecognitionIncident(platformWire = wire, openedAt = 1_000L, screensUnrecognized = true)
@@ -121,6 +148,32 @@ class RecognitionHealthNotifierTest {
                 AppNoticeChannel.Ids.TTS_ENGINE_HEALTH,
             ).size,
         )
+    }
+
+    @Test
+    fun `the notice offers a rules check, and Keep rules up to date while that switch is off`() {
+        // The unit-test classpath pins a test gig.log rules key (root feedTestPins), so this build "trusts" a rules feed.
+        notifier().onIncidentNotice(offerRot("doordash"))
+        assertEquals(listOf("Check for new rules", "Keep rules up to date"), posted().actionTitles())
+
+        runBlocking { assertTrue(rulesSwitch.set(true)) }
+        notifier().onIncidentNotice(offerRot("uber"))
+        assertEquals(listOf("Check for new rules"), posted().actionTitles())
+    }
+
+    @Test
+    fun `the answers to a rules check replace the notice under its own tag`() {
+        val notifier = notifier()
+        notifier.onRulesCheck(offerRot("doordash"), RulesCheckOutcome.NO_UPDATE)
+        val noUpdate = posted()
+        assertEquals("No update yet for DoorDash", noUpdate.extras.getCharSequence(NotificationCompat.EXTRA_TITLE).toString())
+        assertEquals(listOf("Check for new rules", "Keep rules up to date"), noUpdate.actionTitles())
+
+        notifier.onRulesCheck(offerRot("doordash"), RulesCheckOutcome.UPDATED)
+        val updated = posted()
+        assertEquals("New recognition rules in use", updated.extras.getCharSequence(NotificationCompat.EXTRA_TITLE).toString())
+        assertTrue(updated.actionTitles().isEmpty())
+        verify(notificationManager, atLeastOnce()).notify(eq("doordash"), eq(AppNoticeChannel.Ids.RECOGNITION_HEALTH), any<Notification>())
     }
 
     @Test
