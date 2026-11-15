@@ -326,6 +326,52 @@ class FeedRepositoryTest {
         assertEquals("gen-${gen1.sequence}", pointer().first)
     }
 
+    @Test fun `a parent sync that failed once is retried on the next commit`() = runBlocking {
+        val synced = mutableListOf<File>()
+        var failedOnce = false
+        val repository = repo(sync = DirectorySync { dir, _ ->
+            if (dir == tmp.root && !failedOnce) {
+                failedOnce = true
+                throw IOException("sync")
+            }
+            synced += dir
+        })
+        repository.start()
+        site.publish(Feed.FUEL, gen1)
+        assertEquals(FeedRefresh.Failed(FeedError.Storage), repository.refresh())
+        assertTrue("the feeds directory was created before its parent sync failed", root().isDirectory)
+        assertEquals(FeedRefresh.Accepted(gen1.sequence), repository.refresh())
+        assertTrue("the retry syncs the feeds directory into its parent", tmp.root in synced)
+        assertTrue(File(root(), fuel.source.id) in synced)
+    }
+
+    @Test fun `a pointer write that fails after the generation's rename still commits it`() = runBlocking {
+        val repository = repo()
+        repository.start()
+        accept(repository, gen1)
+        File(feedDir(), "CURRENT.tmp").mkdir()
+        File(feedDir(), "CURRENT.tmp/x").writeText("x")
+        accept(repository, gen2)
+        assertEquals("two", repository.state.value.value)
+        val restarted = repo()
+        restarted.start()
+        assertEquals("two", restarted.state.value.value)
+    }
+
+    @Test fun `a pointer rename that fails after the generation's rename still commits it`() = runBlocking {
+        val repository = repo()
+        repository.start()
+        accept(repository, gen1)
+        File(feedDir(), "CURRENT").delete()
+        File(feedDir(), "CURRENT").mkdir()
+        File(feedDir(), "CURRENT/x").writeText("x")
+        accept(repository, gen2)
+        assertEquals("two", repository.state.value.value)
+        val restarted = repo()
+        restarted.start()
+        assertEquals("two", restarted.state.value.value)
+    }
+
     @Test fun `a cached generation of a contract this build cannot read is not restored, and the high-water stays`() =
         runBlocking {
             val first = repo()

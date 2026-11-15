@@ -21,7 +21,12 @@ class FeedClientTest {
     private val server = fake.server
     private val delays = mutableListOf<Int>()
     private val client = FeedClient(fake.client) { retry -> delays += retry }
-    private val open = FeedGate { true }
+    private fun gate(isOpen: () -> Boolean = { true }, allows: suspend () -> Boolean = { true }) = object : FeedGate {
+        override suspend fun allows(): Boolean = allows()
+        override fun isOpen(): Boolean = isOpen()
+    }
+
+    private val open = gate()
     private val sha = "ab".repeat(32)
 
     @After fun tearDown() = fake.close()
@@ -126,11 +131,11 @@ class FeedClientTest {
     }
 
     @Test fun `the gate is asked before every request, retries included`() = runTest {
-        assertEquals(FeedReply.Denied, client.envelope(custom(), Feed.FUEL, etag = null, gate = FeedGate { false }))
+        assertEquals(FeedReply.Denied, client.envelope(custom(), Feed.FUEL, etag = null, gate = gate(allows = { false })))
         assertEquals(0, server.requestCount)
 
         respond(404)
-        val reply = client.payload(custom(), Feed.FUEL, sha, 2, FeedGate { server.requestCount == 0 })
+        val reply = client.payload(custom(), Feed.FUEL, sha, 2, gate(allows = { server.requestCount == 0 }))
         assertEquals(FeedReply.Denied, reply)
         assertEquals(1, server.requestCount)
     }
@@ -138,7 +143,7 @@ class FeedClientTest {
     @Test fun `a 503 with Retry-After 0 is never followed up by OkHttp, so the gate decides the retry`() = runTest {
         server.enqueue(MockResponse.Builder().code(503).addHeader("Retry-After", "0").build())
         respond(200, "{}")
-        val reply = client.payload(custom(), Feed.FUEL, sha, 2, FeedGate { server.requestCount == 0 })
+        val reply = client.payload(custom(), Feed.FUEL, sha, 2, gate(allows = { server.requestCount == 0 }))
         assertEquals("revoked between the 503 and its retry", FeedReply.Denied, reply)
         assertEquals(1, server.requestCount)
     }
@@ -151,13 +156,22 @@ class FeedClientTest {
         assertEquals(listOf(1, 2), delays)
     }
 
-    @Test fun `the gate is asked again at every network exchange`() = runTest {
+    @Test fun `the gate's snapshot is read at every network exchange, and closed sends nothing`() = runTest {
         respond(200, "{}")
-        var asks = 0
-        val reply = client.payload(custom(), Feed.FUEL, sha, 2, FeedGate { ++asks == 1 })
-        assertEquals("the second ask is the exchange itself", FeedReply.Denied, reply)
-        assertEquals(2, asks)
+        var reads = 0
+        val reply = client.payload(custom(), Feed.FUEL, sha, 2, gate(isOpen = { reads++; false }))
+        assertEquals(FeedReply.Denied, reply)
+        assertEquals(1, reads)
         assertEquals(0, server.requestCount)
+    }
+
+    @Test fun `the suspending check never runs on OkHttp's thread`() = runTest {
+        respond(200, "{}")
+        val threads = mutableListOf<String>()
+        val reply = client.payload(custom(), Feed.FUEL, sha, 2, gate(allows = { threads += Thread.currentThread().name; true }))
+        assertTrue(reply is FeedReply.Body)
+        assertEquals("asked once, before the request", 1, threads.size)
+        assertTrue(threads.none { it.contains("OkHttp") })
     }
 
     @Test fun `a body larger than its cap is refused`() = runTest {

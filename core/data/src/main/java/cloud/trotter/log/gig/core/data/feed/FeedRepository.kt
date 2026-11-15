@@ -42,6 +42,7 @@ import java.io.File
 import java.io.IOException
 import java.time.Clock
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * The on-phone cache and swap of one signed feed (#1565, design-r3 § App client, ADR-0013). One instance per feed;
@@ -130,7 +131,7 @@ class FeedRepository<T> internal constructor(
             return denied(source, "consent")
         }
         try {
-            return watched(source, grant) { lockFor(source).withLock { fetch(source, grant) } }
+            return watched(source, grant) { gate -> lockFor(source).withLock { fetch(source, grant, gate) } }
         } finally {
             grant?.spend()
         }
@@ -145,17 +146,31 @@ class FeedRepository<T> internal constructor(
      * Runs [work] and cancels it the moment the feature turns off, the source changes, or the grant's owner starts
      * cancelling (a child job of the owner is cancelled at that onset, before the owner finishes).
      */
-    private suspend fun watched(source: FeedSource, grant: OneShotGrant?, work: suspend () -> FeedRefresh): FeedRefresh =
+    private suspend fun watched(
+        source: FeedSource,
+        grant: OneShotGrant?,
+        work: suspend (FeedGate) -> FeedRefresh,
+    ): FeedRefresh =
         coroutineScope {
-            val job = async { work() }
+            // The gate's snapshot for OkHttp's thread: closed once the watcher or the owner revokes, or the grant dies.
+            val revoked = AtomicBoolean(false)
+            val gate = object : FeedGate {
+                override suspend fun allows(): Boolean = allowed(source, grant)
+                override fun isOpen(): Boolean = !revoked.get() && grant?.isLive() != false
+            }
+            val job = async { work(gate) }
             val watcher = launch {
                 // firstOrNull: a policy whose flows complete (a fixed switch) can never revoke, so the watch just ends.
                 combine(policy.enabled(feed), policy.source(feed)) { on, current -> current == source && (grant != null || on) }
                     .firstOrNull { allowed -> !allowed } ?: return@launch
+                revoked.set(true)
                 job.cancel(Revoked())
             }
             val ownerChild = grant?.ownerChild()
-            val ownerWatch = ownerChild?.invokeOnCompletion { job.cancel(Revoked()) }
+            val ownerWatch = ownerChild?.invokeOnCompletion {
+                revoked.set(true)
+                job.cancel(Revoked())
+            }
             try {
                 job.await()
             } catch (e: CancellationException) {
@@ -181,7 +196,7 @@ class FeedRepository<T> internal constructor(
 
     private fun store(source: FeedSource) = FeedStore(root, source.id, feed, directorySync, crashPoints)
 
-    private suspend fun fetch(source: FeedSource, grant: OneShotGrant?): FeedRefresh {
+    private suspend fun fetch(source: FeedSource, grant: OneShotGrant?, gate: FeedGate): FeedRefresh {
         val store = store(source)
         val newest = withContext(Dispatchers.IO) { store.generations().firstOrNull() }
         // A generation committed but never activated (or a source not loaded yet) is loaded before anything else.
@@ -192,7 +207,6 @@ class FeedRepository<T> internal constructor(
         }
         // Today's pin file holds no gig.log key, so nothing is requested from a source this build cannot verify.
         if (!trust.trusts(source.id, feed)) return fail(source, FeedError.Refused(FeedRefusal.NoTrustedEpoch))
-        val gate = FeedGate { allowed(source, grant) }
 
         val envelope = when (val reply = client.envelope(source, feed, current.etag, gate)) {
             is FeedReply.Body -> reply
@@ -263,7 +277,7 @@ class FeedRepository<T> internal constructor(
             withContext(Dispatchers.IO) { store.discard(stage) }
             return fail(source, FeedError.Storage)
         }
-        if (!durable) Timber.tag(TAG).w("feed commit not proven durable feed=%s source=%s", feed.wire, source.id)
+        if (!durable) Timber.tag(TAG).w("feed pointer not proven after commit feed=%s source=%s", feed.wire, source.id)
         crashPoints.reached(CrashPoint.COMMITTED)
 
         // Committed: a crash or a revocation from here on activates it from disk at the next load.

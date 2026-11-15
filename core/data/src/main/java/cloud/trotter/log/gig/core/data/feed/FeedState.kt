@@ -89,8 +89,8 @@ internal fun interface CrashPoints {
 }
 
 /**
- * Makes a directory's entries durable. [published] is true for the sync after the pointer moved: a failure there is
- * logged and the commit stands; any earlier failure aborts the commit.
+ * Makes a directory's entries durable. [published] is true for a sync after the commit point (the generation's
+ * synced rename): a failure there is logged and the commit stands; any earlier failure aborts the commit.
  */
 internal fun interface DirectorySync {
     @Throws(IOException::class)

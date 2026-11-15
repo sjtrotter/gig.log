@@ -3,7 +3,6 @@ package cloud.trotter.log.gig.core.network.feed
 import cloud.trotter.feed.contract.Feed
 import cloud.trotter.feed.contract.FeedLimits
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.Call
 import okhttp3.Callback
@@ -16,9 +15,13 @@ import okhttp3.Response
 import java.io.IOException
 import kotlin.coroutines.resume
 
-/** Asked before every request, retries included; false sends nothing (#1565: consent before every request). */
-fun interface FeedGate {
+/** Consent for one fetch (#1565: checked before every request). Closed or absent sends nothing. */
+interface FeedGate {
+    /** The full check, asked before every request, retries included. It may suspend. */
     suspend fun allows(): Boolean
+
+    /** A non-blocking snapshot, read inside every network exchange on OkHttp's thread. It must not block. */
+    fun isOpen(): Boolean
 }
 
 /** Why a feed request has no body. Never carries a URL, a header or server text. */
@@ -70,8 +73,8 @@ sealed interface FeedReply {
  *   across IP addresses, so a custom source gets no conditional request and its ETag is dropped.
  * - **Two retries a minute apart** ([RETRY_DELAY_MS]) on a 404, a 408, a 429, a 5xx or a transport failure, which
  *   covers an edge cache that has the new envelope before its payloads. A redirect or any other status is final.
- * - [FeedGate] is asked before every request, retries included, and again inside every network exchange, so no
- *   follow-up OkHttp makes on its own runs without it.
+ * - [FeedGate.allows] is asked before every request, retries included, and [FeedGate.isOpen] inside every network
+ *   exchange, so no follow-up OkHttp makes on its own runs without it.
  *
  * @param retryDelay waits before retry `n` (1 or 2); tests pass one that does not wait.
  */
@@ -86,10 +89,10 @@ class FeedClient(
         .cache(null)
         .retryOnConnectionFailure(false)
         .addNetworkInterceptor { chain ->
-            // Every exchange asks the gate again (fail closed), so no follow-up OkHttp makes on its own skips it, and
-            // Retry-After is dropped so OkHttp never replays a 503 itself: the only retries are this client's.
+            // Every exchange reads the gate's snapshot (fail closed), so no follow-up OkHttp makes on its own skips it,
+            // and Retry-After is dropped so OkHttp never replays a 503 itself: the only retries are this client's.
             val gate = chain.request().tag(FeedGate::class.java)
-            if (gate == null || !runBlocking { gate.allows() }) throw GateClosed()
+            if (gate == null || !gate.isOpen()) throw GateClosed()
             val response = chain.proceed(chain.request())
             if (response.header(RETRY_AFTER) == null) response else response.newBuilder().removeHeader(RETRY_AFTER).build()
         }

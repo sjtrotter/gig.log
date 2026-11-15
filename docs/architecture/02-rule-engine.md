@@ -556,8 +556,10 @@ this layer re-implements none. It has no consumer yet: fuel is #1566, rules #640
   never handed back or stored, because an operator-chosen ETag could follow a phone across IP addresses (security
   X8). A 404, 408, 429, 5xx or transport failure is retried twice, a minute apart (`RETRY_DELAY_MS`, injected in
   tests), which covers an edge cache that holds the new envelope before its payloads. A 3xx or any other status is
-  final. OkHttp makes no retry of its own: a network interceptor asks the gate again at every exchange (fail closed)
-  and drops `Retry-After`, which OkHttp otherwise follows on a `503 Retry-After: 0` without asking anyone. Bodies are
+  final. OkHttp makes no retry of its own: a network interceptor reads the gate's non-blocking snapshot
+  (`FeedGate.isOpen`, closed once the work is revoked) at every exchange, fail closed, and drops `Retry-After`, which
+  OkHttp otherwise follows on a `503 Retry-After: 0` without asking anyone. The suspending check (`FeedGate.allows`)
+  runs only on the caller's coroutine, before each request. Bodies are
   read bounded (`FeedLimits.readBounded`). The feed client has no HTTP logging in any build (`ClientProfile.Feed`),
   since a request line carries the source's URL.
 - **Consent.** `FeedPolicy` gives each feed's switch and source (`AppFeedPolicy`: fuel follows `isGasPriceAuto`;
@@ -574,9 +576,11 @@ this layer re-implements none. It has no consumer yet: fuel is #1566, rules #640
   signed manifest; the digest; the high-water with the digest that set it; the consumer's carry, such as fuel
   anchors or retained constant years; gig.log's ETag), renames the stage to `gen-<sequence>/`, then replaces
   `CURRENT`, which holds the pointer pair (current, previous), through an fsynced temp file and an atomic rename. A
-  `gen-` directory therefore exists only once committed, and a `stage-` directory is never committed state. Each
-  created directory and each rename is synced into its parent (`DirectorySync`): a sync failure before `CURRENT`
-  moves aborts the commit and nothing is published; after it, a WARN, and the commit stands. The high-water and the
+  `gen-` directory therefore exists only once committed, and a `stage-` directory is never committed state. The
+  commit point is that rename, synced into its parent: any failure before it aborts and leaves no `gen-` directory;
+  a failure of the pointer's write, rename or sync after it is a WARN, and the commit stands (the next load
+  activates the newest generation). Every commit re-syncs the whole directory chain from `feeds/` down into its
+  parents (`DirectorySync`), so a parent sync that failed on an earlier try is retried. The high-water and the
   carry live only in `meta.json`, never in DataStore. One mutex per (source, feed) serializes start-up and every
   refresh.
 - **The disk decides the high-water.** Before every acceptance decision the repository reads it fresh from disk: the

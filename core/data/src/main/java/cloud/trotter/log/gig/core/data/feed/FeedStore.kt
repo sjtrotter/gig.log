@@ -45,12 +45,12 @@ internal data class FeedPointers(val current: String, val previous: String?)
  * - `CURRENT` holds the pointer pair (current, previous), replaced through an fsynced temp file and an atomic rename,
  *   so a crash leaves the old pair or the new one, never half of one.
  *
- * Each created directory and each rename is made durable through [sync]. A sync failure before `CURRENT` moves aborts
- * the commit; after it, [commit] reports the commit as not proven durable and the commit stands. The caller serializes
- * every call for one (source, feed).
+ * Each directory and each rename is made durable through [sync]. The commit point is the stage's rename to its
+ * generation, once synced: any failure before it aborts and leaves no `gen-` directory; a pointer failure after it is
+ * reported by [commit] and the commit stands. The caller serializes every call for one (source, feed).
  */
 internal class FeedStore(
-    root: File,
+    private val root: File,
     sourceId: String,
     feed: Feed,
     private val sync: DirectorySync,
@@ -142,9 +142,11 @@ internal class FeedStore(
     }
 
     /**
-     * Commits [stage] as `gen-<sequence>`: its `meta.json`, the rename to its generation name, then the pointer pair
-     * (the new generation, [previous]). Returns false when the pointer moved but its directory sync failed; the commit
-     * stands. Throws, with the pointer pair unchanged, when anything before the pointer's rename fails.
+     * Commits [stage] as `gen-<sequence>`: its `meta.json`, then the rename to its generation name and that rename's
+     * directory sync, which is the commit point. The pointer pair (the new generation, [previous]) follows. Throws,
+     * leaving no `gen-` directory, when anything before the commit point fails. Returns false when anything after it
+     * failed (the pointer's write, rename or sync): the generation is committed all the same, and the next load
+     * activates it as the newest.
      */
     @Throws(IOException::class)
     fun commit(stage: String, meta: FeedMeta, previous: String?): Boolean {
@@ -163,10 +165,10 @@ internal class FeedStore(
         val pair = JsonObject(
             mapOf("current" to JsonPrimitive(genDir.name), "previous" to (previous?.let(::JsonPrimitive) ?: JsonNull)),
         )
-        val tmp = File(dir, CURRENT + TMP)
-        writeDurably(tmp, pair.toString().toByteArray(Charsets.UTF_8))
-        Files.move(tmp.toPath(), File(dir, CURRENT).toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
         return try {
+            val tmp = File(dir, CURRENT + TMP)
+            writeDurably(tmp, pair.toString().toByteArray(Charsets.UTF_8))
+            Files.move(tmp.toPath(), File(dir, CURRENT).toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
             sync.sync(dir, published = true)
             true
         } catch (_: IOException) {
@@ -189,11 +191,14 @@ internal class FeedStore(
         File(dir, stage).deleteRecursively()
     }
 
-    /** Creates [target] and each missing ancestor, syncing each new entry into its parent. */
+    /**
+     * Creates [target] and each missing ancestor up to [root], then syncs every one of them into its parent, those
+     * that already existed included: a directory whose parent sync failed on an earlier try is proven durable now.
+     */
     private fun makeDirectories(target: File) {
-        val missing = generateSequence(target) { it.parentFile }.takeWhile { !it.exists() }.toList().asReversed()
-        for (directory in missing) {
-            if (!directory.mkdir() && !directory.isDirectory) throw IOException("mkdir")
+        val chain = generateSequence(target) { it.parentFile }.takeWhile { it != root.parentFile }.toList().asReversed()
+        for (directory in chain) {
+            if (!directory.isDirectory && !directory.mkdir()) throw IOException("mkdir")
             sync.sync(directory.parentFile ?: throw IOException("no parent"), published = false)
         }
     }
