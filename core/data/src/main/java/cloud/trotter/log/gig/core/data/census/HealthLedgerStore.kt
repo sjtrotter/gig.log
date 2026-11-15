@@ -51,7 +51,10 @@ class HealthLedgerStore @Inject constructor(
             document["rows"]?.jsonObject?.forEach { (key, value) ->
                 try {
                     HealthKey.parse(key)
-                    put(key, Json.decodeFromJsonElement<HealthRow>(value))
+                    val row = Json.decodeFromJsonElement<HealthRow>(value)
+                    // #1571: a sample attempt() could not have built is a corrupt row, like any other decode failure.
+                    require(HealthLedger.wellFormedSamples(row))
+                    put(key, row)
                 } catch (_: IllegalArgumentException) {
                     stats.healthCorrupt.incrementAndGet()
                 }

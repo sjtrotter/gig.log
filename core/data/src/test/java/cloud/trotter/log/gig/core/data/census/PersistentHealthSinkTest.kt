@@ -305,4 +305,52 @@ class PersistentHealthSinkTest {
         store.clear()
         assertEquals(HealthLedger(generation = 4), store.load())
     }
+
+    // ── #1571: the parse sample ─────────────────────────────────────────
+
+    @Test fun `parse attempts land on the start frame's row as a sample, and null versions skip`() = runTest {
+        val sink = sink()
+        val rule = "doordash.screen.delivery_receipt"
+        sink.onScreen(timestamp, key.platform, key.platformAppVersion, rule)
+        sink.onParseAttempt(timestamp, key.platform, key.platformAppVersion, rule, shortfall = false)
+        sink.onParseAttempt(timestamp + 1, key.platform, key.platformAppVersion, rule, shortfall = true)
+        sink.onParseAttempt(timestamp + 2, key.platform, null, rule, shortfall = true)
+        sink.onParseAttempt(timestamp + 3, key.platform, key.platformAppVersion, "Bad Rule", shortfall = true)
+        val ledger = sink.snapshot()
+        val row = ledger.rows.getValue(key.toString())
+        assertEquals(mapOf(rule to "01"), row.parseSamples)
+        assertEquals(1, row.admitted)
+        assertEquals("attempts are not screens", 1L, stats.healthRecorded.get())
+        assertEquals("an ignored attempt is not a refused row", 0L, stats.healthRowsRefused.get())
+        assertEquals(1L, stats.healthSkippedNoVersion.get())
+        assertEquals(ledger, store.load())
+    }
+
+    @Test fun `a persisted row from before the sample decodes with no samples`() = runTest {
+        memory.memory.value = emptyPreferences().toMutablePreferences().apply {
+            this[stringPreferencesKey("ledger_json")] =
+                """{"generation":5,"rows":{"$key":{"admitted":1,"ruleCounts":{"doordash.screen.offer":1},"revision":1}}}"""
+        }
+        val row = store.load().rows.getValue(key.toString())
+        assertEquals(emptyMap<String, String>(), row.parseSamples)
+        assertEquals(0L, stats.healthCorrupt.get())
+    }
+
+    @Test fun `a malformed persisted sample is a corrupt row and valid rows stay`() = runTest {
+        val other = key.copy(platformAppVersion = "7.2")
+        val bad = listOf(
+            "{\"parseSamples\":{\"doordash.screen.offer\":\"0102\"}}",
+            "{\"parseSamples\":{\"doordash.screen.offer\":\"${"0".repeat(21)}\"}}",
+            "{\"parseSamples\":{\"doordash.screen.offer\":3}}",
+        )
+        for (badRow in bad) {
+            memory.memory.value = emptyPreferences().toMutablePreferences().apply {
+                this[stringPreferencesKey("ledger_json")] =
+                    """{"generation":5,"rows":{"$other":$badRow,"$key":{"unknown":1,"revision":1}}}"""
+            }
+            val corruptBefore = stats.healthCorrupt.get()
+            assertEquals(HealthLedger(generation = 5).record(key, null), store.load())
+            assertEquals(badRow, corruptBefore + 1, stats.healthCorrupt.get())
+        }
+    }
 }

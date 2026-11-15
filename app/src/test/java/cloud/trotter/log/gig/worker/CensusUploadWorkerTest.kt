@@ -11,6 +11,7 @@ import androidx.work.WorkerParameters
 import androidx.work.testing.TestListenableWorkerBuilder
 import cloud.trotter.census.contract.auth.Bearer
 import cloud.trotter.census.contract.auth.InstallSecret
+import cloud.trotter.census.contract.health.HealthReportSchema
 import cloud.trotter.log.gig.core.data.census.CensusCredentialStore
 import cloud.trotter.log.gig.core.data.census.CensusCredentialStore.Credential
 import cloud.trotter.log.gig.core.data.census.CensusSpool
@@ -1154,6 +1155,39 @@ class CensusUploadWorkerTest {
         } finally {
             Timber.uproot(tree)
         }
+    }
+
+    @Test fun `a report that fits only without its parse tallies is sent without them`() = runTest {
+        val h = harness()
+        h.initialize()
+        val key = h.health()
+        // #1571: ruleCounts the bound allows alone, beside a full parse map that pushes the report past it.
+        val rules = (0 until 150).associate { "doordash.screen.rule_$it" to 1 }
+        val samples = (0 until HealthReportSchema.MAX_PARSE_SHORTFALL_RULES)
+            .associate { "doordash.screen.parse_rule_$it" to "0".repeat(HealthReportSchema.PARSE_SAMPLE) }
+        h.healthSink.apply {
+            it.copy(rows = mapOf(key.toString() to HealthRow(admitted = 150, ruleCounts = rules, revision = 9, parseSamples = samples)))
+        }
+        h.api.healthResults += HealthResult.Accepted(1, emptyMap())
+        h.worker().doWork()
+        val body = h.api.healthBodies.single().single()
+        assertFalse(body.contains("parseShortfall"))
+        assertTrue(body.contains("\"doordash.screen.rule_149\":1"))
+        assertEquals(0L, h.stats.healthOversized.get())
+        val row = h.healthStore.load().rows.getValue(key.toString())
+        assertEquals(9L, row.postedRevision)
+    }
+
+    @Test fun `a report that fits with its parse tallies carries them`() = runTest {
+        val h = harness()
+        h.initialize()
+        val key = h.health()
+        h.healthSink.apply { ledger ->
+            (0 until HealthReportSchema.PARSE_SAMPLE).fold(ledger) { l, i -> l.attempt(key, "doordash.screen.offer", i < 3) }
+        }
+        h.api.healthResults += HealthResult.Accepted(1, emptyMap())
+        h.worker().doWork()
+        assertTrue(h.api.healthBodies.single().single().endsWith(""","parseShortfall":{"doordash.screen.offer":3}}"""))
     }
 
     @Test fun `health 429 ends the run without uploading skeletons or changing their deadline`() = runTest {

@@ -1444,6 +1444,21 @@ actions: "Check for new rules" (one check per tap) and "Keep rules up to date", 
 rules (`02-rule-engine.md` § The rules client). Log lines (tag `RecognitionHealth`, PII-free): WARN on a rot
 trip, INFO on a clear, a notice and a close, one WARN per process for a failed load or save.
 
+**#1571: the parse sample in the health report.** `ParseRotTracker.step` also returns **eligible attempts**, the
+visits behind the daily health report's per-rule `parseShortfall` field. Visits on both sides, so the ratio does not
+follow how many frames a screen admits: a confirmed rot occurrence is one shortfall attempt (a tripped rule's later
+confirmed visits included; a pre-render occurrence is none), and a healthy frame of R whose winning branch's shape
+declares required fields (`Observation.Screen.matchedShape`, a diagnostic passenger set by the classifier) is one
+healthy attempt when the platform's previous admitted frame was not a healthy frame of R and R's last healthy-visit
+start is unset or ≥ 3 000 ms earlier, so a pre-render visit is one healthy attempt. Each attempt carries its start
+frame's time and platform app version; the attempts never feed the trip or clear counts. The monitor hands them to
+`HealthSink.onParseAttempt` outside its lock, fail-open like `onScreen`. `HealthLedger.attempt` keeps each rule's last
+`HealthReportSchema.PARSE_SAMPLE` (20) attempts of the row as a `0`/`1` string (rule ids the contract grammar and the
+96-character bound accept, at most 128 rules a row; a malformed persisted sample makes the row corrupt on load), and
+`reportJson` sends `{rule: shortfalls among the last 20}` for each rule with a full sample, leaving the field off when
+none has one, so such a row encodes byte for byte as before. A report too large with the field goes without it
+(`HealthLedger.sendableReportJson`); only one too large without it is refused. Screens only.
+
 ## Carried from the CLAUDE.md summary (trim v4)
 
 - `SensitiveTextMarkers` drops the dasher's banking screens using `cloud.trotter.census.contract.SensitiveMarkerData`

@@ -33,7 +33,8 @@ class PersistentHealthSink @Inject constructor(
     @ApplicationScope scope: CoroutineScope,
     @param:IoDispatcher private val io: CoroutineDispatcher,
 ) : HealthSink {
-    private data class Event(val key: HealthKey, val ruleId: String?, val trip: Boolean, val epoch: Long)
+    private enum class Kind { SCREEN, TRIP, HEALTHY_ATTEMPT, SHORTFALL_ATTEMPT }
+    private data class Event(val key: HealthKey, val ruleId: String?, val kind: Kind, val epoch: Long)
     private val mutex = Mutex()
     private val ingress = Any()
     private var epoch = 0L
@@ -80,12 +81,23 @@ class PersistentHealthSink @Inject constructor(
     }
 
     override fun onScreen(timestampMillis: Long, platformWire: String, platformAppVersion: String?, ruleId: String?) =
-        enqueue(timestampMillis, platformWire, platformAppVersion, ruleId, trip = false)
+        enqueue(timestampMillis, platformWire, platformAppVersion, ruleId, Kind.SCREEN)
 
     override fun onTrip(timestampMillis: Long, platformWire: String, platformAppVersion: String?) =
-        enqueue(timestampMillis, platformWire, platformAppVersion, null, trip = true)
+        enqueue(timestampMillis, platformWire, platformAppVersion, null, Kind.TRIP)
 
-    private fun enqueue(timestampMillis: Long, platformWire: String, version: String?, ruleId: String?, trip: Boolean) {
+    override fun onParseAttempt(
+        timestampMillis: Long,
+        platformWire: String,
+        platformAppVersion: String?,
+        ruleId: String,
+        shortfall: Boolean,
+    ) = enqueue(
+        timestampMillis, platformWire, platformAppVersion, ruleId,
+        if (shortfall) Kind.SHORTFALL_ATTEMPT else Kind.HEALTHY_ATTEMPT,
+    )
+
+    private fun enqueue(timestampMillis: Long, platformWire: String, version: String?, ruleId: String?, kind: Kind) {
         try {
             if (version == null) {
                 stats.healthSkippedNoVersion.incrementAndGet()
@@ -97,7 +109,7 @@ class PersistentHealthSink @Inject constructor(
             }
             val day = Instant.ofEpochMilli(timestampMillis).atZone(ZoneOffset.UTC).toLocalDate().toString()
             synchronized(ingress) {
-                if (!channel.trySend(Event(HealthKey(day, platformWire, version), ruleId, trip, epoch)).isSuccess) {
+                if (!channel.trySend(Event(HealthKey(day, platformWire, version), ruleId, kind, epoch)).isSuccess) {
                     stats.healthDropped.incrementAndGet()
                 }
             }
@@ -170,13 +182,19 @@ class PersistentHealthSink @Inject constructor(
                 dirty = true
             }
             val current = requireNotNull(ledger)
-            val updated = if (event.trip) current.trip(event.key) else current.record(event.key, event.ruleId)
+            val updated = when (event.kind) {
+                Kind.SCREEN -> current.record(event.key, event.ruleId)
+                Kind.TRIP -> current.trip(event.key)
+                Kind.HEALTHY_ATTEMPT -> current.attempt(event.key, requireNotNull(event.ruleId), shortfall = false)
+                Kind.SHORTFALL_ATTEMPT -> current.attempt(event.key, requireNotNull(event.ruleId), shortfall = true)
+            }
             if (updated === current) {
-                stats.healthRowsRefused.incrementAndGet()
+                // An attempt the ledger ignores (an unreportable rule id, the per-row rule cap) is not a refused row.
+                if (event.kind == Kind.SCREEN || event.kind == Kind.TRIP) stats.healthRowsRefused.incrementAndGet()
                 return@repeat
             }
             ledger = updated
-            if (!event.trip) stats.healthRecorded.incrementAndGet()
+            if (event.kind == Kind.SCREEN) stats.healthRecorded.incrementAndGet()
             dirty = true
         }
     }

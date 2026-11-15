@@ -4,7 +4,6 @@ import android.content.Context
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
-import cloud.trotter.census.contract.health.HealthReportSchema
 import cloud.trotter.log.gig.BuildConfig
 import cloud.trotter.log.gig.core.data.census.CensusCredentialStore
 import cloud.trotter.log.gig.core.data.census.CensusCredentialStore.Credential
@@ -368,9 +367,10 @@ class CensusUploadWorker @AssistedInject constructor(
                 record.set(CensusRunOutcome.DISABLED)
                 return Result.success()
             }
-            val json = HealthLedger.reportJson(key, row, BuildConfig.VERSION_NAME,
+            // #1571: a report too large with its parse tallies goes without them; only one too large without is refused.
+            val json = HealthLedger.sendableReportJson(key, row, BuildConfig.VERSION_NAME,
                 rulesetVersion = metadataProvider.current().rulesetReleaseTag ?: "dev")
-            if (!HealthReportSchema.fits(json)) {
+            if (json == null) {
                 healthSink.apply { if (it.generation == ledger.generation) it.markRefused(key, row.revision) else it }
                 stats.healthOversized.incrementAndGet()
                 Timber.tag(TAG).w("census health oversized day=%s", key.day)

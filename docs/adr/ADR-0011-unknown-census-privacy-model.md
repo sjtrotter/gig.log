@@ -547,6 +547,10 @@ would sample per customer (#1620). The skeleton `day` becomes a UTC day; today i
 (`SkeletonPublisher.kt:67`), a slow time-zone signal (#1619). Uploads run once a day at a random time, never on a
 recognition trigger (§21). Clicks come in as references into a screen's skeleton (§19, #1634).
 
+**Amended 2026-11-15 (#1571).** The daily health report also carries, per recognition rule, how many of its last 20
+checked screens that UTC day lacked a field the rule needs (`parseShortfall`, 0..20); a rule checked fewer than 20
+times that day is left out, and no totals are sent.
+
 **Cluster fingerprint** (`CensusFingerprint`) is a NEW function in the contract module, not
 today's `stableHash`: `stableHash` is a 32-bit `Int` (`31 * h + child`, collidable, and the type of
 `FrameGate.admit(contentHash)` and of every fixture's `contentHash`), which the server cannot
@@ -1253,7 +1257,7 @@ once §12 to §21 ship.
 
 **Diagnostics, not work history** (#1571, census#64). No count of shifts, deliveries or active days leaves the phone;
 contributor eligibility is a yes or no (§15). The health report carries no count that reads as work done. Its `trips`
-field stays: it counts recognition-health alarm trips (`HealthLedger.kt:26`, `RecognitionHealthMonitor.kt:155-157`),
+field stays: it counts recognition-health alarm trips (`HealthLedger.kt:27`, `RecognitionHealthMonitor.kt:172-174`),
 not deliveries. Its per-rule shortfall count is a tally over a fixed sample
 of the rule's last 20 eligible attempts of the day (`HealthReportSchema.PARSE_SAMPLE`, 0..20), and a rule with fewer than
 20 is left out, so no attempt total or denominator is sent (census#64); the report carries the rules generation. Skeletons are sampled once per layout variant
