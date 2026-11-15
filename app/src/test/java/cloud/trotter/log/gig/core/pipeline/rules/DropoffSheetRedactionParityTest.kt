@@ -427,6 +427,82 @@ class DropoffSheetRedactionParityTest {
         }
     }
 
+    // ------------------------------------------------------------------ #1650
+
+    private val buildingNameDigitFind = Json.parseToJsonElement(
+        """{"all": [{"hasPrecedingSiblingText": "Building Name"}, {"hasTextMatchesRegex": "\\d"}]}""",
+    )
+    private val buildingNameHashFind = Json.parseToJsonElement("""{"hasPrecedingSiblingText": "Building Name"}""")
+
+    private fun isSubpremiseLabelEntry(entry: JsonObject): Boolean =
+        precedingSiblingTextsIn(entry["find"]!!).any { it == "Apt/Suite" || it == "Apt/Suite:" }
+
+    private fun isBuildingNameDigitPlain(entry: JsonObject): Boolean =
+        entry.keys - "comment" == setOf("find", "plainMask") && entry["find"] == buildingNameDigitFind &&
+            entry["plainMask"]?.jsonPrimitive?.booleanOrNull == true
+
+    private fun isBuildingNameHash(entry: JsonObject): Boolean =
+        entry.keys - "comment" == setOf("find") && entry["find"] == buildingNameHashFind
+
+    @Test
+    fun `every dropoff rule with the #1039 subpremise entries declares the Building Name pair after them (#1650)`() {
+        val withSubpremise = dropoffRedactEntries().filter { (_, redact) -> redact.any { isSubpremiseLabelEntry(it) } }
+        assertTrue("the dropoff family declares the #1039 subpremise entries", withSubpremise.isNotEmpty())
+        val failures = withSubpremise.mapNotNull { (id, redact) ->
+            val subpremise = redact.indexOfLast { isSubpremiseLabelEntry(it) }
+            val digitPlain = redact.indexOfFirst { isBuildingNameDigitPlain(it) }
+            val hash = redact.indexOfFirst { isBuildingNameHash(it) }
+            when {
+                digitPlain < 0 || hash < 0 -> "$id: no Building Name pair (digit plain at $digitPlain, hash at $hash)"
+                !(subpremise < digitPlain && digitPlain < hash) ->
+                    "$id: subpremise at $subpremise, digit plain at $digitPlain, hash at $hash"
+                else -> null
+            }
+        }
+        assertEquals(
+            "a rule that declares the #1039 subpremise entries also declares the Building Name pair, " +
+                "subpremise first, then the digit plain mask, then the hash mask",
+            emptyList<String>(),
+            failures,
+        )
+    }
+
+    @Test
+    fun `dropoff_handoff masks a Building Name value on the handoff layout and keeps the label (#1650)`() {
+        val handoff = screens.ruleById("doordash.screen.dropoff_handoff")!!
+        fun maskedRows(value: String): List<UiNode> {
+            val tree = UiNode(
+                className = "android.widget.FrameLayout",
+                viewIdResourceName = "com.doordash.driverapp:id/drop_off_workflow_host_fragment",
+                children = listOf(
+                    UiNode(
+                        className = "android.view.View",
+                        children = listOf(
+                            tv("Hand it to customer"),
+                            tv("123 Sample St"),
+                            tv("Sampleville, TX 75001"),
+                            tv("Building Name"),
+                            tv(value),
+                            tv("Mark as delivered"),
+                        ),
+                    ),
+                ),
+            ).restoreParents()
+            assertEquals("the synthetic frame is the handoff screen", "dropoff_handoff", intentOf(tree))
+            val masked = handoff.redact.apply(tree)
+            assertFalse("'$value' must not persist", serialize(masked).contains(value))
+            return masked.children[0].children
+        }
+
+        val named = maskedRows("Maple Court Apartments")
+        assertTrue("an all-letter value hash-masks; got '${named[4].text}'", WHOLE_MASK_HEX.matches(named[4].text!!))
+        assertEquals("the label stays raw", "Building Name", named[3].text)
+
+        val numbered = maskedRows("Bldg 7")
+        assertEquals("a digit-bearing value plain-masks", "[redacted]", numbered[4].text)
+        assertEquals("the label stays raw", "Building Name", numbered[3].text)
+    }
+
     @Test
     fun `an id-BEARING address block reaching the sheet rule still masks — a recognized frame has no ID_MARKERS backstop (r1)`() {
         // Synthetic: the widened anchor (Directions alone) claims a frame whose block kept its view ids.
