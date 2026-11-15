@@ -103,6 +103,6 @@ class AccessibilityDisclosureCompositionTest {
     }
 
     private companion object {
-        const val CENSUS_CLAUSE = "gig.log itself sends nothing it reads off your phone unless you turn on the census"
+        const val CENSUS_CLAUSE = "gig.log itself sends nothing it reads from your screens unless you turn on the census"
     }
 }
