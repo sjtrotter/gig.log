@@ -566,8 +566,12 @@ this layer re-implements none. It has no consumer yet: fuel is #1566, rules #640
   `isGasPriceAuto`, started eagerly and off until read; constants and rules are off until their own switches exist;
   every feed reads gig.log's site until #1567). One `RefreshGate` per refresh reads their current values, so the
   check before every request (retries included), the one inside every network exchange, and the ones before staging,
-  committing and activating never disagree and never wait for a watcher. A watcher cancels the work as soon as the switch turns off or the source changes. A
-  `OneShotGrant` (an explicit user act, such as "Resume auto") is one call's parameter, bound to its feed and source
+  committing and activating never disagree and never wait for a watcher. A watcher cancels the work as soon as the switch turns off or the source changes.
+  Residual (open, #1566): the fuel switch's `StateFlow` mirrors DataStore through a collector, so for the moment
+  between the stored switch turning off and that collector running, both checks still read on and one request can
+  start. #1566 closes it at the owner: the code that saves the fuel switch also sets the in-memory value at once.
+  Each feed has its own switch: the fuel switch never gates rules or constants, and rules get their own consent with
+  the rules client (#640). A `OneShotGrant` (an explicit user act, such as "Resume auto") is one call's parameter, bound to its feed and source
   id. It is dead from the moment the coroutine that minted it starts cancelling: the refresh holds a child job of
   that owner, which is cancelled at the onset, before the owner finishes. One call spends it, so a cancelled act,
   another feed, another source or a second use is refused before any request. It is never stored, so a background
