@@ -557,15 +557,16 @@ this layer re-implements none. It has no consumer yet: fuel is #1566, rules #640
   X8). A 404, 408, 429, 5xx or transport failure is retried twice, a minute apart (`RETRY_DELAY_MS`, injected in
   tests), which covers an edge cache that holds the new envelope before its payloads. A 3xx or any other status is
   final. OkHttp makes no retry of its own: a network interceptor reads the gate's non-blocking snapshot
-  (`FeedGate.isOpen`, closed once the work is revoked) at every exchange, fail closed, and drops `Retry-After`, which
+  (`FeedGate.isOpen`) at every exchange, fail closed, and drops `Retry-After`, which
   OkHttp otherwise follows on a `503 Retry-After: 0` without asking anyone. The suspending check (`FeedGate.allows`)
   runs only on the caller's coroutine, before each request. Bodies are
   read bounded (`FeedLimits.readBounded`). The feed client has no HTTP logging in any build (`ClientProfile.Feed`),
   since a request line carries the source's URL.
-- **Consent.** `FeedPolicy` gives each feed's switch and source (`AppFeedPolicy`: fuel follows `isGasPriceAuto`;
-  constants and rules are off until their own switches exist; every feed reads gig.log's site until #1567). A
-  refresh checks the switch and the source before every request, retries included, and before staging, committing
-  and activating. A watcher cancels the work as soon as the switch turns off or the source changes. A
+- **Consent.** `FeedPolicy` gives each feed's switch and source as `StateFlow`s (`AppFeedPolicy`: fuel follows
+  `isGasPriceAuto`, started eagerly and off until read; constants and rules are off until their own switches exist;
+  every feed reads gig.log's site until #1567). One `RefreshGate` per refresh reads their current values, so the
+  check before every request (retries included), the one inside every network exchange, and the ones before staging,
+  committing and activating never disagree and never wait for a watcher. A watcher cancels the work as soon as the switch turns off or the source changes. A
   `OneShotGrant` (an explicit user act, such as "Resume auto") is one call's parameter, bound to its feed and source
   id. It is dead from the moment the coroutine that minted it starts cancelling: the refresh holds a child job of
   that owner, which is cancelled at the onset, before the owner finishes. One call spends it, so a cancelled act,

@@ -3,9 +3,11 @@ package cloud.trotter.log.gig.core.data.feed
 import cloud.trotter.feed.contract.Feed
 import cloud.trotter.log.gig.core.data.settings.AppPreferencesRepository
 import cloud.trotter.log.gig.core.network.feed.FeedSource
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.test.runTest
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -16,21 +18,24 @@ import org.mockito.kotlin.mock
 /** #1565: network is opt-in per feature; fuel follows its existing switch, constants and rules stay off. */
 class AppFeedPolicyTest {
     private val auto = MutableStateFlow(false)
-    private val policy = AppFeedPolicy(mock<AppPreferencesRepository> { on { isGasPriceAuto } doReturn auto })
+    private val scope = CoroutineScope(Dispatchers.Unconfined)
+    private val policy = AppFeedPolicy(mock<AppPreferencesRepository> { on { isGasPriceAuto } doReturn auto }, scope)
 
-    @Test fun `fuel follows the auto gas price switch`() = runTest {
-        assertFalse(policy.enabled(Feed.FUEL).first())
+    @After fun tearDown() = scope.cancel()
+
+    @Test fun `fuel follows the auto gas price switch, read as a current value`() {
+        assertFalse(policy.enabled(Feed.FUEL).value)
         auto.value = true
-        assertTrue(policy.enabled(Feed.FUEL).first())
+        assertTrue(policy.enabled(Feed.FUEL).value)
     }
 
-    @Test fun `constants and rules are off until their own switches exist`() = runTest {
+    @Test fun `constants and rules are off until their own switches exist`() {
         auto.value = true
-        assertFalse(policy.enabled(Feed.CONSTANTS).first())
-        assertFalse(policy.enabled(Feed.RULES).first())
+        assertFalse(policy.enabled(Feed.CONSTANTS).value)
+        assertFalse(policy.enabled(Feed.RULES).value)
     }
 
-    @Test fun `every feed reads gig_log's site`() = runTest {
-        for (feed in Feed.entries) assertEquals(FeedSource.GigLog, policy.source(feed).first())
+    @Test fun `every feed reads gig_log's site`() {
+        for (feed in Feed.entries) assertEquals(FeedSource.GigLog, policy.source(feed).value)
     }
 }

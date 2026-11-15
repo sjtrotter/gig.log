@@ -3,23 +3,27 @@ package cloud.trotter.log.gig.core.data.feed
 import cloud.trotter.feed.contract.Feed
 import cloud.trotter.log.gig.core.data.settings.AppPreferencesRepository
 import cloud.trotter.log.gig.core.network.feed.FeedSource
+import cloud.trotter.log.gig.domain.di.ApplicationScope
 import kotlinx.coroutines.CompletableJob
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.stateIn
 import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Per-feature network consent and the chosen source. [FeedRepository] reads both before every step and request, and
- * watches them while work runs: turning [enabled] off cancels that feed's work, and a new [source] cancels the old
- * source's.
+ * Per-feature network consent and the chosen source, as state: [FeedRepository] reads the current values before every
+ * step and inside every network exchange, and watches them while work runs: turning [enabled] off cancels that feed's
+ * work, and a new [source] cancels the old source's.
  */
 interface FeedPolicy {
-    fun enabled(feed: Feed): Flow<Boolean>
-    fun source(feed: Feed): Flow<FeedSource>
+    fun enabled(feed: Feed): StateFlow<Boolean>
+    fun source(feed: Feed): StateFlow<FeedSource>
 }
 
 /**
@@ -28,13 +32,21 @@ interface FeedPolicy {
  * (#1567).
  */
 @Singleton
-class AppFeedPolicy @Inject constructor(private val preferences: AppPreferencesRepository) : FeedPolicy {
-    override fun enabled(feed: Feed): Flow<Boolean> = when (feed) {
-        Feed.FUEL -> preferences.isGasPriceAuto
-        Feed.CONSTANTS, Feed.RULES -> flowOf(false)
+class AppFeedPolicy @Inject constructor(
+    preferences: AppPreferencesRepository,
+    @ApplicationScope scope: CoroutineScope,
+) : FeedPolicy {
+    /** Off until the stored switch is read (fail closed). */
+    private val fuel: StateFlow<Boolean> = preferences.isGasPriceAuto.stateIn(scope, SharingStarted.Eagerly, false)
+    private val off: StateFlow<Boolean> = MutableStateFlow(false)
+    private val gigLog: StateFlow<FeedSource> = MutableStateFlow(FeedSource.GigLog)
+
+    override fun enabled(feed: Feed): StateFlow<Boolean> = when (feed) {
+        Feed.FUEL -> fuel
+        Feed.CONSTANTS, Feed.RULES -> off
     }
 
-    override fun source(feed: Feed): Flow<FeedSource> = flowOf(FeedSource.GigLog)
+    override fun source(feed: Feed): StateFlow<FeedSource> = gigLog
 }
 
 /**

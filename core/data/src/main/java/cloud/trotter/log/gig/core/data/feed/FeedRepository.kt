@@ -15,21 +15,17 @@ import cloud.trotter.feed.contract.VerifiedFeedFile
 import cloud.trotter.feed.contract.VerifiedManifest
 import cloud.trotter.log.gig.core.network.feed.FeedClient
 import cloud.trotter.log.gig.core.network.feed.FeedFetchFailure
-import cloud.trotter.log.gig.core.network.feed.FeedGate
 import cloud.trotter.log.gig.core.network.feed.FeedReply
 import cloud.trotter.log.gig.core.network.feed.FeedSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -42,7 +38,6 @@ import java.io.File
 import java.io.IOException
 import java.time.Clock
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * The on-phone cache and swap of one signed feed (#1565, design-r3 § App client, ADR-0013). One instance per feed;
@@ -115,7 +110,7 @@ class FeedRepository<T> internal constructor(
 
     /** Loads the current source's committed generation. No network. */
     suspend fun start() {
-        val source = policy.source(feed).first()
+        val source = policy.source(feed).value
         lockFor(source).withLock { load(source) }
     }
 
@@ -124,14 +119,14 @@ class FeedRepository<T> internal constructor(
      * only while the feature is on; a [grant] lets one call run while it is off, for its own feed and source only.
      */
     suspend fun refresh(grant: OneShotGrant? = null): FeedRefresh {
-        val source = policy.source(feed).first()
+        val source = policy.source(feed).value
         if (grant != null) {
             if (!grant.claim(feed, source.id)) return denied(source, "grant")
-        } else if (!policy.enabled(feed).first()) {
+        } else if (!policy.enabled(feed).value) {
             return denied(source, "consent")
         }
         try {
-            return watched(source, grant) { gate -> lockFor(source).withLock { fetch(source, grant, gate) } }
+            return watched(source, grant) { gate -> lockFor(source).withLock { fetch(source, gate) } }
         } finally {
             grant?.spend()
         }
@@ -149,26 +144,20 @@ class FeedRepository<T> internal constructor(
     private suspend fun watched(
         source: FeedSource,
         grant: OneShotGrant?,
-        work: suspend (FeedGate) -> FeedRefresh,
+        work: suspend (RefreshGate) -> FeedRefresh,
     ): FeedRefresh =
         coroutineScope {
-            // The gate's snapshot for OkHttp's thread: closed once the watcher or the owner revokes, or the grant dies.
-            val revoked = AtomicBoolean(false)
-            val gate = object : FeedGate {
-                override suspend fun allows(): Boolean = allowed(source, grant)
-                override fun isOpen(): Boolean = !revoked.get() && grant?.isLive() != false
-            }
+            val gate = RefreshGate(feed, policy, source, grant)
             val job = async { work(gate) }
             val watcher = launch {
-                // firstOrNull: a policy whose flows complete (a fixed switch) can never revoke, so the watch just ends.
                 combine(policy.enabled(feed), policy.source(feed)) { on, current -> current == source && (grant != null || on) }
-                    .firstOrNull { allowed -> !allowed } ?: return@launch
-                revoked.set(true)
+                    .first { allowed -> !allowed }
+                gate.revoke()
                 job.cancel(Revoked())
             }
             val ownerChild = grant?.ownerChild()
             val ownerWatch = ownerChild?.invokeOnCompletion {
-                revoked.set(true)
+                gate.revoke()
                 job.cancel(Revoked())
             }
             try {
@@ -184,19 +173,13 @@ class FeedRepository<T> internal constructor(
             }
         }
 
-    private suspend fun allowed(source: FeedSource, grant: OneShotGrant?): Boolean {
-        currentCoroutineContext().ensureActive()
-        if (policy.source(feed).first() != source) return false
-        return grant?.isLive() ?: policy.enabled(feed).first()
-    }
-
-    private suspend fun step(source: FeedSource, grant: OneShotGrant?) {
-        if (!allowed(source, grant)) throw Revoked()
+    private suspend fun step(gate: RefreshGate) {
+        if (!gate.allows()) throw Revoked()
     }
 
     private fun store(source: FeedSource) = FeedStore(root, source.id, feed, directorySync, crashPoints)
 
-    private suspend fun fetch(source: FeedSource, grant: OneShotGrant?, gate: FeedGate): FeedRefresh {
+    private suspend fun fetch(source: FeedSource, gate: RefreshGate): FeedRefresh {
         val store = store(source)
         val newest = withContext(Dispatchers.IO) { store.generations().firstOrNull() }
         // A generation committed but never activated (or a source not loaded yet) is loaded before anything else.
@@ -245,7 +228,7 @@ class FeedRepository<T> internal constructor(
             }
         }
 
-        step(source, grant)
+        step(gate)
         val stage = try {
             withContext(Dispatchers.IO) { store.stage(manifest.sequence, files.associate { it.sha256 to it.bytes() }) }
         } catch (_: IOException) {
@@ -262,7 +245,7 @@ class FeedRepository<T> internal constructor(
         }
         crashPoints.reached(CrashPoint.STAGED)
 
-        step(source, grant)
+        step(gate)
         val highWater = FeedMark(decision.highWater, manifest.digest)
         val etag = envelope.etag.takeIf { source is FeedSource.GigLog }
         val meta = FeedMeta(envelope.bytes, manifest.digest, manifest.sequence, highWater, staged.carry, etag)
@@ -281,7 +264,7 @@ class FeedRepository<T> internal constructor(
         crashPoints.reached(CrashPoint.COMMITTED)
 
         // Committed: a crash or a revocation from here on activates it from disk at the next load.
-        step(source, grant)
+        step(gate)
         val next = Live(source.id, generation, staged.carry, etag, newestSeen = generation)
         publish(next, FeedState(staged.value, staged.period, decision.issuedAt, lastError = null))
         Timber.tag(TAG).i("feed accepted feed=%s sequence=%d source=%s", feed.wire, manifest.sequence, source.id)
@@ -310,7 +293,7 @@ class FeedRepository<T> internal constructor(
             else -> Timber.tag(TAG).w("feed kept last-good feed=%s source=%s error=%s", feed.wire, source.id, error)
         }
         publishing.withLock {
-            if (live?.sourceId == source.id && policy.source(feed).first().id == source.id) {
+            if (live?.sourceId == source.id && policy.source(feed).value.id == source.id) {
                 _state.value = _state.value.copy(lastError = error)
             }
         }
@@ -320,7 +303,7 @@ class FeedRepository<T> internal constructor(
     /** Publishes [next] only while its source is still the chosen one. */
     private suspend fun publish(next: Live, state: FeedState<T>) {
         publishing.withLock {
-            if (policy.source(feed).first().id != next.sourceId) return
+            if (policy.source(feed).value.id != next.sourceId) return
             live = next
             _state.value = state
         }

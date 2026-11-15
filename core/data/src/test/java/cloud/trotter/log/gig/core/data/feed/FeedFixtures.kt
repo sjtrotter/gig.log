@@ -7,8 +7,8 @@ import cloud.trotter.feed.contract.FeedResult
 import cloud.trotter.feed.contract.UserPin
 import cloud.trotter.feed.contract.VerifiedFeedFile
 import cloud.trotter.log.gig.core.network.feed.FeedSource
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -109,8 +109,8 @@ class SimulatedDeath : Throwable()
 class FakeFeedPolicy(enabled: Boolean, source: FeedSource) : FeedPolicy {
     val enabled = MutableStateFlow(enabled)
     val source = MutableStateFlow(source)
-    override fun enabled(feed: Feed): Flow<Boolean> = enabled
-    override fun source(feed: Feed): Flow<FeedSource> = source
+    override fun enabled(feed: Feed): StateFlow<Boolean> = enabled
+    override fun source(feed: Feed): StateFlow<FeedSource> = source
 }
 
 /**

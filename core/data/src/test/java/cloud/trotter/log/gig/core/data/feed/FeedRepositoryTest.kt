@@ -13,7 +13,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -468,10 +468,10 @@ class FeedRepositoryTest {
         assertEquals(before, fake.server.requestCount)
     }
 
-    @Test fun `a policy whose switches are fixed flows still runs a granted fetch`() = runBlocking {
+    @Test fun `a policy whose switches never change still runs a granted fetch`() = runBlocking {
         val fixed = object : FeedPolicy {
-            override fun enabled(feed: Feed) = flowOf(false)
-            override fun source(feed: Feed) = flowOf<FeedSource>(fuel.source)
+            override fun enabled(feed: Feed) = MutableStateFlow(false)
+            override fun source(feed: Feed) = MutableStateFlow<FeedSource>(fuel.source)
         }
         val repository = repo(policy = fixed)
         repository.start()
