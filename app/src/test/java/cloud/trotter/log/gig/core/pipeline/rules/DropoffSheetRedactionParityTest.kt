@@ -446,10 +446,21 @@ class DropoffSheetRedactionParityTest {
     private fun isBuildingNameHash(entry: JsonObject): Boolean =
         entry.keys - "comment" == setOf("find") && entry["find"] == buildingNameHashFind
 
+    /** Every generated DoorDash screen rule's redact block, from any source file. */
+    private fun doordashRedactEntries(): List<Pair<String, List<JsonObject>>> =
+        Json.parseToJsonElement(File(TestRulesetFactory.rulesDir, "doordash.json").readText())
+            .jsonObject["screens"]!!.jsonArray
+            .map { it.jsonObject }
+            .map { rule ->
+                rule["id"]!!.jsonPrimitive.content to (rule["redact"]?.jsonArray?.map { it.jsonObject } ?: emptyList())
+            }
+
     @Test
-    fun `every dropoff rule with the #1039 subpremise entries declares the Building Name pair after them (#1650)`() {
-        val withSubpremise = dropoffRedactEntries().filter { (_, redact) -> redact.any { isSubpremiseLabelEntry(it) } }
-        assertTrue("the dropoff family declares the #1039 subpremise entries", withSubpremise.isNotEmpty())
+    fun `every DoorDash rule with the #1039 subpremise entries declares the Building Name pair after them (#1650)`() {
+        val withSubpremise = doordashRedactEntries().filter { (_, redact) -> redact.any { isSubpremiseLabelEntry(it) } }
+        val ids = withSubpremise.map { it.first }.toSet()
+        assertTrue("every dropoff rule declares the #1039 subpremise entries", ids.containsAll(screensFromDropoffSource()))
+        assertTrue("navigation_generic declares the #1039 subpremise entries", "doordash.screen.navigation_generic" in ids)
         val failures = withSubpremise.mapNotNull { (id, redact) ->
             val subpremise = redact.indexOfLast { isSubpremiseLabelEntry(it) }
             val digitPlain = redact.indexOfFirst { isBuildingNameDigitPlain(it) }
