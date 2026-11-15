@@ -1,18 +1,8 @@
 package cloud.trotter.log.gig.domain.census
 
+import cloud.trotter.census.contract.health.HealthReportDto
+import cloud.trotter.census.contract.health.HealthReportSchema
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.put
-
-/** Server version grammars shared by health recording and reporting. */
-object HealthGrammar {
-    val platformAppVersion = Regex("^[0-9]{1,5}(\\.[0-9]{1,5}){0,3}$")
-    val rulesetVersion = Regex("^(corpus|dev|v?[0-9]{1,5}(\\.[0-9]{1,5}){0,3}(-[a-z0-9]{1,12})?)$")
-    val appVersion = Regex("^([0-9]{1,4}\\.[0-9]{1,4}\\.[0-9]{1,4}(\\+([0-9a-f]{7,40}(\\.dirty)?|nogit))?)$")
-}
 
 /** UTC day, platform wire and observed platform app version identify one report. */
 @Serializable
@@ -91,23 +81,21 @@ data class HealthLedger(val rows: Map<String, HealthRow> = emptyMap(), val gener
 
     companion object {
         const val MAX_ROWS = 256
-        private const val MAX_COUNT = 1_000_000
+        private const val MAX_COUNT = HealthReportSchema.MAX_COUNT
         private fun increment(value: Int): Int = if (value >= MAX_COUNT) MAX_COUNT else value + 1
 
+        /** The wire report for one closed row; [HealthReportSchema] owns its shape and bounds. */
         fun reportJson(key: HealthKey, row: HealthRow, appVersion: String, rulesetVersion: String): String =
-            Json.encodeToString(buildJsonObject {
-                put("day", key.day)
-                put("platform", key.platform)
-                put("platformAppVersion", key.platformAppVersion)
-                put("appVersion", appVersion)
-                put("rulesetVersion", rulesetVersion)
-                put("admitted", row.admitted)
-                put("unknown", row.unknown)
-                put("trips", row.trips)
-                put("ruleCounts", buildJsonObject { row.ruleCounts.forEach { (rule, count) -> put(rule, count) } })
-            })
-
-        fun reportFits(json: String): Boolean = json.toByteArray(Charsets.UTF_8).size <= 8192 &&
-            Json.parseToJsonElement(json).jsonObject.getValue("ruleCounts").jsonObject.size <= 512
+            HealthReportSchema.encode(HealthReportDto(
+                day = key.day,
+                platform = key.platform,
+                platformAppVersion = key.platformAppVersion,
+                appVersion = appVersion,
+                rulesetVersion = rulesetVersion,
+                admitted = row.admitted,
+                unknown = row.unknown,
+                trips = row.trips,
+                ruleCounts = row.ruleCounts,
+            ))
     }
 }

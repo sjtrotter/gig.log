@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import cloud.trotter.census.contract.health.HealthReportSchema
 import cloud.trotter.log.gig.BuildConfig
 import cloud.trotter.log.gig.core.data.census.CensusCredentialStore
 import cloud.trotter.log.gig.core.data.census.CensusCredentialStore.Credential
@@ -369,7 +370,7 @@ class CensusUploadWorker @AssistedInject constructor(
             }
             val json = HealthLedger.reportJson(key, row, BuildConfig.VERSION_NAME,
                 rulesetVersion = metadataProvider.current().rulesetReleaseTag ?: "dev")
-            if (!HealthLedger.reportFits(json)) {
+            if (!HealthReportSchema.fits(json)) {
                 healthSink.apply { if (it.generation == ledger.generation) it.markRefused(key, row.revision) else it }
                 stats.healthOversized.incrementAndGet()
                 Timber.tag(TAG).w("census health oversized day=%s", key.day)
