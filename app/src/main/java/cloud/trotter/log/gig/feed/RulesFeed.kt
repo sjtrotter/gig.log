@@ -11,12 +11,15 @@ import cloud.trotter.log.gig.core.data.feed.RulesFeedStatus
 import cloud.trotter.log.gig.core.data.feed.RulesFeedSwitch
 import cloud.trotter.log.gig.core.pipeline.rules.GenerationResult
 import cloud.trotter.log.gig.core.pipeline.rules.JsonRuleInterpreter
+import cloud.trotter.log.gig.domain.di.DefaultDispatcher
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.time.Clock
 import javax.inject.Inject
@@ -48,6 +51,8 @@ class RulesFeed @Inject constructor(
     private val switch: RulesFeedSwitch,
     private val policy: FeedPolicy,
     private val clock: Clock,
+    /** Verifying, compiling and staging run here, never on the caller's thread (a tap runs on Main). */
+    @param:DefaultDispatcher private val work: CoroutineDispatcher,
 ) : RulesFeedChecks {
 
     private val _status = MutableStateFlow(RulesFeedStatus())
@@ -58,13 +63,15 @@ class RulesFeed @Inject constructor(
 
     /** After the bundled rules are live: activates the committed generation, if one re-verifies. No network. */
     suspend fun start() {
-        repository.start()
-        activateLatest()
+        withContext(work) {
+            repository.start()
+            activateLatest()
+        }
     }
 
     /** A delivery app came to the front. Checks only with the switch on and no foreground check in the last hour. */
     suspend fun onPlatformForeground() {
-        if (!switch.claimForegroundCheck(clock.millis())) return
+        if (!switch.claimForegroundCheck()) return
         check(grant = null)
     }
 
@@ -73,7 +80,11 @@ class RulesFeed @Inject constructor(
         return check(grant)
     }
 
-    private suspend fun check(grant: OneShotGrant?): RulesCheckOutcome {
+    /**
+     * Runs on [work], a child of the caller's coroutine: cancelling the tap still cancels the check, and a one-shot
+     * grant still belongs to the tap that minted it.
+     */
+    private suspend fun check(grant: OneShotGrant?): RulesCheckOutcome = withContext(work) {
         _status.update { it.copy(checking = true) }
         val refresh = try {
             repository.refresh(grant)
@@ -88,7 +99,7 @@ class RulesFeed @Inject constructor(
             FeedRefresh.Denied, FeedRefresh.Cancelled, is FeedRefresh.Failed -> RulesCheckOutcome.FAILED
         }
         _status.update { it.copy(lastCheckAt = clock.millis(), lastOutcome = outcome) }
-        return outcome
+        outcome
     }
 
     /**

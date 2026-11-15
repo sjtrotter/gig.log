@@ -2,6 +2,7 @@ package cloud.trotter.log.gig.core.data.feed
 
 import cloud.trotter.log.gig.core.datastore.feed.RulesFeedDataSource
 import cloud.trotter.log.gig.domain.di.ApplicationScope
+import cloud.trotter.log.gig.domain.time.ElapsedRealtime
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -12,6 +13,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import timber.log.Timber
+import java.time.Clock
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -27,13 +29,16 @@ import javax.inject.Singleton
  * failed save never leaves the feed on. Every path that saves the switch goes through here: Settings, the setup
  * wizard and the phone wipe ([forgetNow]). The recognition notice only opens Settings; it never saves the switch.
  *
- * It also owns the foreground check's hourly limit ([claimForegroundCheck]), persisted beside the switch so a restart
- * does not buy an extra check.
+ * It also owns the foreground check's hourly limit ([claimForegroundCheck]). Within a process the limit runs on
+ * [elapsed] time, which no clock correction moves. The last check's wall time is stored beside the switch so a
+ * restart buys no extra check; a stored time in the future (the clock was set back) counts as a check just now.
  */
 @Singleton
 class RulesFeedSwitch @Inject constructor(
     private val store: RulesFeedDataSource,
     @ApplicationScope scope: CoroutineScope,
+    private val wallClock: Clock = Clock.systemUTC(),
+    private val elapsed: ElapsedRealtime = ElapsedRealtime { System.nanoTime() / 1_000_000 },
 ) {
     private val _enabled = MutableStateFlow(false)
 
@@ -45,7 +50,8 @@ class RulesFeedSwitch @Inject constructor(
     private val writes = Mutex()
     private val loaded = CompletableDeferred<Unit>()
     private val throttle = Mutex()
-    private var lastForegroundCheckAt: Long? = null
+    /** [elapsed] time of the last foreground check, or null when none is known. */
+    private var lastCheckElapsed: Long? = null
 
     init {
         scope.launch {
@@ -57,7 +63,11 @@ class RulesFeedSwitch @Inject constructor(
                 Timber.tag(TAG).w("rules feed choice unreadable (%s); updates stay off", t.javaClass.simpleName)
                 null
             }
-            throttle.withLock { lastForegroundCheckAt = stored?.lastForegroundCheckAt }
+            throttle.withLock {
+                lastCheckElapsed = stored?.lastForegroundCheckAt?.let { at ->
+                    elapsed.millis() - (wallClock.millis() - at).coerceAtLeast(0L)
+                }
+            }
             writes.withLock {
                 if (choices.get() == 0L && stored?.enabled == true) _enabled.value = true
             }
@@ -109,22 +119,23 @@ class RulesFeedSwitch @Inject constructor(
     }
 
     /**
-     * Whether a foreground check may run at [now]: the switch is on and no foreground check started in the hour
-     * before. A true answer stamps [now] first (persisted; a failed write still counts in memory), so two foregrounds
-     * cannot both pass.
+     * Whether a foreground check may run now: the switch is on and no foreground check started in the hour before,
+     * by elapsed time. A true answer stamps the check first (persisted; a failed write still counts in memory), so two
+     * foregrounds cannot both pass.
      */
-    suspend fun claimForegroundCheck(now: Long): Boolean {
+    suspend fun claimForegroundCheck(): Boolean {
         loaded.await()
         if (!_enabled.value) return false
         val claimed = throttle.withLock {
-            val last = lastForegroundCheckAt
-            if (last != null && now >= last && now - last < FOREGROUND_INTERVAL_MS) return@withLock false
-            lastForegroundCheckAt = now
+            val now = elapsed.millis()
+            val last = lastCheckElapsed
+            if (last != null && now - last < FOREGROUND_INTERVAL_MS) return@withLock false
+            lastCheckElapsed = now
             true
         }
         if (!claimed) return false
         try {
-            store.setLastForegroundCheckAt(now)
+            store.setLastForegroundCheckAt(wallClock.millis())
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {

@@ -2,89 +2,69 @@ package cloud.trotter.log.gig.core.pipeline.accessibility.input
 
 import android.view.accessibility.AccessibilityEvent
 import cloud.trotter.log.gig.domain.state.Platform
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
-import kotlinx.coroutines.test.advanceTimeBy
-import kotlinx.coroutines.test.runCurrent
-import kotlinx.coroutines.test.runTest
+import cloud.trotter.log.gig.domain.time.ElapsedRealtime
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
-import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.annotation.Config
 
 /**
- * #640: a foreground is a transition INTO a delivery app the dasher turned on, from any other package. Staying in the
- * app, whatever its windows do, is no new foreground; gig.log's own windows never count as leaving it. A leave is seen
- * when the active window belongs to another package: on a topology event, or on the probe once events go quiet.
+ * #640: a foreground is the first event from a delivery app the dasher turned on after at least 10 minutes with no
+ * event from that app. Active use never re-triggers; a return after a break does; a platform that is off never does.
+ * It reads no window: one clock read and one compare per event.
  */
-@OptIn(ExperimentalCoroutinesApi::class)
-@RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
 class PlatformForegroundsTest {
-    private val own = "cloud.trotter.log.gig"
-    private val launcher = "com.example.launcher"
-    private val dd = Platform.DoorDash.packageName
-    private val uber = Platform.Uber.packageName
-    private var active: String? = null
-    private var at = 0L
+    private var now = 1_000_000L
+    private var enabled = setOf(DD, UBER)
+    private val foregrounds = PlatformForegrounds(emptyFlow(), { enabled }, ElapsedRealtime { now })
 
-    private fun ev(type: Int, pkg: String?) = AccEvent(type, windowId = 1, packageName = pkg, className = null,
-        contentChangeTypes = 0, eventTimeMs = at.also { at += 10_000 })
+    private fun event(pkg: String?, type: Int = AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) =
+        AccEvent(type, windowId = 1, packageName = pkg, className = null, contentChangeTypes = 0, eventTimeMs = 0L)
 
-    private val state = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
-    private val content = AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
-    private val windows = AccessibilityEvent.TYPE_WINDOWS_CHANGED
-
-    @Test fun `window changes inside the app are one foreground, leaving and coming back is another`() = runTest {
-        val source = MutableSharedFlow<AccEvent>(extraBufferCapacity = 64)
-        val foregrounds = PlatformForegrounds(source, { active }, { own }, quietProbeMs = 30_000L)
-        val seen = mutableListOf<Platform>()
-        val job = launch(UnconfinedTestDispatcher(testScheduler)) { foregrounds.events.collect { seen += it } }
-
-        active = dd
-        repeat(5) { source.emit(ev(state, dd)) }
-        source.emit(ev(content, dd))
-        advanceTimeBy(60_000L); runCurrent()
-        source.emit(ev(state, dd))
-        assertEquals("staying in the app is one foreground", listOf(Platform.DoorDash), seen)
-
-        active = own // the bubble in front: still in the delivery app
-        source.emit(ev(windows, null))
-        advanceTimeBy(60_000L); runCurrent()
-        source.emit(ev(state, dd))
-        assertEquals(listOf(Platform.DoorDash), seen)
-
-        active = launcher // left, seen on the quiet probe
-        advanceTimeBy(60_000L); runCurrent()
-        active = dd
-        source.emit(ev(state, dd))
-        assertEquals(listOf(Platform.DoorDash, Platform.DoorDash), seen)
-
-        active = launcher // left, seen on a topology event
-        source.emit(ev(windows, null))
-        active = dd
-        source.emit(ev(state, dd))
-        assertEquals(3, seen.size)
-
-        active = uber // another delivery app's window comes to the front
-        source.emit(ev(state, uber))
-        assertEquals(Platform.Uber, seen.last())
-        job.cancel()
+    private fun after(ms: Long, pkg: String?): Platform? {
+        now += ms
+        return foregrounds.observe(event(pkg))
     }
 
-    @Test fun `a package the registry does not know is never a foreground`() = runTest {
-        val source = MutableSharedFlow<AccEvent>(extraBufferCapacity = 64)
-        val seen = mutableListOf<Platform>()
-        val job = launch(UnconfinedTestDispatcher(testScheduler)) {
-            PlatformForegrounds(source, { launcher }, { own }).events.collect { seen += it }
-        }
-        source.emit(ev(state, launcher))
-        source.emit(ev(state, null))
-        source.emit(ev(windows, null))
-        assertEquals(emptyList<Platform>(), seen)
-        job.cancel()
+    @Test fun `active use is one foreground`() {
+        assertEquals(Platform.DoorDash, after(0, DD))
+        repeat(200) { assertNull("an event every 9 minutes keeps the app in use", after(9 * MINUTE, DD)) }
+    }
+
+    @Test fun `the first event after a 10-minute gap is a foreground`() {
+        after(0, DD)
+        assertNull(after(9 * MINUTE + 59_000, DD))
+        assertEquals(Platform.DoorDash, after(10 * MINUTE, DD))
+        assertNull(after(1_000, DD))
+    }
+
+    @Test fun `each delivery app keeps its own gap`() {
+        assertEquals(Platform.DoorDash, after(0, DD))
+        assertEquals(Platform.Uber, after(1_000, UBER))
+        assertNull(after(1_000, DD))
+    }
+
+    @Test fun `a platform that is off, an unknown package or no package is never a foreground`() {
+        enabled = setOf(DD)
+        assertNull(after(0, UBER))
+        assertNull(after(0, "com.example.launcher"))
+        assertNull(after(0, null))
+        assertNull(foregrounds.observe(event(null, AccessibilityEvent.TYPE_WINDOWS_CHANGED)))
+        enabled = emptySet()
+        assertNull(after(0, DD))
+    }
+
+    @Test fun `the stream emits the foregrounds only`() = runBlocking {
+        val stream = PlatformForegrounds(flowOf(event(DD), event(DD), event(UBER), event("com.example.other")), { enabled }, ElapsedRealtime { now })
+        assertEquals(listOf(Platform.DoorDash, Platform.Uber), stream.events.toList())
+    }
+
+    private companion object {
+        val DD = Platform.DoorDash.packageName!!
+        val UBER = Platform.Uber.packageName!!
+        const val MINUTE = 60_000L
     }
 }

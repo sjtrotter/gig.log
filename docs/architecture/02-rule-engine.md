@@ -636,16 +636,22 @@ only rules and nothing fetched; ADR-0013, design-r3 § App client and plan-r7 §
   Start-up runs after `loadDefaults` (the floor), re-verifies the cache and activates it with no network. The APK's
   own generation mark (`FEED_SEQUENCE`, `FEED_DIGEST`) comes with the publishing half (#641); until then
   `FeedRepository` has no bundled mark for rules.
-- **When it checks.** On a delivery app coming to the front (`PlatformForegrounds`, `:core:pipeline`): a transition
-  INTO a platform the dasher turned on from any other package, resolved through the platform registry. Staying in the
-  app is no new foreground, whatever its windows do, and gig.log's own windows (the bubble) never count as leaving it.
-  The listener admits events only from the platforms that are on, so a leave is seen on the active window's package:
-  on a `TYPE_WINDOWS_CHANGED` (it reaches the app only with Screen events allowed; at most one read a second by event
-  time) and on one probe 30 s after the last event, which also covers the filtered posture; a return inside that
-  quiet period is no new foreground. Then at most once an hour (`RulesFeedSwitch.claimForegroundCheck`, stamped at the
-  start and persisted, so a restart buys no extra check), and only with the switch on; and on the dasher's tap. The
-  foreground stream is conflated so a running check never holds back the accessibility event stream. There is no
-  worker and no other caller of `refresh`.
+- **When it checks.** When the dasher opens or returns to a delivery app (`PlatformForegrounds`, `:core:pipeline`):
+  the first accessibility event from a platform the dasher turned on (the enabled set read as it is now, packages
+  through the platform registry) after at least 10 minutes with no event from that platform, by elapsed time
+  (`ElapsedRealtime`, which counts sleep). Active use never re-triggers; a return after a break does; a platform
+  that is off never does. It reads no window and no tree: on the event stream's hot path it costs a set lookup, a
+  clock read and one compare. Then at most once an hour (`RulesFeedSwitch.claimForegroundCheck`): within a process
+  by elapsed time, which no wall-clock correction moves; across restarts from the stored wall time of the last
+  check, where a time in the future (the clock was set back) counts as a check just now. Only with the switch on,
+  and on the dasher's tap. The foreground stream is conflated so a running check never holds back the accessibility
+  event stream. There is no worker and no other caller of `refresh`. History: the first cut counted every
+  `TYPE_WINDOW_STATE_CHANGED`; the next read the active window's package on topology events and on a 30 s probe to
+  see a leave, which called `rootInActiveWindow` (a tree prefetch from any app), ran once and missed a later leave,
+  and did not check the enabled set (Sol round 1, S3 to S5), so the gap rule replaced it.
+- **Off the main thread.** `RulesFeed` runs every check and its start-up on the injected default dispatcher
+  (`withContext`), a child of the caller's coroutine, so a tap on Main never verifies, compiles or stages there, and
+  cancelling the tap still cancels the check and its one-shot grant.
 - **The switch.** "Keep recognition rules up to date" (`RulesFeedSwitch`, `:core:data`, stored in
   `datastore/rules_feed.preferences_pb`, excluded from backup and transfer), off by default in every build;
   `AppFeedPolicy` gives it to the rules feed only. Its in-memory `StateFlow` is the value every `RefreshGate` check

@@ -179,16 +179,6 @@ class AccessibilitySource @Inject constructor(
      */
     fun getService(): AccessibilityService? = serviceRef?.get()
 
-    /**
-     * The active window's package (#640, the foreground signal's leave probe), or null when unbound, unreadable or
-     * on any failure. One binder call; reads no tree.
-     */
-    fun activeWindowPackage(): String? = try {
-        getLiveNativeRoot()?.packageName?.toString()
-    } catch (_: Exception) {
-        null
-    }
-
     /** This app's own package (the service's), or null when unbound — our bubble's windows. */
     fun ownPackage(): String? = serviceRef?.get()?.packageName
 

@@ -430,8 +430,12 @@ class WizardViewModel @Inject constructor(
         _saveStatus.value = SaveStatus.Saving
         val finalState = _state.value
         val vehicle = vehicleDraft.state.value
+        // #640: an off answer turns the rules feed off now, before any write, and is saved first; an on answer is
+        // saved last, so a write that fails or never finishes can never leave the feed on.
+        if (!finalState.keepRulesUpToDate) rulesFeedSwitch.forgetNow()
         viewModelScope.launch {
             _saveStatus.value = try {
+                if (!finalState.keepRulesUpToDate) saveRulesChoice(false)
                 val vehicleSaved = saveVehicle(finalState, vehicle)
                 saveSettings(finalState, vehicle)
                 if (vehicleSaved) SaveStatus.Saved else SaveStatus.Failed(SaveFailure.VEHICLE)
@@ -448,6 +452,10 @@ class WizardViewModel @Inject constructor(
     /** #640: the rules question's answer; saved by [save], so Skip leaves the switch as it was. */
     fun setKeepRulesUpToDate(on: Boolean) {
         _state.update { it.copy(keepRulesUpToDate = on) }
+    }
+
+    private suspend fun saveRulesChoice(on: Boolean) {
+        check(rulesFeedSwitch.set(on)) { "rules updates choice not saved" }
     }
 
     /** The dasher closed a failure to go back to setup; their answers are still in [state]. */
@@ -529,8 +537,7 @@ class WizardViewModel @Inject constructor(
         }
 
         strategyRepository.updateRules(updatedRules)
-        // Through the switch's owner, which turns the feed off in memory before it saves.
-        check(rulesFeedSwitch.set(finalState.keepRulesUpToDate)) { "rules updates choice not saved" }
+        if (finalState.keepRulesUpToDate) saveRulesChoice(true)
         appStateRepository.setFirstRunComplete()
     }
 }

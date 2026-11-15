@@ -547,6 +547,51 @@ class WizardViewModelTest {
     }
 
     @Test
+    fun `an off answer turns the rules switch off before any other write, even one that never finishes`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        stubRepositories()
+        val switch = rulesFeedSwitchStub(initial = true)
+        whenever(appPreferencesRepository.mirrorFuelType(any())).doSuspendableAnswer { kotlinx.coroutines.awaitCancellation() }
+        val viewModel = WizardViewModel(
+            strategyRepository, appPreferencesRepository, appStateRepository,
+            vehicleRepository, gasPriceRepository, garageRepository, switch,
+        )
+        testScheduler.advanceUntilIdle()
+        viewModel.setKeepRulesUpToDate(false)
+
+        viewModel.save()
+        verify(switch).forgetNow()
+        testScheduler.runCurrent()
+        assertEquals("the held write is still running", SaveStatus.Saving, viewModel.saveStatus.value)
+        org.mockito.kotlin.verifyBlocking(switch) { set(false) }
+        inOrder(switch, appPreferencesRepository) {
+            verify(switch).forgetNow()
+            org.mockito.kotlin.verifyBlocking(switch) { set(false) }
+            org.mockito.kotlin.verifyBlocking(appPreferencesRepository) { mirrorFuelType(any()) }
+        }
+    }
+
+    @Test
+    fun `an on answer is saved only after every other write, so a failed write never turns it on`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        stubRepositories()
+        val switch = rulesFeedSwitchStub(initial = false)
+        whenever(appPreferencesRepository.mirrorFuelType(any())).doSuspendableAnswer { throw java.io.IOException("refused") }
+        val viewModel = WizardViewModel(
+            strategyRepository, appPreferencesRepository, appStateRepository,
+            vehicleRepository, gasPriceRepository, garageRepository, switch,
+        )
+        testScheduler.advanceUntilIdle()
+        viewModel.setKeepRulesUpToDate(true)
+
+        viewModel.save()
+        testScheduler.advanceUntilIdle()
+        assertEquals(SaveStatus.Failed(SaveFailure.SETTINGS), viewModel.saveStatus.value)
+        org.mockito.kotlin.verifyBlocking(switch, org.mockito.kotlin.never()) { set(any()) }
+        verify(switch, org.mockito.kotlin.never()).forgetNow()
+    }
+
+    @Test
     fun `finish persists strategy and scoring rules without touching allowShopping`() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         stubRepositories()

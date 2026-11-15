@@ -8,6 +8,14 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.emptyPreferences
 import cloud.trotter.feed.contract.Feed
 import cloud.trotter.feed.contract.FeedRefusal
+import cloud.trotter.feed.contract.VerifiedFeedFile
+import cloud.trotter.log.gig.core.data.feed.FeedStage
+import cloud.trotter.log.gig.core.data.feed.FeedStager
+import cloud.trotter.log.gig.domain.time.ElapsedRealtime
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonObject
+import java.util.concurrent.Executors
 import cloud.trotter.log.gig.core.data.capability.RuleCapabilityRepository
 import cloud.trotter.log.gig.core.data.feed.AppFeedPolicy
 import cloud.trotter.log.gig.core.data.feed.FeedError
@@ -78,7 +86,7 @@ class RulesFeedTest {
     }
 
     private val switchStore = MemoryPreferences()
-    private val switch = RulesFeedSwitch(RulesFeedDataSource(switchStore), scope)
+    private val switch = RulesFeedSwitch(RulesFeedDataSource(switchStore), scope, clock, ElapsedRealtime { now })
     private val policy = AppFeedPolicy(
         mock<AppPreferencesRepository> { on { isGasPriceAuto } doReturn MutableStateFlow(false) }, switch, scope,
     )
@@ -109,11 +117,21 @@ class RulesFeedTest {
     private class Phone(val interpreter: JsonRuleInterpreter, val feed: RulesFeed, val repository: FeedRepository<RulesCandidate>)
 
     /** A phone start: bundled rules first, then the feed's committed generation. */
+    /** Every staging call's thread, to show staging never runs on the tapping thread. */
+    private val stagingThreads = CopyOnWriteArrayList<String>()
+
     private fun boot(root: File = tmp.root): Phone = runBlocking {
         val interpreter = JsonRuleInterpreter(context(), grants)
         interpreter.loadDefaults()
-        val repository = FeedRepository(Feed.RULES, RulesFeedStager(interpreter), client, policy, root, clock, buildTimeMs = TestRulesFeed.NOW - DAY)
-        val feed = RulesFeed(interpreter, repository, switch, policy, clock)
+        val stager = RulesFeedStager(interpreter)
+        val recording = object : FeedStager<RulesCandidate> by stager {
+            override fun stage(files: List<VerifiedFeedFile>, carry: JsonObject?): FeedStage<RulesCandidate> {
+                stagingThreads += Thread.currentThread().name
+                return stager.stage(files, carry)
+            }
+        }
+        val repository = FeedRepository(Feed.RULES, recording, client, policy, root, clock, buildTimeMs = TestRulesFeed.NOW - DAY)
+        val feed = RulesFeed(interpreter, repository, switch, policy, clock, Dispatchers.Default)
         feed.start()
         Phone(interpreter, feed, repository)
     }
@@ -274,39 +292,44 @@ class RulesFeedTest {
         assertEquals(2, site.envelopeRequests())
     }
 
-    @Test fun `staying in a delivery app checks once, leaving and returning after an hour checks again, within it not`() = runBlocking {
+    @Test fun `active use checks once, a return after a break past the hour checks again, within the hour not`() = runBlocking {
         val phone = boot()
         turnOn()
         publish(TestRulesFeed.NOW, remote("MarkerA"))
-        var active: String? = DOORDASH
-        val foregrounds = PlatformForegrounds(emptyFlow(), { active }, { OWN })
-        suspend fun play(vararg events: AccEvent) =
-            events.forEach { event -> foregrounds.observe(event)?.let { phone.feed.onPlatformForeground() } }
+        val foregrounds = PlatformForegrounds(emptyFlow(), { setOf(DOORDASH) }, ElapsedRealtime { now })
+        suspend fun use(minutes: Int) = repeat(minutes) {
+            now += MINUTE
+            foregrounds.observe(event(DOORDASH))?.let { phone.feed.onPlatformForeground() }
+        }
 
-        play(event(STATE, DOORDASH), event(STATE, DOORDASH), event(CONTENT, DOORDASH))
-        assertEquals("staying in the app is one check", 1, site.envelopeRequests())
-        now += 2 * HOUR
-        active = OWN // the bubble in front is still the delivery app
-        play(event(WINDOWS, null), event(STATE, DOORDASH), event(CONTENT, DOORDASH))
-        assertEquals("still in the app: no new foreground", 1, site.envelopeRequests())
-
-        active = LAUNCHER
-        play(event(WINDOWS, null))
-        active = DOORDASH
-        play(event(STATE, DOORDASH))
-        assertEquals("back after more than an hour", 2, site.envelopeRequests())
-
-        now += 30 * MINUTE
-        active = LAUNCHER
-        play(event(WINDOWS, null))
-        active = DOORDASH
-        play(event(STATE, DOORDASH))
+        use(minutes = 90)
+        assertEquals("active use is one check", 1, site.envelopeRequests())
+        now += 2 * HOUR // a break
+        use(minutes = 1)
+        assertEquals("back after the hour", 2, site.envelopeRequests())
+        now += 15 * MINUTE // a short break, inside the hour
+        use(minutes = 1)
         assertEquals("back within the hour", 2, site.envelopeRequests())
+        assertNull("a platform that is off is never a foreground", foregrounds.observe(event(Platform.Uber.packageName)))
     }
 
-    private var eventTime = 0L
-    private fun event(type: Int, pkg: String?) =
-        AccEvent(type, windowId = 1, packageName = pkg, className = null, contentChangeTypes = 0, eventTimeMs = eventTime++ * 10_000L)
+    @Test fun `staging never runs on the tapping thread`() = runBlocking {
+        val phone = boot()
+        publish(TestRulesFeed.NOW, remote("MarkerA"))
+        val main = Executors.newSingleThreadExecutor { Thread(it, "fake-main") }.asCoroutineDispatcher()
+        try {
+            assertEquals(RulesCheckOutcome.UPDATED, withContext(main) { phone.feed.checkNow() })
+        } finally {
+            main.close()
+        }
+        assertTrue(stagingThreads.isNotEmpty())
+        assertFalse(stagingThreads.toString(), stagingThreads.any { it == "fake-main" })
+    }
+
+    private fun event(pkg: String?) = AccEvent(
+        AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, windowId = 1, packageName = pkg, className = null,
+        contentChangeTypes = 0, eventTimeMs = 0L,
+    )
 
     @Test fun `Check now with the switch on skips the hourly limit`() = runBlocking {
         val phone = boot()
@@ -346,12 +369,7 @@ class RulesFeedTest {
     }
 
     private companion object {
-        val DOORDASH = Platform.DoorDash.packageName
-        const val OWN = "cloud.trotter.log.gig"
-        const val LAUNCHER = "com.example.launcher"
-        const val STATE = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
-        const val CONTENT = AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
-        const val WINDOWS = AccessibilityEvent.TYPE_WINDOWS_CHANGED
+        val DOORDASH = Platform.DoorDash.packageName!!
         const val MINUTE = 60_000L
         const val HOUR = 60 * MINUTE
         const val DAY = 24 * HOUR

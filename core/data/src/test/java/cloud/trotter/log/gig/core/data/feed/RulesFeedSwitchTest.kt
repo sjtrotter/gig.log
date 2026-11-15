@@ -10,6 +10,7 @@ import cloud.trotter.log.gig.core.network.feed.FeedClient
 import cloud.trotter.log.gig.core.network.feed.FeedGate
 import cloud.trotter.log.gig.core.network.feed.FeedReply
 import cloud.trotter.log.gig.core.network.feed.FeedSource
+import cloud.trotter.log.gig.domain.time.ElapsedRealtime
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -28,6 +29,8 @@ import org.mockito.kotlin.doReturn
 import org.mockito.kotlin.mock
 import java.time.Clock
 import java.time.Instant
+import java.time.ZoneId
+import java.time.ZoneOffset
 
 /**
  * #640: "Keep recognition rules up to date" is the rules feed's own consent. Its in-memory value, the one every
@@ -47,6 +50,7 @@ class RulesFeedSwitchTest {
     }
 
     private val enabledKey = booleanPreferencesKey("rules_updates_enabled")
+    private val MINUTE = 60_000L
     private val lastCheckKey = longPreferencesKey("last_foreground_check_at")
 
     private fun switchOn(store: MemoryPreferences = MemoryPreferences(preferencesOf(enabledKey to true))) =
@@ -132,23 +136,62 @@ class RulesFeedSwitchTest {
         assertEquals(false, store.current[enabledKey])
     }
 
+    private var wall = Instant.parse("2026-11-15T12:00:00Z").toEpochMilli()
+    private var elapsed = 5_000_000L
+    private val wallClock = object : Clock() {
+        override fun getZone(): ZoneId = ZoneOffset.UTC
+        override fun withZone(zone: ZoneId?): Clock = this
+        override fun instant(): Instant = Instant.ofEpochMilli(wall)
+    }
+
+    private fun clocked(store: MemoryPreferences) =
+        RulesFeedSwitch(RulesFeedDataSource(store), scope, wallClock, ElapsedRealtime { elapsed })
+
+    private fun advance(ms: Long) {
+        wall += ms
+        elapsed += ms
+    }
+
     @Test fun `a foreground check runs at most once an hour, and the limit survives a restart`() = runBlocking {
         val store = MemoryPreferences(preferencesOf(enabledKey to true))
-        val switch = switchOn(store)
-        val t = Instant.parse("2026-11-15T12:00:00Z").toEpochMilli()
-        assertTrue(switch.claimForegroundCheck(t))
-        assertFalse(switch.claimForegroundCheck(t + 59 * 60_000L))
-        assertTrue(switch.claimForegroundCheck(t + 60 * 60_000L))
-        assertEquals(t + 60 * 60_000L, store.current[lastCheckKey])
+        val switch = clocked(store)
+        assertTrue(switch.claimForegroundCheck())
+        val first = wall
+        advance(59 * MINUTE)
+        assertFalse(switch.claimForegroundCheck())
+        advance(MINUTE)
+        assertTrue(switch.claimForegroundCheck())
+        assertEquals(first + 60 * MINUTE, store.current[lastCheckKey])
 
-        val restarted = switchOn(store)
-        assertFalse(restarted.claimForegroundCheck(t + 61 * 60_000L))
-        assertTrue(restarted.claimForegroundCheck(t + 120 * 60_000L))
+        advance(MINUTE)
+        val restarted = clocked(store)
+        assertFalse(restarted.claimForegroundCheck())
+        advance(59 * MINUTE)
+        assertTrue(restarted.claimForegroundCheck())
+    }
+
+    @Test fun `a wall clock set back never buys an extra check`() = runBlocking {
+        val switch = clocked(MemoryPreferences(preferencesOf(enabledKey to true)))
+        assertTrue(switch.claimForegroundCheck())
+        wall -= 2 * MINUTE // the phone's clock is corrected backwards; elapsed time keeps counting
+        elapsed += MINUTE
+        assertFalse(switch.claimForegroundCheck())
+        elapsed += 59 * MINUTE
+        assertTrue(switch.claimForegroundCheck())
+    }
+
+    @Test fun `a stored last check in the future counts as a check just now`() = runBlocking {
+        val store = MemoryPreferences(preferencesOf(enabledKey to true, lastCheckKey to wall + 5 * 24 * 60 * MINUTE))
+        val switch = clocked(store)
+        assertFalse(switch.claimForegroundCheck())
+        advance(59 * MINUTE)
+        assertFalse(switch.claimForegroundCheck())
+        advance(MINUTE)
+        assertTrue(switch.claimForegroundCheck())
     }
 
     @Test fun `with the switch off no foreground check is claimed`() = runBlocking {
-        val switch = RulesFeedSwitch(RulesFeedDataSource(MemoryPreferences()), scope)
-        assertFalse(switch.claimForegroundCheck(Instant.parse("2026-11-15T12:00:00Z").toEpochMilli()))
+        assertFalse(clocked(MemoryPreferences()).claimForegroundCheck())
     }
 
     /** Never reached in these tests: every refresh is refused before a request. */
