@@ -483,7 +483,7 @@ publishing run under one `Mutex`, so a load suspended in reconciliation cannot b
 generation live with the other's capabilities (`ActivationSerializationTest`). A `Prepared` carries its interpreter,
 the floor it was built on and the activation revision it saw; `activate` refuses it (false, with a WARN, live
 generation untouched) when any of them is no longer current, so a candidate prepared on an older floor, or before
-another generation went live, cannot replace a newer one. No network code exists yet (the rules feed is #640).
+another generation went live, cannot replace a newer one. Fetching rules through the feed channel (below) is #640.
 
 - **Generation.** `RuleGeneration` is one immutable set of screen, click and notification rulesets, and it is the
   redaction source (`ScreenRedactionSource`). `ObservationClassifier.classifyFrame` reads the live generation once
@@ -539,3 +539,76 @@ another generation went live, cannot replace a newer one. No network code exists
   their prose, the contract tables, the per-file caps) and pins it to the number, so a vocabulary change fails CI
   until it bumps the contract or re-pins it on purpose. The 1 MB per-file limit (`MAX_RULE_FILE_BYTES`) and
   `MAX_RULES_PER_FILE` hold for every source.
+
+
+## The feed channel: transport, cache and consent (#1565)
+
+One layer fetches, keeps and swaps every signed feed (fuel, constants, rules): `FeedClient` in `:core:network`
+(`network.feed`) and `FeedRepository` in `:core:data` (`data.feed`). Every check of the bytes is `feed-contract`'s;
+this layer re-implements none. It has no consumer yet: fuel is #1566, rules #640, constants #695. Nothing calls
+`refresh`, and gig.log's pin file holds no key, so this build sends no feed request.
+
+- **Transport.** `FeedClient` GETs `<feedsUrl><feed>/envelope.json`, then each payload at `<feed>/<sha256>.json`,
+  built from the signed hash under the envelope's own feed directory (a non-hex name is refused before any request).
+  https only for every source, checked before every request. Redirects off (`followRedirects`, `followSslRedirects`),
+  no cookie jar, no cache, and no header of ours but the fixed `User-Agent: gig.log-feeds/1`. `If-None-Match` goes
+  only to gig.log's own source (`FeedSource.GigLog`). A custom source gets no conditional request, and its ETag is
+  never handed back or stored, because an operator-chosen ETag could follow a phone across IP addresses (security
+  X8). A 404, 408, 429, 5xx or transport failure is retried twice, a minute apart (`RETRY_DELAY_MS`, injected in
+  tests), which covers an edge cache that holds the new envelope before its payloads. A 3xx or any other status is
+  final. OkHttp makes no retry of its own: a network interceptor reads the gate's non-blocking snapshot
+  (`FeedGate.isOpen`) at every exchange, fail closed, and drops `Retry-After`, which
+  OkHttp otherwise follows on a `503 Retry-After: 0` without asking anyone. The suspending check (`FeedGate.allows`)
+  runs only on the caller's coroutine, before each request. Bodies are
+  read bounded (`FeedLimits.readBounded`). The feed client has no HTTP logging in any build (`ClientProfile.Feed`),
+  since a request line carries the source's URL.
+- **Consent.** `FeedPolicy` gives each feed's switch and source as `StateFlow`s (`AppFeedPolicy`: fuel follows
+  `isGasPriceAuto`, started eagerly and off until read; constants and rules are off until their own switches exist;
+  every feed reads gig.log's site until #1567). One `RefreshGate` per refresh reads their current values, so the
+  check before every request (retries included), the one inside every network exchange, and the ones before staging,
+  committing and activating never disagree and never wait for a watcher. A watcher cancels the work as soon as the switch turns off or the source changes.
+  Residual (open, #1566): the fuel switch's `StateFlow` mirrors DataStore through a collector, so for the moment
+  between the stored switch turning off and that collector running, both checks still read on and one request can
+  start. #1566 closes it at the owner: the code that saves the fuel switch also sets the in-memory value at once.
+  Each feed has its own switch: the fuel switch never gates rules or constants, and rules get their own consent with
+  the rules client (#640). A `OneShotGrant` (an explicit user act, such as "Resume auto") is one call's parameter, bound to its feed and source
+  id. It is dead from the moment the coroutine that minted it starts cancelling: the refresh holds a child job of
+  that owner, which is cancelled at the onset, before the owner finishes. One call spends it, so a cancelled act,
+  another feed, another source or a second use is refused before any request. It is never stored, so a background
+  refresh cannot start from one.
+- **Cache.** Under `noBackupFilesDir/feeds/<source>/<feed>/`, a generation is written to `stage-<sequence>-<random>/`
+  (payloads named by sha256). Committing writes and fsyncs its `meta.json` (the envelope, so start-up re-verifies the
+  signed manifest; the digest; the high-water with the digest that set it; the consumer's carry, such as fuel
+  anchors or retained constant years; gig.log's ETag), renames the stage to `gen-<sequence>/`, then replaces
+  `CURRENT`, which holds the pointer pair (current, previous), through an fsynced temp file and an atomic rename. A
+  `gen-` directory therefore exists only once committed, and a `stage-` directory is never committed state. The
+  commit point is that rename, synced into its parent: any failure before it aborts and leaves no `gen-` directory;
+  a failure of the pointer's write, rename or sync after it is a WARN, and the commit stands (the next load
+  activates the newest generation). Every commit re-syncs the whole directory chain from `feeds/` down into its
+  parents (`DirectorySync`), so a parent sync that failed on an earlier try is retried. The high-water and the
+  carry live only in `meta.json`, never in DataStore. One mutex per (source, feed) serializes start-up and every
+  refresh.
+- **The disk decides the high-water.** Before every acceptance decision the repository reads it fresh from disk: the
+  largest sequence that any `gen-` directory name (evidence even when its `meta.json` is unreadable), any readable
+  `meta.json` or the pointer pair names, with a digest only when a readable `meta.json` records one for it. A
+  generation committed but never activated (a revocation or a crash after the commit) therefore still counts, and
+  the next refresh loads it before deciding. Pruning runs after the commit, keeps the new generation and the one it
+  replaced, and never removes the newest generation on disk.
+- **Stage, commit, activate.** The consumer's `FeedStager` checks the staged files (fuel and constants bounds; for
+  rules, the batch loader's `prepareGeneration`) and returns the value and the carry to commit, without activating.
+  Activation publishes `StateFlow<FeedState<T>>`, which holds anchors only (`value`, `period`, `issuedAt`,
+  `lastError`); the UI derives "current" or "old" from `FeedFreshness` and `rememberNow()`. A file a committed
+  generation already holds with the same sha256 is re-verified against the new manifest and not downloaded again.
+- **Start-up** (`start`) deletes every stage, then walks the `gen-` directories newest first and activates the first
+  that re-verifies through `VerifiedManifest.verify` and `VerifiedFeedFile.verify`, whose `contract` this build's
+  stager reads, and (rules) that the bundled `FEED_SEQUENCE` does not supersede; else no feed value (the consumer's
+  bundled baseline, or no feed price for fuel). A pointer that names a missing or invalid generation is only
+  high-water evidence. The high-water never drops. A crash after the stage's rename activates that generation at the
+  next start; a crash before it leaves the old generation live. `FeedRepositoryTest` holds the issue's acceptance
+  list and these edges against an HTTPS fake server that answers for the real host names, with feeds signed by
+  generated keys as custom sources (gig.log's pins come only from the shipped pin file, so no test seam widens
+  `FeedTrust`).
+- **Logging** (tag `Feeds`): INFO only for an accepted generation (feed, sequence, source id); WARN when last-good
+  is kept for a refusal, a stage rejection or a storage failure, for a start-up fallback, and for a commit whose
+  final directory sync failed; DEBUG for a fetch failure, a denial or a cancellation. No `Feeds` line carries a URL,
+  an address, a header or a body.

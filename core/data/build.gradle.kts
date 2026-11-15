@@ -61,4 +61,8 @@ dependencies {
     testImplementation(libs.robolectric)
     testImplementation(libs.mockito.kotlin)
     testImplementation(libs.kotlinx.coroutines.test)
+    // #1565: the feed repository tests run the real FeedClient against an HTTPS fake server.
+    testImplementation(libs.okhttp)
+    testImplementation(libs.okhttp.mockwebserver)
+    testImplementation(libs.okhttp.tls)
 }
