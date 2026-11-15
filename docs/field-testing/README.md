@@ -86,6 +86,7 @@ Dated field reports continue below; checklist policy is in CHECKLIST §0.
 
 ## Sessions
 
+- [2026-11-15 — desk analysis of the 11-15 pull: shifts 11-13 and 11-14; money reconciles; a stacked drop logged as arrived 5 mi early; the handoff screen saved a building name raw](sessions/2026-11-15-desk-analysis-of-the-11-15-pull-shifts-11-13-and-11-14.md)
 - [2026-11-12 — desk analysis of the 11-12 pull: dashes 11-07 and 11-11; money reconciles; two trailing-plus cards lost; v0.233.0's offer pool…](sessions/2026-11-12-desk-analysis-of-the-11-12-pull-dashes-11-07-and-11-11.md)
 - [2026-11-06 — desk analysis of the 11-06 pull: dashes 11-01 and 11-05; DoorDash 8.106.9 breaks the offline home, so a $0 shift never ended](sessions/2026-11-06-desk-analysis-of-the-11-06-pull-doordash-8-106-9.md)
 - [2026-10-26 — desk analysis of the 10-26 pull: dashes 10-18 evening to 10-25; two accepts recorded as timeouts cost $21.40; two…](sessions/2026-10-26-desk-analysis-of-the-10-26-pull-dashes-10-18.md)
