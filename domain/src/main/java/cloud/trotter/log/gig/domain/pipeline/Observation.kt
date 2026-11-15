@@ -81,6 +81,13 @@ sealed interface Observation : cloud.trotter.log.gig.domain.model.state.StateEve
          * anything, and it is never serialized into a capture envelope.
          */
         val parseShortfalls: List<ParseShortfall> = emptyList(),
+        /**
+         * The winning branch's shape (`CompiledBranch.shape`, #1571); null for an UNKNOWN frame or a branch that
+         * declares none. A DIAGNOSTIC passenger beside [parseShortfalls]: the parse-rot tracker reads it to tell
+         * whether a healthy frame counts toward its rule's parse sample. Nothing reads it to decide anything, and it is
+         * never serialized into a capture envelope.
+         */
+        val matchedShape: String? = null,
     ) : FlowObservation
 
     /** A click/tap event classified by the click pipeline. */

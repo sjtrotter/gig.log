@@ -90,9 +90,20 @@ class RecognitionHealthMonitorTest {
     }
 
     private data class ScreenCall(val timestamp: Long, val platform: String, val version: String?, val rule: String?)
+    private data class AttemptCall(val timestamp: Long, val platform: String, val version: String?, val rule: String, val shortfall: Boolean)
     private class Sink : HealthSink {
         val screens = mutableListOf<ScreenCall>()
         val trips = mutableListOf<ScreenCall>()
+        val attempts = mutableListOf<AttemptCall>()
+        override fun onParseAttempt(
+            timestampMillis: Long,
+            platformWire: String,
+            platformAppVersion: String?,
+            ruleId: String,
+            shortfall: Boolean,
+        ) {
+            attempts += AttemptCall(timestampMillis, platformWire, platformAppVersion, ruleId, shortfall)
+        }
         override fun onScreen(timestampMillis: Long, platformWire: String, platformAppVersion: String?, ruleId: String?) {
             screens += ScreenCall(timestampMillis, platformWire, platformAppVersion, ruleId)
         }
@@ -133,9 +144,12 @@ class RecognitionHealthMonitorTest {
         target: String = UNKNOWN_TARGET,
         ruleId: String? = null,
         shortfalls: List<ParseShortfall> = emptyList(),
+        shape: String? = null,
+        version: String? = null,
     ) = Observation.Screen(
-        timestamp = t, captureId = null, ruleId = ruleId, metadata = ReplayMetadata.EMPTY,
+        timestamp = t, captureId = null, ruleId = ruleId, metadata = ReplayMetadata.EMPTY.copy(platformAppVersion = version),
         flow = null, modeHint = null, parsed = ParsedFields.None, target = target, parseShortfalls = shortfalls,
+        matchedShape = shape,
     )
 
     private val doordash = requireNotNull(Platform.DoorDash.packageName)
@@ -279,6 +293,15 @@ class RecognitionHealthMonitorTest {
                 throw AssertionError("private details must never be logged")
             }
             override fun onTrip(timestampMillis: Long, platformWire: String, platformAppVersion: String?) {
+                throw AssertionError("private details must never be logged")
+            }
+            override fun onParseAttempt(
+                timestampMillis: Long,
+                platformWire: String,
+                platformAppVersion: String?,
+                ruleId: String,
+                shortfall: Boolean,
+            ) {
                 throw AssertionError("private details must never be logged")
             }
         }
@@ -574,5 +597,72 @@ class RecognitionHealthMonitorTest {
         runCurrent()
 
         assertEquals(listOf("closed:doordash", "notice:doordash"), reporter.calls)
+    }
+
+    // ── #1571: the parse sample's attempts ──────────────────────────────
+
+    @Test fun `the sink receives one attempt per visit with the start frame's version`() = runTest {
+        val sink = Sink()
+        val monitor = monitor(sink = sink)
+        monitor.onScreenAdmitted(doordash, frame(0, shortfalls = listOf(offerRot), version = "7.1"))
+        monitor.onScreenAdmitted(doordash, frame(500, shortfalls = listOf(offerRot), version = "7.2"))
+        monitor.onScreenAdmitted(doordash, frame(3_000, target = "home", ruleId = homeRule, shape = "idle", version = "7.2"))
+        for (t in listOf(10_000L, 10_500L, 11_000L)) {
+            monitor.onScreenAdmitted(doordash, frame(t, target = "offer", ruleId = offerRule, shape = "offer", version = "7.2"))
+        }
+        assertEquals(
+            listOf(
+                AttemptCall(0, dd, "7.1", offerRule, shortfall = true),
+                AttemptCall(10_000, dd, "7.2", offerRule, shortfall = false),
+            ),
+            sink.attempts,
+        )
+    }
+
+    @Test fun `an UNKNOWN frame is never a healthy attempt, whatever shape it carries`() = runTest {
+        val sink = Sink()
+        val monitor = monitor(sink = sink)
+        monitor.onScreenAdmitted(doordash, frame(0, ruleId = offerRule, shape = "offer", version = "7.1"))
+        assertTrue(sink.attempts.isEmpty())
+    }
+
+    @Test fun `a throwing onParseAttempt changes nothing about recognition or the other sink calls`() = runTest {
+        val calls = mutableListOf<String>()
+        val sink = object : HealthSink {
+            override fun onScreen(timestampMillis: Long, platformWire: String, platformAppVersion: String?, ruleId: String?) {
+                calls += "screen:$timestampMillis"
+            }
+            override fun onTrip(timestampMillis: Long, platformWire: String, platformAppVersion: String?) {
+                calls += "trip:$timestampMillis"
+            }
+            override fun onParseAttempt(
+                timestampMillis: Long,
+                platformWire: String,
+                platformAppVersion: String?,
+                ruleId: String,
+                shortfall: Boolean,
+            ) {
+                throw IllegalStateException("ledger down")
+            }
+        }
+        val healthyReporter = Recorder()
+        val healthyMonitor = monitor(healthyReporter, Sink())
+        val reporter = Recorder()
+        val monitor = monitor(reporter, sink)
+        for (m in listOf(healthyMonitor, monitor)) {
+            for (i in 0 until 5) {
+                val t = i * 4_000L
+                m.onScreenAdmitted(doordash, frame(t, shortfalls = listOf(offerRot), version = "7.1"))
+                m.onScreenAdmitted(doordash, frame(t + 1_000, target = "home", ruleId = homeRule, shape = "idle", version = "7.1"))
+            }
+            m.onScreenAdmitted(doordash, frame(20_000, target = "home", ruleId = homeRule, shape = "idle", version = "7.1"))
+        }
+        runCurrent()
+
+        assertEquals(healthyReporter.calls, reporter.calls)
+        assertEquals(listOf("notice:doordash"), reporter.calls)
+        assertEquals(healthyMonitor.open.value, monitor.open.value)
+        assertEquals("every frame still reached onScreen", 11, calls.count { it.startsWith("screen:") })
+        assertEquals(5, warnings.count { it == "Health ledger record failed — sensing unaffected" })
     }
 }

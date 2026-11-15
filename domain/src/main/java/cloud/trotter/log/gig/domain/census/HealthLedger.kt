@@ -1,5 +1,6 @@
 package cloud.trotter.log.gig.domain.census
 
+import cloud.trotter.census.contract.WireTokenGrammars
 import cloud.trotter.census.contract.health.HealthReportDto
 import cloud.trotter.census.contract.health.HealthReportSchema
 import kotlinx.serialization.Serializable
@@ -28,6 +29,11 @@ data class HealthRow(
     val revision: Long = 0,
     val postedRevision: Long = -1,
     val refusedRevision: Long = -1,
+    /**
+     * Per rule id, the row's last [HealthReportSchema.PARSE_SAMPLE] eligible parse attempts (#1571), oldest first:
+     * `'0'` read every required field, `'1'` left one null. Never longer than PARSE_SAMPLE.
+     */
+    val parseSamples: Map<String, String> = emptyMap(),
 )
 
 /** Immutable, JSON object keyed ledger scoped to one census identity generation. */
@@ -46,6 +52,26 @@ data class HealthLedger(val rows: Map<String, HealthRow> = emptyMap(), val gener
 
     fun trip(key: HealthKey): HealthLedger = update(key) {
         it.copy(trips = increment(it.trips), revision = it.revision + 1)
+    }
+
+    /**
+     * One eligible parse attempt of [ruleId] (#1571). Returns this ledger unchanged for a rule id the report could not
+     * carry, for a new rule once the row holds [HealthReportSchema.MAX_PARSE_SHORTFALL_RULES], and for a new row past
+     * [MAX_ROWS].
+     */
+    fun attempt(key: HealthKey, ruleId: String, shortfall: Boolean): HealthLedger {
+        if (!isReportableRuleId(ruleId)) return this
+        val row = rows[key.toString()]
+        if (row != null && ruleId !in row.parseSamples &&
+            row.parseSamples.size >= HealthReportSchema.MAX_PARSE_SHORTFALL_RULES
+        ) {
+            return this
+        }
+        return update(key) {
+            val sample = (it.parseSamples[ruleId].orEmpty() + if (shortfall) SHORTFALL else HEALTHY)
+                .takeLast(HealthReportSchema.PARSE_SAMPLE)
+            it.copy(parseSamples = it.parseSamples + (ruleId to sample), revision = it.revision + 1)
+        }
     }
 
     fun pruneBefore(dayExclusive: String): HealthLedger = copy(
@@ -82,20 +108,67 @@ data class HealthLedger(val rows: Map<String, HealthRow> = emptyMap(), val gener
     companion object {
         const val MAX_ROWS = 256
         private const val MAX_COUNT = HealthReportSchema.MAX_COUNT
+        private const val HEALTHY = '0'
+        private const val SHORTFALL = '1'
         private fun increment(value: Int): Int = if (value >= MAX_COUNT) MAX_COUNT else value + 1
 
-        /** The wire report for one closed row; [HealthReportSchema] owns its shape and bounds. */
-        fun reportJson(key: HealthKey, row: HealthRow, appVersion: String, rulesetVersion: String): String =
-            HealthReportSchema.encode(HealthReportDto(
-                day = key.day,
-                platform = key.platform,
-                platformAppVersion = key.platformAppVersion,
-                appVersion = appVersion,
-                rulesetVersion = rulesetVersion,
-                admitted = row.admitted,
-                unknown = row.unknown,
-                trips = row.trips,
-                ruleCounts = row.ruleCounts,
-            ))
+        private fun isReportableRuleId(ruleId: String): Boolean =
+            ruleId.length <= HealthReportSchema.MAX_PARSE_RULE_ID_LENGTH && WireTokenGrammars.ruleId.matches(ruleId)
+
+        /**
+         * Whether a persisted row's [HealthRow.parseSamples] is one [attempt] could have built: reportable rule ids, at
+         * most [HealthReportSchema.MAX_PARSE_SHORTFALL_RULES] of them, each sample non-empty, `0`/`1` only and at most
+         * [HealthReportSchema.PARSE_SAMPLE] long.
+         */
+        fun wellFormedSamples(row: HealthRow): Boolean =
+            row.parseSamples.size <= HealthReportSchema.MAX_PARSE_SHORTFALL_RULES &&
+                row.parseSamples.all { (rule, sample) ->
+                    isReportableRuleId(rule) && sample.length in 1..HealthReportSchema.PARSE_SAMPLE &&
+                        sample.all { it == HEALTHY || it == SHORTFALL }
+                }
+
+        /**
+         * Per rule with a full sample, its shortfalls among the last [HealthReportSchema.PARSE_SAMPLE] attempts; null
+         * when no rule has a full sample, so the report leaves the field off.
+         */
+        fun parseShortfall(row: HealthRow): Map<String, Int>? = row.parseSamples
+            .filterValues { it.length == HealthReportSchema.PARSE_SAMPLE }
+            .mapValues { (_, sample) -> sample.count { it == SHORTFALL } }
+            .toSortedMap()
+            .takeIf { it.isNotEmpty() }
+
+        /**
+         * The wire report for one closed row; [HealthReportSchema] owns its shape and bounds. With [withParseShortfall]
+         * false the report leaves `parseShortfall` off, as [sendableReportJson] does when the full report does not fit.
+         */
+        fun reportJson(
+            key: HealthKey,
+            row: HealthRow,
+            appVersion: String,
+            rulesetVersion: String,
+            withParseShortfall: Boolean = true,
+        ): String = HealthReportSchema.encode(HealthReportDto(
+            day = key.day,
+            platform = key.platform,
+            platformAppVersion = key.platformAppVersion,
+            appVersion = appVersion,
+            rulesetVersion = rulesetVersion,
+            admitted = row.admitted,
+            unknown = row.unknown,
+            trips = row.trips,
+            ruleCounts = row.ruleCounts,
+            parseShortfall = if (withParseShortfall) parseShortfall(row) else null,
+        ))
+
+        /**
+         * The report to send for one closed row: the full report when it passes [HealthReportSchema.fits], else the
+         * report without `parseShortfall` when that one fits, else null (the row is refused as oversized).
+         */
+        fun sendableReportJson(key: HealthKey, row: HealthRow, appVersion: String, rulesetVersion: String): String? {
+            val full = reportJson(key, row, appVersion, rulesetVersion)
+            if (HealthReportSchema.fits(full)) return full
+            return reportJson(key, row, appVersion, rulesetVersion, withParseShortfall = false)
+                .takeIf(HealthReportSchema::fits)
+        }
     }
 }

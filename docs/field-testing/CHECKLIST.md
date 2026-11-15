@@ -74,6 +74,7 @@ Five items the dev confirmed on 2026-10-07. Each full item appears once, with it
 - [The Play build does not read an Uber offer pop-up (#1413)](checklist/open/1413-play-build-uber-offer-not-read.md)
 - [A recognition incident posts one notice and shows on Home (#1560)](checklist/open/1560-recognition-incident-notice.md)
 - [Recognition rules: the notice actions and Check now (#640)](checklist/open/640-rules-updates-notice-actions-check-now.md)
+- [The health report carries per-rule shortfall counts (#1571)](checklist/open/1571-health-report-parse-shortfall.md)
 - [The bottom bar's three tabs and where each link lands (#1447)](checklist/open/1447-bottom-bar-routes.md)
 - [Permission and consent screens say only what each one does (#1457)](checklist/open/1457-permission-and-consent-screens.md)
 - [One offer story, no score or verdict (#1442)](checklist/open/1442-one-offer-story-no-score-or-verdict.md)

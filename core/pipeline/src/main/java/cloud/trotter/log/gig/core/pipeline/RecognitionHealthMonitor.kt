@@ -83,6 +83,8 @@ class RecognitionHealthMonitor @Inject constructor(
     private class FrameOutcome(
         val alarm: RecognitionHealth.Alarm?,
         val edges: List<RotEdge>,
+        /** The parse-sample attempts the frame completed (#1571); handed to the sink outside the lock. */
+        val attempts: List<ParseAttempt>,
         /** The closed incident's `openedAt`, when this frame closed it. */
         val closedOpenedAt: Long?,
         val notice: RecognitionIncident?,
@@ -147,9 +149,24 @@ class RecognitionHealthMonitor @Inject constructor(
                 Timber.tag(TAG).w("Health ledger record failed — sensing unaffected")
             }
 
-            val shortfalls = (obs as? Observation.Screen)?.parseShortfalls.orEmpty()
+            val screen = obs as? Observation.Screen
+            val shortfalls = screen?.parseShortfalls.orEmpty()
             val frame = synchronized(lock) {
-                decide(wire, obs.timestamp, unknown, obs.ruleId.takeUnless { unknown }, shortfalls)
+                decide(
+                    wire, obs.timestamp, obs.metadata.platformAppVersion, unknown,
+                    obs.ruleId.takeUnless { unknown }, screen?.matchedShape.takeUnless { unknown }, shortfalls,
+                )
+            }
+
+            for (attempt in frame.attempts) {
+                try {
+                    sink.onParseAttempt(
+                        attempt.timestamp, attempt.platformWire, attempt.platformAppVersion, attempt.ruleId,
+                        attempt.shortfall,
+                    )
+                } catch (t: Throwable) {
+                    Timber.tag(TAG).w("Health ledger record failed — sensing unaffected")
+                }
             }
 
             frame.alarm?.let { alarm ->
@@ -187,12 +204,15 @@ class RecognitionHealthMonitor @Inject constructor(
     private fun decide(
         wire: String,
         timestamp: Long,
+        platformAppVersion: String?,
         unknown: Boolean,
         winnerRuleId: String?,
+        winnerShape: String?,
         shortfalls: List<ParseShortfall>,
     ): FrameOutcome {
         val alarm = health.record(wire, unknown)
-        val edges = rot.record(wire, timestamp, winnerRuleId, shortfalls)
+        val step = rot.step(wire, timestamp, platformAppVersion, winnerRuleId, winnerShape, shortfalls)
+        val edges = step.edges
         val openedBefore = if (edges.any { it is RotEdge.Cleared }) {
             book.open().firstOrNull { it.platformWire == wire }?.openedAt
         } else {
@@ -216,7 +236,7 @@ class RecognitionHealthMonitor @Inject constructor(
         closed.forEach { actions.trySend(Action.Close(it)) }
         notice?.let { actions.trySend(Action.Post(it, book.lastNoticeAt())) }
 
-        return FrameOutcome(alarm, edges, openedBefore?.takeIf { closed.isNotEmpty() }, notice)
+        return FrameOutcome(alarm, edges, step.attempts, openedBefore?.takeIf { closed.isNotEmpty() }, notice)
     }
 
     /** The #1560 log lines: our own identifiers, counts and minutes only (principle 7). */

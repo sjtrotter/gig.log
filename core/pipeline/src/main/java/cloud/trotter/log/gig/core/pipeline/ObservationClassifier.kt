@@ -220,6 +220,7 @@ class ObservationClassifier @Inject constructor(
             targets = result.targets,
             transitionOverrides = result.transitionOverrides,
             parseShortfalls = shortfalls.toList(),
+            matchedShape = result.shape,
         )
 
         // Cache last non-sensitive screen for click enrichment, keyed by THIS
@@ -246,6 +247,7 @@ class ObservationClassifier @Inject constructor(
         targets: Map<String, NodeRef> = emptyMap(),
         transitionOverrides: Map<TransitionTrigger, List<RequestedEffect>> = emptyMap(),
         parseShortfalls: List<ParseShortfall> = emptyList(),
+        matchedShape: String? = null,
     ) = Observation.Screen(
         timestamp = now,
         captureId = null,
@@ -261,6 +263,7 @@ class ObservationClassifier @Inject constructor(
         targets = targets,
         transitionOverrides = transitionOverrides,
         parseShortfalls = parseShortfalls,
+        matchedShape = matchedShape,
     )
 
     // ── Click ───────────────────────────────────────────────────────────

@@ -14,6 +14,19 @@ sealed interface RotEdge {
 }
 
 /**
+ * One eligible attempt of a rule ([ParseRotTracker]): a visit of [ruleId] that read every required field
+ * ([shortfall] false) or a confirmed rot occurrence ([shortfall] true). [timestamp] and [platformAppVersion] are the
+ * visit's start frame's, so an attempt that confirms after midnight UTC still counts toward the day it started.
+ */
+data class ParseAttempt(
+    val platformWire: String,
+    val ruleId: String,
+    val timestamp: Long,
+    val platformAppVersion: String?,
+    val shortfall: Boolean,
+)
+
+/**
  * The pure half of the #1560 parse-rot cause: a rule that keeps MATCHING screens while its
  * shape-required fields (`ParsedFieldsFactory.REQUIRED_FIELDS_BY_SHAPE`: offer → payAmount,
  * distance; post_task → totalPay; session_ended → totalEarnings) come back null. #1036 counts
@@ -39,6 +52,13 @@ sealed interface RotEdge {
  * pre-render frame lives here and only here; later consumers of eligible attempts reuse it.
  * R trips after [TRIP_OCCURRENCES] confirmed occurrences with no healthy parse of R between, and
  * [CLEAR_HEALTHY] healthy parses of R clear it.
+ *
+ * **Eligible attempts (#1571).** The health report's per-rule sample (`HealthReportSchema.PARSE_SAMPLE`) counts
+ * visits, not frames, on both sides. A confirmed occurrence is one shortfall attempt, tripped rule or not; a
+ * pre-render occurrence is none. A healthy frame of R whose winning branch's shape declares required fields is one
+ * healthy attempt when it starts a healthy visit: the platform's previous admitted frame was not a healthy frame of R,
+ * and R's previous healthy-visit start is unset or at least [PRE_RENDER_WINDOW_MS] earlier. So a pre-render visit is
+ * one healthy attempt. Attempts come back from [step] and never feed the trip or clear counts.
  *
  * **Only required-field rot counts.** Total rot of shapes with no required fields is deferred to
  * #1049: those shapes have benign nulls (the `waiting_for_offer` carousel), and sensitive and
@@ -79,6 +99,9 @@ class ParseRotTracker {
         /** Start of the one unconfirmed occurrence. */
         var pendingAt: Long? = null
 
+        /** The platform app version of [pendingAt]'s frame; its attempt carries it. */
+        var pendingVersion: String? = null
+
         /** Start of the rule's latest occurrence, confirmed or not. */
         var lastOccurrenceStart: Long? = null
         var confirmed = 0
@@ -95,12 +118,21 @@ class ParseRotTracker {
 
         /** Sorted by rule id, so edges come out in a stable order. */
         val rules = TreeMap<String, RuleRun>()
+
+        /** The rule whose healthy frame the platform's previous admitted frame was; null for any other frame. */
+        var healthyOnLastFrame: String? = null
+
+        /** Healthy-visit starts inside the last [PRE_RENDER_WINDOW_MS], by rule id; older ones are dropped. */
+        val healthyVisitStart = HashMap<String, Long>()
     }
+
+    /** What one [step] decided: the trip and clear edges, and the eligible attempts it completed. */
+    data class Step(val edges: List<RotEdge>, val attempts: List<ParseAttempt>)
 
     private val platforms = HashMap<String, PlatformState>()
 
     /**
-     * One admitted screen frame.
+     * One admitted screen frame, edges only (the #1560 tests' entry point; it reports no attempt).
      *
      * @param winnerRuleId the rule that classified the frame; null for an UNKNOWN frame.
      * @param shortfalls the frame's own shortfalls, as the classifier reported them.
@@ -111,16 +143,48 @@ class ParseRotTracker {
         timestamp: Long,
         winnerRuleId: String?,
         shortfalls: List<ParseShortfall>,
-    ): List<RotEdge> {
+    ): List<RotEdge> = step(platformWire, timestamp, null, winnerRuleId, null, shortfalls).edges
+
+    /**
+     * One admitted screen frame.
+     *
+     * @param platformAppVersion the frame's platform app version; an attempt carries its start frame's.
+     * @param winnerRuleId the rule that classified the frame; null for an UNKNOWN frame.
+     * @param winnerShape the winning branch's shape; a healthy attempt needs one that declares required fields.
+     * @param shortfalls the frame's own shortfalls, as the classifier reported them.
+     * @return the edges (every [RotEdge.Tripped] before every [RotEdge.Cleared]) and the attempts the frame completed.
+     */
+    fun step(
+        platformWire: String,
+        timestamp: Long,
+        platformAppVersion: String?,
+        winnerRuleId: String?,
+        winnerShape: String?,
+        shortfalls: List<ParseShortfall>,
+    ): Step {
         val state = platforms.getOrPut(platformWire) { PlatformState() }
+        val attempts = mutableListOf<ParseAttempt>()
 
         // 1. Confirm what this frame's time has made old enough.
-        val edges = sweepState(platformWire, state, timestamp)
+        val edges = sweepState(platformWire, state, timestamp, attempts)
 
         // 2. A healthy winner: its own branch read every required field.
         val healthy = winnerRuleId != null && shortfalls.none {
             it.ruleId == winnerRuleId && !it.branchSkipped && it.hasParseTrigger
         }
+        val healthyWinner = if (healthy) winnerRuleId else null
+        if (healthyWinner != null && requiresFields(winnerShape)) {
+            val lastStart = state.healthyVisitStart[healthyWinner]
+            if (state.healthyOnLastFrame != healthyWinner &&
+                (lastStart == null || timestamp - lastStart >= PRE_RENDER_WINDOW_MS)
+            ) {
+                // A start PRE_RENDER_WINDOW_MS old reads the same as none, so only the window's starts are kept.
+                state.healthyVisitStart.values.removeIf { timestamp - it >= PRE_RENDER_WINDOW_MS }
+                state.healthyVisitStart[healthyWinner] = timestamp
+                attempts += ParseAttempt(platformWire, healthyWinner, timestamp, platformAppVersion, shortfall = false)
+            }
+        }
+        state.healthyOnLastFrame = healthyWinner
         if (healthy) {
             val winner = checkNotNull(winnerRuleId)
             state.rules[winner]?.let { run ->
@@ -153,6 +217,7 @@ class ParseRotTracker {
             val last = run.lastOccurrenceStart
             if (ruleId !in state.rotOnLastFrame && (last == null || timestamp - last >= PRE_RENDER_WINDOW_MS)) {
                 run.pendingAt = timestamp
+                run.pendingVersion = platformAppVersion
                 run.lastOccurrenceStart = timestamp
             }
         }
@@ -161,13 +226,17 @@ class ParseRotTracker {
         state.rotOnLastFrame = rotNow
 
         // 5. Trips before clears (L8): a frame that trips one rule and clears another keeps the incident open.
-        return ordered(edges)
+        return Step(ordered(edges), attempts)
     }
 
     /** Confirmation only, no frame: confirms what [timestamp] has made old enough. Tests end each platform with it. */
-    fun sweep(platformWire: String, timestamp: Long): List<RotEdge> {
-        val state = platforms[platformWire] ?: return emptyList()
-        return ordered(sweepState(platformWire, state, timestamp))
+    fun sweep(platformWire: String, timestamp: Long): List<RotEdge> = sweepStep(platformWire, timestamp).edges
+
+    /** [sweep], with the shortfall attempts it confirmed. */
+    fun sweepStep(platformWire: String, timestamp: Long): Step {
+        val state = platforms[platformWire] ?: return Step(emptyList(), emptyList())
+        val attempts = mutableListOf<ParseAttempt>()
+        return Step(ordered(sweepState(platformWire, state, timestamp, attempts)), attempts)
     }
 
     fun isRotted(platformWire: String, ruleId: String): Boolean =
@@ -177,12 +246,19 @@ class ParseRotTracker {
     fun confirmedOccurrences(platformWire: String, ruleId: String): Int =
         platforms[platformWire]?.rules?.get(ruleId)?.confirmed ?: 0
 
-    private fun sweepState(platformWire: String, state: PlatformState, timestamp: Long): MutableList<RotEdge> {
+    private fun sweepState(
+        platformWire: String,
+        state: PlatformState,
+        timestamp: Long,
+        attempts: MutableList<ParseAttempt>,
+    ): MutableList<RotEdge> {
         val edges = mutableListOf<RotEdge>()
         for ((ruleId, run) in state.rules) {
             val pending = run.pendingAt ?: continue
             if (pending + PRE_RENDER_WINDOW_MS > timestamp) continue
             run.pendingAt = null
+            // A confirmed occurrence is one shortfall attempt, whether or not the rule is already tripped.
+            attempts += ParseAttempt(platformWire, ruleId, pending, run.pendingVersion, shortfall = true)
             if (run.rotted) {
                 // A confirmed rot visit of a rotted rule: the clear streak starts over.
                 run.healthyStreak = 0
@@ -213,12 +289,11 @@ class ParseRotTracker {
         edges.filterIsInstance<RotEdge.Tripped>() + edges.filterIsInstance<RotEdge.Cleared>()
 
     /** Required-field rot of a shape that declares required fields; nothing else counts. */
-    private fun eligible(shortfall: ParseShortfall): Boolean {
-        val shape = shortfall.shape ?: return false
-        return shortfall.hasParseTrigger &&
-            ParsedFieldsFactory.REQUIRED_FIELDS_BY_SHAPE[shape].orEmpty().isNotEmpty() &&
-            shortfall.nullRequiredFields.isNotEmpty()
-    }
+    private fun eligible(shortfall: ParseShortfall): Boolean =
+        shortfall.hasParseTrigger && requiresFields(shortfall.shape) && shortfall.nullRequiredFields.isNotEmpty()
+
+    private fun requiresFields(shape: String?): Boolean =
+        shape != null && ParsedFieldsFactory.REQUIRED_FIELDS_BY_SHAPE[shape].orEmpty().isNotEmpty()
 
     companion object {
         /** Confirmed rot occurrences of one rule, with no healthy parse between, that trip it. */
