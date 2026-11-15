@@ -636,9 +636,13 @@ only rules and nothing fetched; ADR-0013, design-r3 § App client and plan-r7 §
   Start-up runs after `loadDefaults` (the floor), re-verifies the cache and activates it with no network. The APK's
   own generation mark (`FEED_SEQUENCE`, `FEED_DIGEST`) comes with the publishing half (#641); until then
   `FeedRepository` has no bundled mark for rules.
-- **When it checks.** On a delivery app coming to the front (`PlatformForegrounds`, `:core:pipeline`: each
-  `TYPE_WINDOW_STATE_CHANGED` from a package the platform registry resolves; the listener already admits only the
-  platforms the dasher turned on), at most once an hour (`RulesFeedSwitch.claimForegroundCheck`, stamped at the
+- **When it checks.** On a delivery app coming to the front (`PlatformForegrounds`, `:core:pipeline`): a transition
+  INTO a platform the dasher turned on from any other package, resolved through the platform registry. Staying in the
+  app is no new foreground, whatever its windows do, and gig.log's own windows (the bubble) never count as leaving it.
+  The listener admits events only from the platforms that are on, so a leave is seen on the active window's package:
+  on a `TYPE_WINDOWS_CHANGED` (it reaches the app only with Screen events allowed; at most one read a second by event
+  time) and on one probe 30 s after the last event, which also covers the filtered posture; a return inside that
+  quiet period is no new foreground. Then at most once an hour (`RulesFeedSwitch.claimForegroundCheck`, stamped at the
   start and persisted, so a restart buys no extra check), and only with the switch on; and on the dasher's tap. The
   foreground stream is conflated so a running check never holds back the accessibility event stream. There is no
   worker and no other caller of `refresh`.
@@ -646,16 +650,18 @@ only rules and nothing fetched; ADR-0013, design-r3 § App client and plan-r7 §
   `datastore/rules_feed.preferences_pb`, excluded from backup and transfer), off by default in every build;
   `AppFeedPolicy` gives it to the rules feed only. Its in-memory `StateFlow` is the value every `RefreshGate` check
   reads, and it turns off at the instant the switch is saved: `set(false)` sets it before anything suspends, then
-  saves, on every path that saves the switch (Settings > Recognition rules, the setup wizard's question, the notice
-  action and the phone wipe, which calls `forgetNow` just before Android clears storage). No collector mirrors the
+  saves, on every path that saves the switch (Settings > Recognition rules, the setup wizard's question and the phone
+  wipe, which calls `forgetNow` just before Android clears storage). No collector mirrors the
   store: it is read once at start, and a choice made before that read lands wins. Turning on counts once saved, and an
   "off" that lands while an "on" is saving stays off. `RulesFeedSwitchTest` turns it off with the store's write held
   back and shows the next exchange refused with no request at the server. This closes the #1565 consent window for
   rules; the fuel switch's own window stays open until #1566.
 - **Taps.** "Check now" (Settings) and the notice's "Check for new rules" run `checkNow`: with the switch off, on a
   `OneShotGrant` minted in the tap's coroutine (the Settings screen's scope, or one application-scope coroutine per
-  notice tap), so a tap allows one fetch; with it on, a plain refresh that skips the hourly limit. The notice's "Keep
-  rules up to date" (`enableAndCheck`) saves the switch on, then checks at once.
+  notice tap), so a tap allows one fetch and is its own consent; with it on, a plain refresh that skips the hourly
+  limit. The notice's "Keep rules up to date" never saves the network consent: it deep-links to Settings > Recognition
+  rules (`MainActivity.routeIntent`, route `settings/rules`), where the dasher turns the switch on beside its timing
+  disclosure.
 - **The notice actions** (`RecognitionHealthNotifier`, `RulesNoticeActionReceiver`, `RulesNoticeActionHandler`). Every
   recognition notice carries "Check for new rules", plus "Keep rules up to date" while the switch is off, but only in
   a build whose pin file trusts a gig.log rules key; before #641 a check could only fail, so no button is shown. The

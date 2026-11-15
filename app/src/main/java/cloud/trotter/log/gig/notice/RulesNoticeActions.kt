@@ -11,6 +11,8 @@ import cloud.trotter.log.gig.domain.di.ApplicationScope
 import cloud.trotter.log.gig.domain.pipeline.RecognitionIncident
 import cloud.trotter.log.gig.domain.pipeline.RecognitionIncidents
 import cloud.trotter.log.gig.feed.RulesFeed
+import cloud.trotter.log.gig.ui.main.MainActivity
+import cloud.trotter.log.gig.ui.main.navigation.Screen
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
@@ -24,8 +26,9 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * The recognition notice's rules actions (#640): "Check for new rules" (one check on a one-shot grant, with "Keep
- * recognition rules up to date" off or on) and "Keep rules up to date" (saves the switch on, then checks at once).
+ * The recognition notice's "Check for new rules" (#640): one check per tap, on a one-shot grant while "Keep recognition
+ * rules up to date" is off (the tap is its own consent). The notice's other button, "Keep rules up to date", only opens
+ * Settings > Recognition rules, where the switch sits beside its timing disclosure; nothing here saves the switch.
  *
  * Each tap runs in its own application-scope coroutine, so the grant [RulesFeed.checkNow] mints belongs to that tap
  * and dies with it; the receiver returns at once, since a check with its retries can outlast a broadcast's time limit.
@@ -45,11 +48,8 @@ class RulesNoticeActionHandler @Inject constructor(
     fun onAction(action: String, platformWire: String, openedAt: Long) {
         scope.launch {
             try {
-                val outcome = when (action) {
-                    ACTION_CHECK -> rulesFeed.checkNow()
-                    ACTION_KEEP_UPDATED -> rulesFeed.enableAndCheck() ?: RulesCheckOutcome.FAILED
-                    else -> return@launch
-                }
+                if (action != ACTION_CHECK) return@launch
+                val outcome = rulesFeed.checkNow()
                 Timber.tag(TAG).i("rules check from the recognition notice on %s: %s", platformWire, outcome)
                 answer(platformWire, openedAt, outcome)
             } catch (e: CancellationException) {
@@ -69,14 +69,13 @@ class RulesNoticeActionHandler @Inject constructor(
 
     companion object {
         const val ACTION_CHECK = "cloud.trotter.log.gig.action.RULES_CHECK"
-        const val ACTION_KEEP_UPDATED = "cloud.trotter.log.gig.action.RULES_KEEP_UPDATED"
         const val EXTRA_PLATFORM = "rules_platform"
         const val EXTRA_OPENED_AT = "rules_opened_at"
         private const val TAG = "Feeds"
     }
 }
 
-/** The notice buttons' broadcast. Not exported; the PendingIntents are immutable and explicit. */
+/** The "Check for new rules" broadcast. Not exported; the PendingIntents are immutable and explicit. */
 class RulesNoticeActionReceiver : BroadcastReceiver() {
 
     @EntryPoint
@@ -96,27 +95,36 @@ class RulesNoticeActionReceiver : BroadcastReceiver() {
 
     companion object {
         /**
-         * The buttons for [incident]'s notice: "Check for new rules", and "Keep rules up to date" while the switch is
-         * off. Each PendingIntent is keyed by action and platform, so two platforms' notices keep their own.
+         * The buttons for [incident]'s notice: "Check for new rules", and while the switch is off "Keep rules up to
+         * date", which opens Settings > Recognition rules (the switch and its disclosure). The check's PendingIntent is
+         * keyed by platform, so two platforms' notices keep their own.
          */
         fun actions(context: Context, incident: RecognitionIncident, offerKeepUpdated: Boolean): List<NotificationCompat.Action> =
             buildList {
-                add(action(context, incident, RulesNoticeActionHandler.ACTION_CHECK, R.string.recognition_action_check))
-                if (offerKeepUpdated) {
-                    add(action(context, incident, RulesNoticeActionHandler.ACTION_KEEP_UPDATED, R.string.recognition_action_keep_updated))
-                }
+                add(check(context, incident))
+                if (offerKeepUpdated) add(openSettings(context))
             }
 
-        private fun action(context: Context, incident: RecognitionIncident, action: String, label: Int): NotificationCompat.Action {
+        private fun check(context: Context, incident: RecognitionIncident): NotificationCompat.Action {
             val intent = Intent(context, RulesNoticeActionReceiver::class.java)
-                .setAction(action)
+                .setAction(RulesNoticeActionHandler.ACTION_CHECK)
                 .putExtra(RulesNoticeActionHandler.EXTRA_PLATFORM, incident.platformWire)
                 .putExtra(RulesNoticeActionHandler.EXTRA_OPENED_AT, incident.openedAt)
-            val requestCode = (action + incident.platformWire).hashCode()
             val pending = PendingIntent.getBroadcast(
-                context, requestCode, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                context, (RulesNoticeActionHandler.ACTION_CHECK + incident.platformWire).hashCode(), intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
-            return NotificationCompat.Action.Builder(0, context.getString(label), pending).build()
+            return NotificationCompat.Action.Builder(0, context.getString(R.string.recognition_action_check), pending).build()
         }
+
+        private fun openSettings(context: Context): NotificationCompat.Action {
+            val pending = PendingIntent.getActivity(
+                context, OPEN_SETTINGS_REQUEST_CODE, MainActivity.routeIntent(context, Screen.RulesUpdates.route),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            return NotificationCompat.Action.Builder(0, context.getString(R.string.recognition_action_keep_updated), pending).build()
+        }
+
+        private const val OPEN_SETTINGS_REQUEST_CODE = 640
     }
 }

@@ -12,6 +12,8 @@ import cloud.trotter.log.gig.core.datastore.feed.RulesFeedDataSource
 import cloud.trotter.log.gig.domain.pipeline.ParseRotCause
 import cloud.trotter.log.gig.domain.pipeline.RecognitionIncident
 import cloud.trotter.log.gig.domain.state.Platform
+import cloud.trotter.log.gig.ui.main.MainActivity
+import cloud.trotter.log.gig.ui.main.navigation.Screen
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,6 +34,7 @@ import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
 
 /**
  * The dasher-visible half of the recognition incident (#937, #1560) — the mirror of
@@ -159,6 +162,18 @@ class RecognitionHealthNotifierTest {
         runBlocking { assertTrue(rulesSwitch.set(true)) }
         notifier().onIncidentNotice(offerRot("uber"))
         assertEquals(listOf("Check for new rules"), posted().actionTitles())
+    }
+
+    @Test
+    fun `Keep rules up to date opens Settings - Recognition rules and saves nothing`() {
+        notifier().onIncidentNotice(offerRot("doordash"))
+        val (check, keep) = posted().actions.toList()
+        val opens = shadowOf(keep.actionIntent)
+        assertTrue("the switch is turned on where its disclosure is", keep.actionIntent.isActivity)
+        assertEquals(MainActivity::class.java.name, opens.savedIntent.component?.className)
+        assertEquals(Screen.RulesUpdates.route, opens.savedIntent.getStringExtra(MainActivity.EXTRA_ROUTE))
+        assertTrue("a check is a broadcast, one per tap", check.actionIntent.isBroadcast)
+        assertFalse(rulesSwitch.enabled.value)
     }
 
     @Test

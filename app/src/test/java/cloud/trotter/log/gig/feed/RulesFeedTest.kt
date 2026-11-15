@@ -2,6 +2,7 @@ package cloud.trotter.log.gig.feed
 
 import android.content.Context
 import android.content.res.AssetManager
+import android.view.accessibility.AccessibilityEvent
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.emptyPreferences
@@ -17,14 +18,18 @@ import cloud.trotter.log.gig.core.data.settings.AppPreferencesRepository
 import cloud.trotter.log.gig.core.datastore.capability.RuleCapabilityDataSource
 import cloud.trotter.log.gig.core.datastore.feed.RulesFeedDataSource
 import cloud.trotter.log.gig.core.network.feed.FeedClient
+import cloud.trotter.log.gig.core.pipeline.accessibility.input.AccEvent
+import cloud.trotter.log.gig.core.pipeline.accessibility.input.PlatformForegrounds
 import cloud.trotter.log.gig.core.pipeline.rules.JsonRuleInterpreter
 import cloud.trotter.log.gig.core.pipeline.rules.TestRulesFeed
 import cloud.trotter.log.gig.domain.action.RuleAction
 import cloud.trotter.log.gig.domain.model.accessibility.UiNode
+import cloud.trotter.log.gig.domain.state.Platform
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.runBlocking
 import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
@@ -269,6 +274,40 @@ class RulesFeedTest {
         assertEquals(2, site.envelopeRequests())
     }
 
+    @Test fun `staying in a delivery app checks once, leaving and returning after an hour checks again, within it not`() = runBlocking {
+        val phone = boot()
+        turnOn()
+        publish(TestRulesFeed.NOW, remote("MarkerA"))
+        var active: String? = DOORDASH
+        val foregrounds = PlatformForegrounds(emptyFlow(), { active }, { OWN })
+        suspend fun play(vararg events: AccEvent) =
+            events.forEach { event -> foregrounds.observe(event)?.let { phone.feed.onPlatformForeground() } }
+
+        play(event(STATE, DOORDASH), event(STATE, DOORDASH), event(CONTENT, DOORDASH))
+        assertEquals("staying in the app is one check", 1, site.envelopeRequests())
+        now += 2 * HOUR
+        active = OWN // the bubble in front is still the delivery app
+        play(event(WINDOWS, null), event(STATE, DOORDASH), event(CONTENT, DOORDASH))
+        assertEquals("still in the app: no new foreground", 1, site.envelopeRequests())
+
+        active = LAUNCHER
+        play(event(WINDOWS, null))
+        active = DOORDASH
+        play(event(STATE, DOORDASH))
+        assertEquals("back after more than an hour", 2, site.envelopeRequests())
+
+        now += 30 * MINUTE
+        active = LAUNCHER
+        play(event(WINDOWS, null))
+        active = DOORDASH
+        play(event(STATE, DOORDASH))
+        assertEquals("back within the hour", 2, site.envelopeRequests())
+    }
+
+    private var eventTime = 0L
+    private fun event(type: Int, pkg: String?) =
+        AccEvent(type, windowId = 1, packageName = pkg, className = null, contentChangeTypes = 0, eventTimeMs = eventTime++ * 10_000L)
+
     @Test fun `Check now with the switch on skips the hourly limit`() = runBlocking {
         val phone = boot()
         turnOn()
@@ -276,14 +315,6 @@ class RulesFeedTest {
         phone.feed.onPlatformForeground()
         assertEquals(RulesCheckOutcome.NO_UPDATE, phone.feed.checkNow())
         assertEquals(2, site.envelopeRequests())
-    }
-
-    @Test fun `the notice's Keep rules up to date turns the switch on and checks at once`() = runBlocking {
-        val phone = boot()
-        publish(TestRulesFeed.NOW, remote("MarkerA"))
-        assertEquals(RulesCheckOutcome.UPDATED, phone.feed.enableAndCheck())
-        assertTrue(switch.enabled.value)
-        assertEquals("doordash.screen.marker_MarkerA", phone.recognizes("MarkerA"))
     }
 
     /** The rules feed directory of gig.log's site: one envelope, payloads by sha256; counts every request. */
@@ -315,6 +346,12 @@ class RulesFeedTest {
     }
 
     private companion object {
+        val DOORDASH = Platform.DoorDash.packageName
+        const val OWN = "cloud.trotter.log.gig"
+        const val LAUNCHER = "com.example.launcher"
+        const val STATE = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+        const val CONTENT = AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+        const val WINDOWS = AccessibilityEvent.TYPE_WINDOWS_CHANGED
         const val MINUTE = 60_000L
         const val HOUR = 60 * MINUTE
         const val DAY = 24 * HOUR

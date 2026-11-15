@@ -30,9 +30,9 @@ import javax.inject.Singleton
  *   the feed channel commits it to disk; only then does [activateLatest] hand it to [JsonRuleInterpreter.activate]. A
  *   refused file, a rejected generation or a crash keeps the generation in use: the last good one, else the bundled
  *   rules.
- * - **When it checks.** On a delivery app coming to the front ([onPlatformForeground]), at most once an hour and only
- *   with "Keep recognition rules up to date" on; and on the dasher's own tap ([checkNow], [enableAndCheck]). Nothing
- *   else calls [FeedRepository.refresh], and there is no worker.
+ * - **When it checks.** On a delivery app coming to the front ([onPlatformForeground], a transition into the app,
+ *   `PlatformForegrounds`), at most once an hour and only with "Keep recognition rules up to date" on; and on the
+ *   dasher's own tap ([checkNow]). Nothing else calls [FeedRepository.refresh], and there is no worker.
  * - **Consent.** The rules feed's own switch ([RulesFeedSwitch]); with it off, only a tap's one-shot grant sends a
  *   request, one fetch per tap.
  * - **Capabilities** of a remote rule land undecided, as every capability does: the loader reconciles them before the
@@ -71,12 +71,6 @@ class RulesFeed @Inject constructor(
     override suspend fun checkNow(): RulesCheckOutcome {
         val grant = if (switch.enabled.value) null else OneShotGrant.forUserAct(Feed.RULES, policy.source(Feed.RULES).value)
         return check(grant)
-    }
-
-    /** The notice's "Keep rules up to date": saves the switch on, then checks at once. Null when the save failed. */
-    suspend fun enableAndCheck(): RulesCheckOutcome? {
-        if (!switch.set(true)) return null
-        return check(grant = null)
     }
 
     private suspend fun check(grant: OneShotGrant?): RulesCheckOutcome {

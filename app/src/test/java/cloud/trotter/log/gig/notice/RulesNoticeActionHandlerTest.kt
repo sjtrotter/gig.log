@@ -15,7 +15,7 @@ import org.mockito.kotlin.times
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.verifyBlocking
 
-/** #640: the notice's rules actions. "No update yet" posts once per incident; an answer never outlives its incident. */
+/** #640: the notice's rules actions. one tap is one check; "No update yet" posts once per incident; an answer never outlives its incident. */
 class RulesNoticeActionHandlerTest {
     private val incident = RecognitionIncident(platformWire = "doordash", openedAt = 1_000L, screensUnrecognized = true)
     private val open = MutableStateFlow(listOf(incident))
@@ -25,7 +25,6 @@ class RulesNoticeActionHandlerTest {
     private fun handler(outcome: RulesCheckOutcome): Pair<RulesNoticeActionHandler, RulesFeed> {
         val feed = mock<RulesFeed> {
             on { checkNow() } doReturn outcome
-            on { enableAndCheck() } doReturn outcome
         }
         return RulesNoticeActionHandler(feed, incidents, notifier, CoroutineScope(Dispatchers.Unconfined)) to feed
     }
@@ -40,13 +39,6 @@ class RulesNoticeActionHandlerTest {
         open.value = listOf(next)
         handler.onAction(RulesNoticeActionHandler.ACTION_CHECK, "doordash", 9_000L)
         verify(notifier, times(1)).onRulesCheck(next, RulesCheckOutcome.NO_UPDATE)
-    }
-
-    @Test fun `Keep rules up to date saves the switch through the feed and answers`() {
-        val (handler, feed) = handler(RulesCheckOutcome.UPDATED)
-        handler.onAction(RulesNoticeActionHandler.ACTION_KEEP_UPDATED, "doordash", 1_000L)
-        verifyBlocking(feed) { enableAndCheck() }
-        verify(notifier).onRulesCheck(incident, RulesCheckOutcome.UPDATED)
     }
 
     @Test fun `an answer for an incident that closed is not posted`() {

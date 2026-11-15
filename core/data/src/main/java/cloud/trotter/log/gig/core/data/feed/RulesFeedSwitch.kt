@@ -25,7 +25,7 @@ import javax.inject.Singleton
  * inside every exchange) is already closed, whatever the store is doing. No collector mirrors the store: it is read once
  * at start, and a choice made before that read lands wins over it. Turning on takes effect once it is saved, so a
  * failed save never leaves the feed on. Every path that saves the switch goes through here: Settings, the setup
- * wizard, the notice action and the phone wipe ([forgetNow]).
+ * wizard and the phone wipe ([forgetNow]). The recognition notice only opens Settings; it never saves the switch.
  *
  * It also owns the foreground check's hourly limit ([claimForegroundCheck]), persisted beside the switch so a restart
  * does not buy an extra check.
