@@ -1254,8 +1254,9 @@ once §12 to §21 ship.
 **Diagnostics, not work history** (#1571, census#64). No count of shifts, deliveries or active days leaves the phone;
 contributor eligibility is a yes or no (§15). The health report carries no count that reads as work done. Its `trips`
 field stays: it counts recognition-health alarm trips (`HealthLedger.kt:26`, `RecognitionHealthMonitor.kt:155-157`),
-not deliveries. It carries per-rule shortfall counts and
-their denominators, clipped to fixed bounds, with the rules generation. Skeletons are sampled once per layout variant
+not deliveries. Its per-rule shortfall count is a tally over a fixed sample
+of the rule's last 20 eligible attempts of the day (`HealthReportSchema.PARSE_SAMPLE`, 0..20), and a rule with fewer than
+20 is left out, so no attempt total or denominator is sent (census#64); the report carries the rules generation. Skeletons are sampled once per layout variant
 per UTC day, as presence (§8).
 
 **Upload timing and transport** (#1620).

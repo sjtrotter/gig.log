@@ -41,8 +41,12 @@ owns the daily health report (`POST /v1/health` item): `HealthReportDto`, its bo
 checks (`HealthReportSchema`), and the version and rule-id grammars (`WireTokenGrammars`). The
 phone encodes through `HealthReportSchema.encode` and refuses an oversized report with `fits`;
 the server accepts through `check`, passing its own day window and platform allowlist. The
-optional `parseShortfall` map (census#64) carries, per rule id, `shortfall` of `eligible`
-attempts; a report without it encodes exactly as before. `conformance/health-report-vectors.jsonl`
+optional `parseShortfall` map (census#64) carries, per rule id, the number of shortfalls among
+that rule's last `PARSE_SAMPLE` (20) eligible attempts of the UTC day, `0..20`. A rule with
+fewer than 20 eligible attempts that day is left out, so the most the field says about volume
+is "this rule had at least 20 eligible attempts today": it carries no attempt total. Its rule
+ids are at most 96 characters (legacy `ruleCounts` keeps its own bound). A report without it
+encodes exactly as before. `conformance/health-report-vectors.jsonl`
 pins the verdicts both sides must reach.
 
 ## Consuming from another build

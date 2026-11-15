@@ -40,18 +40,14 @@ data class HealthReportDto(
     val trips: Int,
     val ruleCounts: Map<String, Int>,
     /**
-     * Per-rule parse health for the day, keyed by rule id (census#64). Optional: a report without it is valid, and
-     * a null value is left off the wire, so an older report serializes byte for byte as before.
+     * Per-rule parse health (census#64): for each rule with at least [HealthReportSchema.PARSE_SAMPLE] eligible
+     * attempts that UTC day, how many of the last [HealthReportSchema.PARSE_SAMPLE] of them left a shape-required field
+     * null, `0..PARSE_SAMPLE`. A rule below the sample size is left out, so the field reveals no attempt count beyond
+     * "at least PARSE_SAMPLE today". Optional: a null value is left off the wire, so an older report serializes byte
+     * for byte as before.
      */
-    val parseShortfall: Map<String, RuleParseCountDto>? = null,
+    val parseShortfall: Map<String, Int>? = null,
 )
-
-/**
- * One rule's day: [eligible] matched frames that count toward the denominator (not pre-render frames), of which
- * [shortfall] left a shape-required field null. `0 <= shortfall <= eligible`.
- */
-@Serializable
-data class RuleParseCountDto(val shortfall: Int, val eligible: Int)
 
 /** Why the server refused one health report. The first failing check wins, in this order. */
 enum class HealthReportRejection(val wire: String) {

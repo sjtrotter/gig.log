@@ -37,10 +37,19 @@ object HealthReportSchema {
     const val MAX_REPORT_BYTES = 8192
     const val MAX_RULE_COUNTS = 512
 
+    /**
+     * The fixed sample behind each [HealthReportDto.parseShortfall] value: the rule's last PARSE_SAMPLE eligible
+     * attempts of the day. The value counts the shortfalls among them, so it is never more than PARSE_SAMPLE.
+     */
+    const val PARSE_SAMPLE = 20
+
     /** At most this many rules in [HealthReportDto.parseShortfall]. */
     const val MAX_PARSE_SHORTFALL_RULES = 128
 
-    /** Every count, including each shortfall and eligible value, is an integer in `0..MAX_COUNT`. */
+    /** A [HealthReportDto.parseShortfall] rule id is at most this long; `ruleCounts` keeps its legacy bound. */
+    const val MAX_PARSE_RULE_ID_LENGTH = 96
+
+    /** Every daily count is an integer in `0..MAX_COUNT`. */
     const val MAX_COUNT = 1_000_000
 
     /** The wire keys, in order. */
@@ -49,7 +58,6 @@ object HealthReportSchema {
         "admitted", "unknown", "trips", "ruleCounts", "parseShortfall",
     )
 
-    private val PARSE_COUNT_FIELDS = setOf("shortfall", "eligible")
     private val DAY = Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}")
     private val json = Json { encodeDefaults = false; explicitNulls = false }
 
@@ -100,10 +108,12 @@ object HealthReportSchema {
         val parseShortfall = if ("parseShortfall" !in element) null else {
             val parse = element["parseShortfall"] as? JsonObject ?: return invalid(HealthReportRejection.BAD_COUNT)
             if (parse.size > MAX_PARSE_SHORTFALL_RULES) return invalid(HealthReportRejection.BAD_COUNT)
-            val rules = linkedMapOf<String, RuleParseCountDto>()
+            val rules = linkedMapOf<String, Int>()
             for ((rule, value) in parse) {
-                if (!WireTokenGrammars.ruleId.matches(rule)) return invalid(HealthReportRejection.BAD_RULE_ID)
-                rules[rule] = value.parseCount() ?: return invalid(HealthReportRejection.BAD_COUNT)
+                if (rule.length > MAX_PARSE_RULE_ID_LENGTH || !WireTokenGrammars.ruleId.matches(rule)) {
+                    return invalid(HealthReportRejection.BAD_RULE_ID)
+                }
+                rules[rule] = value.count()?.takeIf { it <= PARSE_SAMPLE } ?: return invalid(HealthReportRejection.BAD_COUNT)
             }
             rules
         }
@@ -122,12 +132,4 @@ object HealthReportSchema {
     /** A JSON integer (never a string, fraction or boolean) in `0..MAX_COUNT`. */
     private fun JsonElement?.count(): Int? =
         (this as? JsonPrimitive)?.takeIf { !it.isString }?.intOrNull?.takeIf { it in 0..MAX_COUNT }
-
-    private fun JsonElement.parseCount(): RuleParseCountDto? {
-        val obj = this as? JsonObject ?: return null
-        if (obj.keys != PARSE_COUNT_FIELDS) return null
-        val shortfall = obj["shortfall"].count() ?: return null
-        val eligible = obj["eligible"].count() ?: return null
-        return if (shortfall <= eligible) RuleParseCountDto(shortfall, eligible) else null
-    }
 }

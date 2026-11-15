@@ -52,10 +52,10 @@ class HealthReportSchemaTest {
     }
 
     @Test
-    fun `parse counts follow ruleCounts on the wire, keyed by rule id, and round trip`() {
-        val report = legacy.copy(parseShortfall = mapOf("doordash.screen.offer" to RuleParseCountDto(shortfall = 2, eligible = 9)))
+    fun `parse counts follow ruleCounts on the wire as one sample count per rule id, and round trip`() {
+        val report = legacy.copy(parseShortfall = mapOf("doordash.screen.offer" to 2))
         val raw = HealthReportSchema.encode(report)
-        assertTrue(raw.endsWith(""","parseShortfall":{"doordash.screen.offer":{"shortfall":2,"eligible":9}}}"""))
+        assertTrue(raw.endsWith(""","parseShortfall":{"doordash.screen.offer":2}}"""))
         assertEquals(HealthReportSchema.FIELDS, Json.parseToJsonElement(raw).jsonObject.keys.toList())
         assertEquals(HealthReportCheck.Valid(report), HealthReportSchema.check(Json.parseToJsonElement(raw)))
     }
@@ -117,13 +117,32 @@ class HealthReportSchemaTest {
         val many = HealthReportSchema.encode(legacy.copy(admitted = 600, ruleCounts = (1..600).associate { "a.r$it" to 1 }))
         assertTrue(many.toByteArray().size < HealthReportSchema.MAX_REPORT_BYTES)
         assertFalse(HealthReportSchema.fits(many))
-        val parse = (0..HealthReportSchema.MAX_PARSE_SHORTFALL_RULES).associate { "a.r$it" to RuleParseCountDto(0, 0) }
+        val parse = (0..HealthReportSchema.MAX_PARSE_SHORTFALL_RULES).associate { "a.r$it" to 0 }
         assertFalse(HealthReportSchema.fits(HealthReportSchema.encode(legacy.copy(parseShortfall = parse))))
         assertTrue(HealthReportSchema.fits(HealthReportSchema.encode(legacy.copy(parseShortfall = parse - "a.r0"))))
         assertFalse(HealthReportSchema.fits(HealthReportSchema.encode(legacy.copy(ruleCounts = mapOf("a.${"x".repeat(8500)}" to 1)))))
         val unicode = HealthReportSchema.encode(legacy.copy(ruleCounts = mapOf("a.${"é".repeat(4100)}" to 1)))
         assertTrue(unicode.length < HealthReportSchema.MAX_REPORT_BYTES)
         assertFalse(HealthReportSchema.fits(unicode))
+    }
+
+    @Test
+    fun `a parse count is a shortfall tally of the fixed sample, never an attempt total`() {
+        val obj = Json.parseToJsonElement(HealthReportSchema.encode(legacy)).jsonObject
+        fun with(rule: String, value: JsonElement) =
+            HealthReportSchema.check(JsonObject(obj + ("parseShortfall" to JsonObject(mapOf(rule to value)))))
+        assertEquals(20, HealthReportSchema.PARSE_SAMPLE)
+        for (value in 0..HealthReportSchema.PARSE_SAMPLE) {
+            assertTrue(with("a.b", JsonPrimitive(value)) is HealthReportCheck.Valid)
+        }
+        assertEquals(invalid(HealthReportRejection.BAD_COUNT), with("a.b", JsonPrimitive(HealthReportSchema.PARSE_SAMPLE + 1)))
+        assertEquals(invalid(HealthReportRejection.BAD_COUNT), with("a.b", JsonObject(mapOf("shortfall" to JsonPrimitive(0), "eligible" to JsonPrimitive(40)))))
+        val longest = "a." + "b".repeat(HealthReportSchema.MAX_PARSE_RULE_ID_LENGTH - 2)
+        assertTrue(with(longest, JsonPrimitive(0)) is HealthReportCheck.Valid)
+        assertEquals(invalid(HealthReportRejection.BAD_RULE_ID), with(longest + "b", JsonPrimitive(0)))
+        // The length bound is the new field's own: a legacy rule count keeps its id unbounded but for the report size.
+        val legacyLong = JsonObject(obj + ("ruleCounts" to JsonObject(mapOf(longest + "b" to JsonPrimitive(1)))))
+        assertTrue(HealthReportSchema.check(legacyLong) is HealthReportCheck.Valid)
     }
 
     @Test
