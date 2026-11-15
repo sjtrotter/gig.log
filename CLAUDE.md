@@ -52,7 +52,7 @@ Claude analysis agent beside one; `./gradlew --stop` when a run finishes. Host r
 
 ```bash
 # The full unit gate (PR CI runs it; locally run one module, e.g. ./gradlew :domain:test)
-./gradlew testDebugUnitTest :domain:test censusContractTest
+./gradlew testDebugUnitTest :domain:test censusContractTest feedContractTest
 
 # Ruleset/recognition regressions only (fast; does NOT sort INBOX or re-triage UNKNOWN)
 ./gradlew :app:testDebugUnitTest --tests "*AllMatchersSuite*"
@@ -98,7 +98,9 @@ The project uses modular Clean Architecture with a strict dependency graph:
 :feature:bubble    → :domain, :core:designsystem
 
 matchers (included build, not a :core module) ⇒ canonicalizes rules → :core:pipeline consumes as generated assets
-census-contract (included build, Apache-2.0) ⇒ the census wire contract + the rule-authoring contract (`authoring/`: vocabulary + `RuleDraft` generator) that the census dashboard and the app's round-trip gate share; :domain depends on it (api), the dashbuddy-census server includeBuilds it
+census-contract (included build, Apache-2.0) ⇒ the census wire contract + the rule-authoring contract (`authoring/`: vocabulary + `RuleDraft` generator) that the census dashboard and the app's round-trip gate share
+feed-contract (included build, Apache-2.0) ⇒ the signed feed format and its one verifier
+  both: :domain depends on it (api), the dashbuddy-census server includeBuilds it
 ```
 
 **Feature modules.** UI lives per feature under `:feature:*` (`cloud.trotter.log.gig.feature.<name>`). A feature
@@ -112,8 +114,7 @@ module, the bubble HUD, the Garage or navigation, read
   pipeline, provider and capture contracts, the `PlatformPreferences` read interface, and the number, money and
   duration formatting owner (`format.Formats`, `format.TimeFormats`). The `region` package's cell id is the only
   location-shaped value that may ever leave the device. Repository implementations and Hilt bindings live in
-  `:core:data`. The census wire contract lives in the `census-contract/` included build; `domain.privacy.PiiShapes`
-  stays here.
+  `:core:data`. `domain.privacy.PiiShapes` stays here, not in `census-contract/`.
 - **`:core:pipeline`**: accessibility and notification pipelines, the JSON rule engine, the observation
   classifier. Reads third-party UI.
 - **`:core:state`**: the multi-region state machine, effect map, `TransitionPolicy`, crash recovery

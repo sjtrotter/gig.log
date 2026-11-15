@@ -463,6 +463,12 @@ integrity verification before compile. `RulesetVerifier` (ECDSA P-256/SHA-256, n
 so compiling remote bytes is structurally unreachable without verification against the configured source's pinned
 key. Bundled assets are exempt (the APK signature covers them). Signing tooling: `matchers/tools/`.
 
+The signed feed format that the rules feed (#640) will deliver through, and its one verifier, live in the Apache-2.0
+`feed-contract/` included build (#1563, ADR-0013 §9). It owns the 1 MB rules file cap,
+`FeedLimits.MAX_RULES_FILE_BYTES`; the compiler's `MAX_RULE_FILE_BYTES` and `RulesetCrypto.MAX_BUNDLE_BYTES` reference
+it. A rules payload keeps the compiler's bounds (`parseBoundedJson`, depth 64), not the feed reader's depth-4 bound,
+and `FeedRulesPayloadBoundsTest` holds the shipped rules to the feed's per-file and per-generation caps.
+
 
 ## The batch loader: one generation, checked whole, swapped in one step (#1568)
 

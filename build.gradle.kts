@@ -13,12 +13,15 @@ plugins {
 tasks.register("censusContractTest") {
     dependsOn(gradle.includedBuild("census-contract").task(":test"))
 }
+tasks.register("feedContractTest") {
+    dependsOn(gradle.includedBuild("feed-contract").task(":test"))
+}
 
 // Warnings-as-errors gate (#841): every Kotlin compilation in every module fails on ANY
 // warning — hand-written or KSP-generated. A deliberate exception (e.g. the minSdk-30
 // areBubblesAllowed fallback) gets a site-local @Suppress with a justifying comment, never
 // a global opt-out. (The matchers included build has no Kotlin compilation; the census-contract
-// included build gates itself — see its build file.)
+// and feed-contract included builds gate themselves — see their build files.)
 subprojects {
     tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompilationTask<*>>().configureEach {
         compilerOptions.allWarningsAsErrors.set(true)

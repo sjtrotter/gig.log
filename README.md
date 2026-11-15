@@ -116,7 +116,7 @@ You need Android Studio or the Android SDK, and JDK 21 (CI uses Temurin 21). Set
 ./gradlew :app:assembleDebug
 
 # Run all unit tests
-./gradlew testDebugUnitTest :domain:test censusContractTest
+./gradlew testDebugUnitTest :domain:test censusContractTest feedContractTest
 
 # Run only the recognition regressions (a fast check before a pull request)
 ./gradlew :app:testDebugUnitTest --tests "*AllMatchersSuite*"
@@ -156,7 +156,8 @@ Parts of this project were written with AI coding tools: [Claude](https://claude
 
 The app is licensed under the [PolyForm Shield License 1.0.0](LICENSE), copyright 2026 Stephen Trotter. The source is public, so you can check what the app does.
 
-Two parts are licensed separately under Apache-2.0:
+Three parts are licensed separately under Apache-2.0:
 
 - the recognition rules in [`matchers/`](matchers/) ([licence](matchers/LICENSE)),
-- the census wire contract in [`census-contract/`](census-contract/) ([licence](census-contract/LICENSE)), which the app shares with the census server, [dashbuddy-census](https://github.com/sjtrotter/dashbuddy-census) (AGPL-3.0).
+- the census wire contract in [`census-contract/`](census-contract/) ([licence](census-contract/LICENSE)), which the app shares with the census server, [dashbuddy-census](https://github.com/sjtrotter/dashbuddy-census) (AGPL-3.0),
+- the signed feed format and its verifier in [`feed-contract/`](feed-contract/) ([licence](feed-contract/LICENSE)), shared the same way.
