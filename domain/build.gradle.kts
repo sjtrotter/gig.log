@@ -18,6 +18,8 @@ dependencies {
     // #1173: substituted from the census-contract included build; api exposes the contract
     // transitively (:core:pipeline reads TextFold/SensitiveMarkerData, :app tests read DTOs).
     api("cloud.trotter.census:contract:0.0.0-local")
+    // #1563: the feed format and verifier, from the feed-contract included build.
+    api("cloud.trotter.feed:feed-contract:0.0.0-local")
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.javax.inject)
     implementation(libs.kotlinx.serialization.json)
@@ -25,8 +27,9 @@ dependencies {
     testImplementation(libs.kotlin.reflect)
 }
 
-// #1173 review: :domain:test — which CI already runs — also runs the contract's tests,
-// because :domain is the contract's first consumer.
+// #1173 review: :domain:test — which CI already runs — also runs both contracts' tests,
+// because :domain is their first consumer.
 tasks.test {
     dependsOn(gradle.includedBuild("census-contract").task(":test"))
+    dependsOn(gradle.includedBuild("feed-contract").task(":test"))
 }

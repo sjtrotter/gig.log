@@ -1,5 +1,6 @@
 package cloud.trotter.log.gig.core.pipeline.rules
 
+import cloud.trotter.feed.contract.FeedLimits
 import cloud.trotter.log.gig.domain.capability.RuleCapabilityGrants
 import timber.log.Timber
 import java.security.KeyFactory
@@ -135,11 +136,10 @@ internal object RulesetCrypto {
     const val SIGNATURE_ALGORITHM = "SHA256withECDSA"
 
     /**
-     * Max accepted remote bundle size, checked BEFORE hashing/verifying. Aligned with
-     * [JsonRuleInterpreter]'s post-decode 1 MB file cap so a bundle that would be
-     * rejected at compile can't burn crypto work first.
+     * Max accepted remote bundle size, checked BEFORE hashing/verifying. The feed format's rules file cap, which is
+     * also the compiler's file cap, so a bundle that would be rejected at compile can't burn crypto work first.
      */
-    const val MAX_BUNDLE_BYTES = 1_000_000
+    const val MAX_BUNDLE_BYTES = FeedLimits.MAX_RULES_FILE_BYTES
 
     /**
      * Max accepted length of the base64 signature string, checked BEFORE decode. A real

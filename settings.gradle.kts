@@ -32,6 +32,10 @@ includeBuild("matchers")
 includeBuild("census-contract") {
     name = "census-contract"
 }
+// #1563: the signed feed format and its one verifier (ADR-0013 §9), Apache-2.0, shared with the census server.
+includeBuild("feed-contract") {
+    name = "feed-contract"
+}
 
 rootProject.name = "gig-log"
 include(":app")

@@ -1,5 +1,6 @@
 package cloud.trotter.log.gig.core.pipeline.rules
 
+import cloud.trotter.feed.contract.FeedLimits
 import cloud.trotter.log.gig.domain.model.accessibility.UiNode
 import cloud.trotter.log.gig.domain.model.notification.RawNotificationData
 import kotlinx.serialization.json.JsonArray
@@ -21,8 +22,8 @@ internal class CompiledRuleFile(
     val isolatedRuleIds: List<String>,
 )
 
-/** The 1 MB per-file limit, for every source. */
-internal const val MAX_RULE_FILE_BYTES = 1_000_000
+/** The 1 MB per-file limit, for every source; the feed format owns the number. */
+internal const val MAX_RULE_FILE_BYTES = FeedLimits.MAX_RULES_FILE_BYTES
 
 /**
  * Parse and compile one rules JSON string. Returns null when the file fails validation or

@@ -143,7 +143,7 @@ jobs:
         # One invocation with --continue (#1450): a red module no longer hides the rest.
         # :domain is pure-JVM — its task is `test`, which the Android aggregate does NOT
         # include; without it every :domain test is CI-invisible (#617 review / #590 gap).
-        # #1173 review: :domain:test covers the census-contract included build's tests; the alias is harmless.
+        # #1173 review: :domain:test covers the census-contract and feed-contract tests; the aliases are harmless.
         # #907 — lintVitalRelease: PR CI once built/tested only the debug variant, so a release-only
         # break (16 ExtraTranslation errors from the #98 :feature:setup extraction) shipped invisibly.
         shell: bash
@@ -153,7 +153,7 @@ jobs:
           DEBUG_KEYSTORE_PASSWORD: ${{ (github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && secrets.DEBUG_KEYSTORE_PASSWORD || '' }}
         run: |
           lint=''; if [ "$FULL_GATE" = 'true' ]; then lint=':app:lintVitalRelease'; fi
-          ./gradlew $GRADLE_CI_FLAGS --continue :app:assembleDebug testDebugUnitTest :domain:test censusContractTest \
+          ./gradlew $GRADLE_CI_FLAGS --continue :app:assembleDebug testDebugUnitTest :domain:test censusContractTest feedContractTest \
             $lint 2>&1 | tee gate.log
 
       - name: Accessibility-tool flag (the debug APK declares true)
