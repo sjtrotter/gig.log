@@ -410,11 +410,12 @@ class DropoffSheetRedactionParityTest {
         // Runs the COMPLETE compiled redact sequence of every rule that declares a Building Name entry,
         // so an unrelated earlier entry (the id-less street shape, say) that claimed and hashed the
         // value fails here — which is exactly what it caught on dropoff_pre_arrival_completion (r1).
-        val ruleIds = dropoffRedactEntries()
+        val withBuildingName = dropoffRedactEntries()
             .filter { (_, redact) -> redact.any { "Building Name" in precedingSiblingTextsIn(it["find"]!!) } }
-            .map { it.first }
-        assertTrue("the dropoff family declares Building Name entries", ruleIds.size >= 3)
-        for (id in ruleIds) {
+        assertTrue("the dropoff family declares Building Name entries", withBuildingName.size >= 3)
+        // A rule with an id-less catch-all (`dropoff_photo`) masks the label too: over-redaction, not a leak.
+        val idLessCatchAll = Json.parseToJsonElement("""{"hasNoId": true}""")
+        for ((id, redact) in withBuildingName) {
             val rule = screens.ruleById(id)!!
             fun valueAfterLabel(value: String): String =
                 rule.redact.apply(UiNode(className = "android.view.View", children = listOf(tv("Building Name"), tv(value))).restoreParents()).children[1].text!!
@@ -422,9 +423,97 @@ class DropoffSheetRedactionParityTest {
                 assertEquals("$id: digit-bearing '$v' plain-masks through the whole sequence", "[redacted]", valueAfterLabel(v))
             }
             assertTrue("$id: an alphabetic complex name keeps the distinctness hash", WHOLE_MASK_HEX.matches(valueAfterLabel("Maple Court Apartments")))
+            if (redact.any { it["find"] == idLessCatchAll }) continue
             assertEquals("$id: the label is chrome and stays raw", "Building Name",
                 rule.redact.apply(UiNode(className = "android.view.View", children = listOf(tv("Building Name"), tv("Bldg 7"))).restoreParents()).children[0].text)
         }
+    }
+
+    // ------------------------------------------------------------------ #1650
+
+    private val buildingNameDigitFind = Json.parseToJsonElement(
+        """{"all": [{"hasPrecedingSiblingText": "Building Name"}, {"hasTextMatchesRegex": "\\d"}]}""",
+    )
+    private val buildingNameHashFind = Json.parseToJsonElement("""{"hasPrecedingSiblingText": "Building Name"}""")
+
+    private fun isSubpremiseLabelEntry(entry: JsonObject): Boolean =
+        precedingSiblingTextsIn(entry["find"]!!).any { it == "Apt/Suite" || it == "Apt/Suite:" }
+
+    private fun isBuildingNameDigitPlain(entry: JsonObject): Boolean =
+        entry.keys - "comment" == setOf("find", "plainMask") && entry["find"] == buildingNameDigitFind &&
+            entry["plainMask"]?.jsonPrimitive?.booleanOrNull == true
+
+    private fun isBuildingNameHash(entry: JsonObject): Boolean =
+        entry.keys - "comment" == setOf("find") && entry["find"] == buildingNameHashFind
+
+    /** Every generated DoorDash screen rule's redact block, from any source file. */
+    private fun doordashRedactEntries(): List<Pair<String, List<JsonObject>>> =
+        Json.parseToJsonElement(File(TestRulesetFactory.rulesDir, "doordash.json").readText())
+            .jsonObject["screens"]!!.jsonArray
+            .map { it.jsonObject }
+            .map { rule ->
+                rule["id"]!!.jsonPrimitive.content to (rule["redact"]?.jsonArray?.map { it.jsonObject } ?: emptyList())
+            }
+
+    @Test
+    fun `every DoorDash rule with the #1039 subpremise entries declares the Building Name pair after them (#1650)`() {
+        val withSubpremise = doordashRedactEntries().filter { (_, redact) -> redact.any { isSubpremiseLabelEntry(it) } }
+        val ids = withSubpremise.map { it.first }.toSet()
+        assertTrue("every dropoff rule declares the #1039 subpremise entries", ids.containsAll(screensFromDropoffSource()))
+        assertTrue("navigation_generic declares the #1039 subpremise entries", "doordash.screen.navigation_generic" in ids)
+        val failures = withSubpremise.mapNotNull { (id, redact) ->
+            val subpremise = redact.indexOfLast { isSubpremiseLabelEntry(it) }
+            val digitPlain = redact.indexOfFirst { isBuildingNameDigitPlain(it) }
+            val hash = redact.indexOfFirst { isBuildingNameHash(it) }
+            when {
+                digitPlain < 0 || hash < 0 -> "$id: no Building Name pair (digit plain at $digitPlain, hash at $hash)"
+                !(subpremise < digitPlain && digitPlain < hash) ->
+                    "$id: subpremise at $subpremise, digit plain at $digitPlain, hash at $hash"
+                else -> null
+            }
+        }
+        assertEquals(
+            "a rule that declares the #1039 subpremise entries also declares the Building Name pair, " +
+                "subpremise first, then the digit plain mask, then the hash mask",
+            emptyList<String>(),
+            failures,
+        )
+    }
+
+    @Test
+    fun `dropoff_handoff masks a Building Name value on the handoff layout and keeps the label (#1650)`() {
+        val handoff = screens.ruleById("doordash.screen.dropoff_handoff")!!
+        fun maskedRows(value: String): List<UiNode> {
+            val tree = UiNode(
+                className = "android.widget.FrameLayout",
+                viewIdResourceName = "com.doordash.driverapp:id/drop_off_workflow_host_fragment",
+                children = listOf(
+                    UiNode(
+                        className = "android.view.View",
+                        children = listOf(
+                            tv("Hand it to customer"),
+                            tv("123 Sample St"),
+                            tv("Sampleville, TX 75001"),
+                            tv("Building Name"),
+                            tv(value),
+                            tv("Mark as delivered"),
+                        ),
+                    ),
+                ),
+            ).restoreParents()
+            assertEquals("the synthetic frame is the handoff screen", "dropoff_handoff", intentOf(tree))
+            val masked = handoff.redact.apply(tree)
+            assertFalse("'$value' must not persist", serialize(masked).contains(value))
+            return masked.children[0].children
+        }
+
+        val named = maskedRows("Maple Court Apartments")
+        assertTrue("an all-letter value hash-masks; got '${named[4].text}'", WHOLE_MASK_HEX.matches(named[4].text!!))
+        assertEquals("the label stays raw", "Building Name", named[3].text)
+
+        val numbered = maskedRows("Bldg 7")
+        assertEquals("a digit-bearing value plain-masks", "[redacted]", numbered[4].text)
+        assertEquals("the label stays raw", "Building Name", numbered[3].text)
     }
 
     @Test
