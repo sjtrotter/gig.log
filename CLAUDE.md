@@ -100,7 +100,7 @@ The project uses modular Clean Architecture with a strict dependency graph:
 matchers (included build, not a :core module) ⇒ canonicalizes rules → :core:pipeline consumes as generated assets
 census-contract (included build, Apache-2.0) ⇒ the census wire contract + the rule-authoring contract (`authoring/`: vocabulary + `RuleDraft` generator) that the census dashboard and the app's round-trip gate share
 feed-contract (included build, Apache-2.0) ⇒ the signed feed format and its one verifier
-  both: :domain depends on it (api), the dashbuddy-census server includeBuilds it
+  both: :domain depends on it (api); the census server includeBuilds census-contract, feed-contract later
 ```
 
 **Feature modules.** UI lives per feature under `:feature:*` (`cloud.trotter.log.gig.feature.<name>`). A feature
