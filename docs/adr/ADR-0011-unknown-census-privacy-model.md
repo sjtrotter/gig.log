@@ -1224,6 +1224,14 @@ approves the signing. Drafting from skeletons adds:
 - Proof: #1632 redrafts a shipped id-less rule blind and compares it on the real corpus; #1633 ships a rule through
   shadow and canary to every phone, then closes the trusted path (§6).
 
+**Amended 2026-11-15 (census#102).** The health report carries shadow counts in two optional fields
+(`HealthReportSchema` in `census-contract/`). `shadow` lists, per candidate, `generation` (the live rules the phone ran),
+`rule`, `digest` (the candidate's definition) and up to four metrics, `tied`, `onUnknown`, `emptyParse` and `maskFail`.
+Each metric counts hits among the candidate's last 20 eligible visits of the UTC day, and a metric whose sample is not full
+is left out. `probeRefused` names the probes the phone refused. Both hold at most 32 entries, carry no screen text, and
+nothing sends them until #1630 ships. Residual: a reported metric says the rule had at least 20 visits on that phone that
+day, and within an epoch the operator can read one install's answer, as with probes (§17).
+
 ### §19 Click evidence as references into skeletons (#1634, census#87)
 
 This supersedes §10's "Clicks stay OUT". When a tap lands on a node no click rule recognizes, or a click rule is in an

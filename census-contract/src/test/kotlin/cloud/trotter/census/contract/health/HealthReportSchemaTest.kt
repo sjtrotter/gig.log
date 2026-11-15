@@ -56,7 +56,7 @@ class HealthReportSchemaTest {
         val report = legacy.copy(parseShortfall = mapOf("doordash.screen.offer" to 2))
         val raw = HealthReportSchema.encode(report)
         assertTrue(raw.endsWith(""","parseShortfall":{"doordash.screen.offer":2}}"""))
-        assertEquals(HealthReportSchema.FIELDS, Json.parseToJsonElement(raw).jsonObject.keys.toList())
+        assertEquals(HealthReportSchema.FIELDS.takeWhile { it != "shadow" }, Json.parseToJsonElement(raw).jsonObject.keys.toList())
         assertEquals(HealthReportCheck.Valid(report), HealthReportSchema.check(Json.parseToJsonElement(raw)))
     }
 
