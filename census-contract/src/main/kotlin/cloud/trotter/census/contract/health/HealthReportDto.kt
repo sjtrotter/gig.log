@@ -47,6 +47,39 @@ data class HealthReportDto(
      * for byte as before.
      */
     val parseShortfall: Map<String, Int>? = null,
+    /**
+     * Shadow-rule tallies (census#102, gig.log#1630): per candidate rule, at most [HealthReportSchema.MAX_SHADOW_ENTRIES]
+     * entries, unique by (generation, rule, digest). Optional; a null value is left off the wire.
+     */
+    val shadow: List<ShadowTallyDto>? = null,
+    /** Probes the phone refused to evaluate (census#102): configuration status, not screen evidence. Optional. */
+    val probeRefused: List<ShadowRefDto>? = null,
+)
+
+/**
+ * One shadow rule's tallies for the day. [generation] names the live rules the phone ran and [digest] the candidate's
+ * definition, each the first 16 hex of a sha256; [rule] is the candidate's rule id. Each metric is the count among the
+ * last [HealthReportSchema.PARSE_SAMPLE] visits where that metric could be measured, `0..PARSE_SAMPLE`; a null metric is
+ * unavailable (its sample was not full) and is left off the wire. [tied] and [onUnknown] share one sample, so they are
+ * both present or both absent, and an entry carries at least one metric.
+ */
+@Serializable
+data class ShadowTallyDto(
+    val generation: String,
+    val rule: String,
+    val digest: String,
+    val tied: Int? = null,
+    val onUnknown: Int? = null,
+    val emptyParse: Int? = null,
+    val maskFail: Int? = null,
+)
+
+/** One refused probe (census#102), named as a [ShadowTallyDto] is. */
+@Serializable
+data class ShadowRefDto(
+    val generation: String,
+    val rule: String,
+    val digest: String,
 )
 
 /** Why the server refused one health report. The first failing check wins, in this order. */

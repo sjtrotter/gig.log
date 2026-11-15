@@ -22,6 +22,7 @@ package cloud.trotter.census.contract.health
 
 import cloud.trotter.census.contract.WireTokenGrammars
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -52,13 +53,23 @@ object HealthReportSchema {
     /** Every daily count is an integer in `0..MAX_COUNT`. */
     const val MAX_COUNT = 1_000_000
 
+    /** At most this many entries in [HealthReportDto.shadow], and again in [HealthReportDto.probeRefused]. */
+    const val MAX_SHADOW_ENTRIES = 32
+
     /** The wire keys, in order. */
     val FIELDS: List<String> = listOf(
         "day", "platform", "platformAppVersion", "appVersion", "rulesetVersion",
-        "admitted", "unknown", "trips", "ruleCounts", "parseShortfall",
+        "admitted", "unknown", "trips", "ruleCounts", "parseShortfall", "shadow", "probeRefused",
     )
 
+    /** The keys of one [ShadowRefDto], in wire order. */
+    val SHADOW_REF_FIELDS: List<String> = listOf("generation", "rule", "digest")
+
+    /** The metrics of one [ShadowTallyDto], in wire order after [SHADOW_REF_FIELDS]. */
+    val SHADOW_METRICS: List<String> = listOf("tied", "onUnknown", "emptyParse", "maskFail")
+
     private val DAY = Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}")
+    private val HEX16 = Regex("[0-9a-f]{16}")
     private val json = Json { encodeDefaults = false; explicitNulls = false }
 
     fun encode(report: HealthReportDto): String = json.encodeToString(HealthReportDto.serializer(), report)
@@ -70,12 +81,28 @@ object HealthReportSchema {
         val rules = obj["ruleCounts"] as? JsonObject ?: return false
         val parse = obj["parseShortfall"]
         return rules.size <= MAX_RULE_COUNTS &&
-            (parse == null || (parse as? JsonObject)?.let { it.size <= MAX_PARSE_SHORTFALL_RULES } == true)
+            (parse == null || (parse as? JsonObject)?.let { it.size <= MAX_PARSE_SHORTFALL_RULES } == true) &&
+            listOf(obj["shadow"], obj["probeRefused"]).all { list ->
+                list == null || (list as? JsonArray)?.let { it.size <= MAX_SHADOW_ENTRIES } == true
+            }
     }
+
+    /**
+     * The report the phone sends: [report] whole when it [fits], else without `shadow`, then also without
+     * `probeRefused`, then also without `parseShortfall`; null when even the base report does not fit.
+     */
+    fun encodeFitting(report: HealthReportDto): String? = sequenceOf(
+        report,
+        report.copy(shadow = null),
+        report.copy(shadow = null, probeRefused = null),
+        report.copy(shadow = null, probeRefused = null, parseShortfall = null),
+    ).map(::encode).firstOrNull(::fits)
 
     /**
      * Validates one report element. [dayAccepted] and [platformAccepted] are the receiver's policy (the server's
      * date window and accepted platforms); the checks run in [HealthReportRejection] order and the first miss wins.
+     * Unknown keys inside `shadow` and `probeRefused` entries are found with the top-level ones. Each optional field is
+     * then checked in wire order: shape, size and values first (`bad_count`), then identifiers (`bad_rule_id`).
      */
     fun check(
         element: JsonElement,
@@ -83,7 +110,10 @@ object HealthReportSchema {
         platformAccepted: (String) -> Boolean = { true },
     ): HealthReportCheck {
         if (element !is JsonObject) return invalid(HealthReportRejection.BAD_ITEM)
-        if (element.keys.any { it !in FIELDS }) return invalid(HealthReportRejection.UNKNOWN_FIELD)
+        if (element.keys.any { it !in FIELDS } ||
+            element.entryKeys("shadow").any { it !in SHADOW_REF_FIELDS && it !in SHADOW_METRICS } ||
+            element.entryKeys("probeRefused").any { it !in SHADOW_REF_FIELDS }
+        ) return invalid(HealthReportRejection.UNKNOWN_FIELD)
         val day = element.string("day")?.takeIf { DAY.matches(it) } ?: return invalid(HealthReportRejection.BAD_DAY)
         val date = try { LocalDate.parse(day) } catch (_: DateTimeParseException) { return invalid(HealthReportRejection.BAD_DAY) }
         if (!dayAccepted(date)) return invalid(HealthReportRejection.STALE_DAY)
@@ -113,21 +143,71 @@ object HealthReportSchema {
                 if (rule.length > MAX_PARSE_RULE_ID_LENGTH || !WireTokenGrammars.ruleId.matches(rule)) {
                     return invalid(HealthReportRejection.BAD_RULE_ID)
                 }
-                rules[rule] = value.count()?.takeIf { it <= PARSE_SAMPLE } ?: return invalid(HealthReportRejection.BAD_COUNT)
+                rules[rule] = value.sampleCount() ?: return invalid(HealthReportRejection.BAD_COUNT)
             }
             rules
+        }
+        val shadow = if ("shadow" !in element) null else {
+            val entries = element.entries("shadow") ?: return invalid(HealthReportRejection.BAD_COUNT)
+            val metrics = entries.map { entry ->
+                val values = SHADOW_METRICS.map { key ->
+                    if (key !in entry) null else entry[key].sampleCount() ?: return invalid(HealthReportRejection.BAD_COUNT)
+                }
+                // tied and onUnknown share one sample; an entry with no metric says nothing.
+                if ((values[0] == null) != (values[1] == null) || values.all { it == null }) {
+                    return invalid(HealthReportRejection.BAD_COUNT)
+                }
+                values
+            }
+            val refs = entries.refs(platform) ?: return invalid(HealthReportRejection.BAD_RULE_ID)
+            refs.zip(metrics) { ref, (tied, onUnknown, emptyParse, maskFail) ->
+                ShadowTallyDto(ref.generation, ref.rule, ref.digest, tied, onUnknown, emptyParse, maskFail)
+            }
+        }
+        val probeRefused = if ("probeRefused" !in element) null else {
+            val entries = element.entries("probeRefused") ?: return invalid(HealthReportRejection.BAD_COUNT)
+            entries.refs(platform) ?: return invalid(HealthReportRejection.BAD_RULE_ID)
         }
         if (Json.encodeToString(JsonElement.serializer(), element).toByteArray(Charsets.UTF_8).size > MAX_REPORT_BYTES) {
             return invalid(HealthReportRejection.TOO_LARGE)
         }
         return HealthReportCheck.Valid(HealthReportDto(
             day, platform, platformAppVersion, appVersion, rulesetVersion, admitted, unknown, trips, ruleCounts, parseShortfall,
+            shadow, probeRefused,
         ))
     }
 
     private fun invalid(reason: HealthReportRejection) = HealthReportCheck.Invalid(reason)
     private fun JsonObject.string(key: String): String? = (this[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
     private fun JsonObject.version(key: String, grammar: Regex): String? = string(key)?.takeIf { grammar.matches(it) }
+
+    /** The keys of every object entry of the array at [key]; a malformed field is left to its own check. */
+    private fun JsonObject.entryKeys(key: String): Sequence<String> =
+        (this[key] as? JsonArray).orEmpty().asSequence().filterIsInstance<JsonObject>().flatMap { it.keys }
+
+    /** The array at [key] as objects, at most [MAX_SHADOW_ENTRIES]; null for an explicit null or any other shape. */
+    private fun JsonObject.entries(key: String): List<JsonObject>? = (this[key] as? JsonArray)
+        ?.takeIf { it.size <= MAX_SHADOW_ENTRIES }
+        ?.map { it as? JsonObject ?: return null }
+
+    /**
+     * Each entry's (generation, rule, digest): 16 lowercase hex, a rule id of at most [MAX_PARSE_RULE_ID_LENGTH]
+     * under the report's own platform, 16 lowercase hex. Null when one is malformed or two entries repeat a triple.
+     */
+    private fun List<JsonObject>.refs(platform: String): List<ShadowRefDto>? {
+        val refs = map { entry ->
+            val generation = entry.string("generation")?.takeIf { HEX16.matches(it) } ?: return null
+            val rule = entry.string("rule")?.takeIf {
+                it.length <= MAX_PARSE_RULE_ID_LENGTH && WireTokenGrammars.ruleId.matches(it) && it.startsWith("$platform.")
+            } ?: return null
+            val digest = entry.string("digest")?.takeIf { HEX16.matches(it) } ?: return null
+            ShadowRefDto(generation, rule, digest)
+        }
+        return refs.takeIf { it.toSet().size == it.size }
+    }
+
+    /** A JSON integer in `0..PARSE_SAMPLE`: one count over a fixed sample. */
+    private fun JsonElement?.sampleCount(): Int? = count()?.takeIf { it <= PARSE_SAMPLE }
 
     /** A JSON integer (never a string, fraction or boolean) in `0..MAX_COUNT`. */
     private fun JsonElement?.count(): Int? =

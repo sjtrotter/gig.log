@@ -139,7 +139,7 @@ data class HealthLedger(val rows: Map<String, HealthRow> = emptyMap(), val gener
 
         /**
          * The wire report for one closed row; [HealthReportSchema] owns its shape and bounds. With [withParseShortfall]
-         * false the report leaves `parseShortfall` off, as [sendableReportJson] does when the full report does not fit.
+         * false the report leaves `parseShortfall` off.
          */
         fun reportJson(
             key: HealthKey,
@@ -147,7 +147,18 @@ data class HealthLedger(val rows: Map<String, HealthRow> = emptyMap(), val gener
             appVersion: String,
             rulesetVersion: String,
             withParseShortfall: Boolean = true,
-        ): String = HealthReportSchema.encode(HealthReportDto(
+        ): String = HealthReportSchema.encode(
+            report(key, row, appVersion, rulesetVersion).let { if (withParseShortfall) it else it.copy(parseShortfall = null) },
+        )
+
+        /**
+         * The report to send for one closed row: the largest form that passes [HealthReportSchema.fits], in the
+         * schema's own drop order ([HealthReportSchema.encodeFitting]); null when the row is refused as oversized.
+         */
+        fun sendableReportJson(key: HealthKey, row: HealthRow, appVersion: String, rulesetVersion: String): String? =
+            HealthReportSchema.encodeFitting(report(key, row, appVersion, rulesetVersion))
+
+        private fun report(key: HealthKey, row: HealthRow, appVersion: String, rulesetVersion: String) = HealthReportDto(
             day = key.day,
             platform = key.platform,
             platformAppVersion = key.platformAppVersion,
@@ -157,18 +168,7 @@ data class HealthLedger(val rows: Map<String, HealthRow> = emptyMap(), val gener
             unknown = row.unknown,
             trips = row.trips,
             ruleCounts = row.ruleCounts,
-            parseShortfall = if (withParseShortfall) parseShortfall(row) else null,
-        ))
-
-        /**
-         * The report to send for one closed row: the full report when it passes [HealthReportSchema.fits], else the
-         * report without `parseShortfall` when that one fits, else null (the row is refused as oversized).
-         */
-        fun sendableReportJson(key: HealthKey, row: HealthRow, appVersion: String, rulesetVersion: String): String? {
-            val full = reportJson(key, row, appVersion, rulesetVersion)
-            if (HealthReportSchema.fits(full)) return full
-            return reportJson(key, row, appVersion, rulesetVersion, withParseShortfall = false)
-                .takeIf(HealthReportSchema::fits)
-        }
+            parseShortfall = parseShortfall(row),
+        )
     }
 }

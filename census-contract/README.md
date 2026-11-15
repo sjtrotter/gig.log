@@ -46,7 +46,11 @@ that rule's last `PARSE_SAMPLE` (20) eligible attempts of the UTC day, `0..20`. 
 fewer than 20 eligible attempts that day is left out, so the most the field says about volume
 is "this rule had at least 20 eligible attempts today": it carries no attempt total. Its rule
 ids are at most 96 characters (legacy `ruleCounts` keeps its own bound). A report without it
-encodes exactly as before. `conformance/health-report-vectors.jsonl`
+encodes exactly as before. The optional `shadow` and `probeRefused` lists (census#102) carry shadow-rule
+tallies and refused probes: at most 32 entries each, unique by `(generation, rule, digest)`, 16-hex
+identifiers, rule ids under the report's own platform, and each metric `0..20` over its own sample, left
+out when unavailable. A report too large to send drops `shadow`, then `probeRefused`, then
+`parseShortfall` (`HealthReportSchema.encodeFitting`). `conformance/health-report-vectors.jsonl`
 pins the verdicts both sides must reach.
 
 ## Consuming from another build
