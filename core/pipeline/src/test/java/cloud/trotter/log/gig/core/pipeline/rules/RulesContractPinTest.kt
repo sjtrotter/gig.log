@@ -28,7 +28,7 @@ import java.util.Locale
 class RulesContractPinTest {
 
     private val pinned = mapOf(
-        1 to "35c4f4599ed98543faec1362e60c1fef867cf6664a4337d3c27e69486b50b75a",
+        1 to "89c54fed74e5efb4b94817f3c836264eaede8dbe7170532e534eae71ed2947d8",
     )
 
     @Test

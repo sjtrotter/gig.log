@@ -129,15 +129,16 @@ abstract class ImportMatchersRules : DefaultTask() {
         rulesOut.deleteRecursively()
         rulesOut.mkdirs()
         var count = 0
+        // Shadow files (#1630) go to rules/shadow/, so every reader of rules/*.json sees live files only.
+        fun copy(j: File) {
+            val dest = if (j.nameWithoutExtension.endsWith("_shadow")) File(rulesOut, "shadow/${j.name}") else File(rulesOut, j.name)
+            j.copyTo(dest, overwrite = true)
+            count++
+        }
         source.files.forEach { f ->
             when {
-                f.isDirectory ->
-                    f.listFiles { c -> c.isFile && c.extension == "json" }?.forEach { j ->
-                        j.copyTo(File(rulesOut, j.name), overwrite = true); count++
-                    }
-                f.isFile && f.extension == "json" -> {
-                    f.copyTo(File(rulesOut, f.name), overwrite = true); count++
-                }
+                f.isDirectory -> f.listFiles { c -> c.isFile && c.extension == "json" }?.forEach { copy(it) }
+                f.isFile && f.extension == "json" -> copy(f)
             }
         }
         if (count == 0) {

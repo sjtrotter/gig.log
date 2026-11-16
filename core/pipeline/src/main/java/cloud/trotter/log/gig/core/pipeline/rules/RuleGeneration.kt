@@ -9,12 +9,18 @@ import cloud.trotter.log.gig.domain.state.Platform
  * One complete, compiled rule set (#1568): the screen, click and notification rulesets that go live
  * together and are replaced together. Immutable, so the generation that classified a frame can be
  * carried to the capture stage and mask that frame with its own rules, whatever went live since.
+ *
+ * [id] is the generation id of [RuleIdentifiers.generationId] over the live files it was assembled
+ * from (null for a generation built by hand, or when hashing failed). [shadow] is the shadow set
+ * validated against this generation (#1630), or null; it is never part of the rulesets above.
  */
 class RuleGeneration(
     val screens: Ruleset<UiNode> = Ruleset(emptyList()),
     val clicks: Ruleset<UiNode> = Ruleset(emptyList()),
     val notifications: Ruleset<RawNotificationData> = Ruleset(emptyList()),
     val formatVersion: Int? = null,
+    val id: String? = null,
+    val shadow: ShadowSet? = null,
 ) : ScreenRedactionSource {
 
     /** The compiled `redact` block of screen rule [ruleId] in this generation, or null when it declares none. */
@@ -34,8 +40,13 @@ class RuleGeneration(
 /** One rules file of a generation: bundled (the APK's own) or remote (signature-verified). */
 sealed class RuleFile(val source: String, internal val json: String) {
 
+    /** The file's logical name: `doordash` for `rules/doordash.json` or the remote `doordash` file. */
+    internal abstract val logicalName: String
+
     /** A file shipped in the APK's `assets/rules/`; only the interpreter reads these. */
-    class Bundled internal constructor(source: String, json: String) : RuleFile(source, json)
+    class Bundled internal constructor(source: String, json: String) : RuleFile(source, json) {
+        override val logicalName: String = source.substringAfterLast('/').removeSuffix(".json")
+    }
 
     /**
      * A downloaded file; only a passing signature check can produce its [VerifiedRulesetBytes]. [platform] is the
@@ -43,6 +54,7 @@ sealed class RuleFile(val source: String, internal val json: String) {
      */
     class Remote(verified: VerifiedRulesetBytes) : RuleFile(verified.source, verified.json) {
         internal val platform: Platform = verified.platform
+        override val logicalName: String = platform.wire
     }
 }
 

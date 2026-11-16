@@ -26,10 +26,16 @@ class BundledGenerationTest {
         File(dir, relative).also { check(it.isDirectory) { "generated rules dir missing at ${it.path}" } }
     }
 
-    private val shipped: List<Pair<String, String>> by lazy {
+    private val generated: List<Pair<String, String>> by lazy {
         rulesDir.listFiles { f -> f.extension == "json" }!!.sortedBy { it.name }
-            .map { "rules/${it.name}" to it.readText() }
+            .map { "rules/${it.name}" to it.readText() } +
+            File(rulesDir, "shadow").listFiles { f -> f.extension == "json" }.orEmpty().sortedBy { it.name }
+                .map { "rules/shadow/${it.name}" to it.readText() }
     }
+
+    /** The live files; the `_shadow` files (#1630) are checked on their own below. */
+    private val shipped by lazy { generated.filterNot { (path, _) -> path.removeSuffix(".json").endsWith(ShadowSetCompiler.SHADOW_SUFFIX) } }
+    private val shippedShadow by lazy { generated - shipped.toSet() }
 
     @Test
     fun `every shipped file compiles whole, with no isolated rule`() {
@@ -39,6 +45,27 @@ class BundledGenerationTest {
             assertNotNull("$path failed to compile", compiled)
             assertEquals("$path isolated rules", emptyList<String>(), compiled!!.isolatedRuleIds)
         }
+    }
+
+    @Test
+    fun `no shipped live file carries a shadow rule`() {
+        for ((path, json) in shipped) {
+            for (section in listOf("screens", "clicks", "notifications")) {
+                val marked = Json.parseToJsonElement(json).jsonObject[section]?.jsonArray.orEmpty()
+                    .filter { "shadow" in it.jsonObject }
+                assertEquals("$path $section", emptyList<Any>(), marked)
+            }
+        }
+    }
+
+    @Test
+    fun `every shipped shadow candidate loads, none dropped`() {
+        val prepared = RuleGenerationAssembler.assemble(
+            generated.map { (path, json) -> RuleFile.Bundled(path, json) }, emptyList(),
+        ) as GenerationResult.Prepared
+        val candidates = shippedShadow.sumOf { (_, json) -> Json.parseToJsonElement(json).jsonObject["screens"]?.jsonArray?.size ?: 0 }
+        assertEquals(candidates, prepared.generation.shadow?.candidates?.size ?: 0)
+        assertEquals(0, prepared.generation.shadow?.droppedCandidates ?: 0)
     }
 
     @Test

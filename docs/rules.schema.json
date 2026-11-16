@@ -63,6 +63,10 @@
           "description": "Match-order control, ENFORCED AT RUNTIME (#419): Ruleset.matchFirst evaluates every overrideable:false rule (priority-ordered) before any overrideable rule, so a non-overrideable match can never be pre-empted by another rule's priority; priority only orders within a partition. Also a CI/CD gate: the split-repo pipeline requires human review before shipping changes to this rule. Default: true.",
           "default": true
         },
+        "shadow": {
+          "const": true,
+          "description": "#1630: marks a shadow candidate, the only place a rule is marked. The canonicalizer moves every marked screen rule of a platform into the generated <platform>_shadow.json asset, which the app compiles into a separate ShadowSet that never takes part in live recognition. A candidate keeps the id it will have when live and may share it with a live rule; two candidates may not share one. Any value other than true is a build error, and so is the key on a click or notification rule."
+        },
         "state": { "$ref": "#/$defs/stateBlock" },
         "bind": { "$ref": "#/$defs/bindBlock" },
         "enables": {

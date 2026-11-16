@@ -8,6 +8,14 @@ object RuleEngineConstants {
     const val MAX_SUPPORTED_FORMAT_VERSION = 2
 
     /**
+     * The `format_version` a `<platform>_shadow` rules file declares (#1630). It is above
+     * [MAX_SUPPORTED_FORMAT_VERSION], so a reader built before shadow files rejects the file, and only
+     * the shadow reader accepts it, for `_shadow` files alone. The matchers build writes the same
+     * number; `ShadowFormatVersionPinTest` (`:core:pipeline`) holds the two equal.
+     */
+    const val SHADOW_FORMAT_VERSION = MAX_SUPPORTED_FORMAT_VERSION + 1
+
+    /**
      * The rules feed's `contract` number (#1568, ADR-0013): the version of the vocabulary the rule
      * compiler accepts. A rules manifest whose contract this app does not support is refused and
      * the last good rules stay. `RulesContractPinTest` (`:core:pipeline`) fails when the

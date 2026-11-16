@@ -62,8 +62,7 @@ class PickupArrivedRedactParityTest {
 
     /** Every platform's screen rules by id (the sweep is platform-neutral: a claim by any rule is judged). */
     private val rulesByIdAllPlatforms: Map<String, JsonObject> by lazy {
-        File(TestRulesetFactory.rulesDir).walkTopDown()
-            .filter { it.isFile && it.extension == "json" }
+        File(TestRulesetFactory.rulesDir).listFiles { f -> f.isFile && f.extension == "json" }.orEmpty().asSequence()
             .sortedBy { it.path }
             .flatMap { file ->
                 Json.parseToJsonElement(file.readText()).jsonObject["screens"]?.jsonArray.orEmpty()
