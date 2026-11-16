@@ -16,6 +16,9 @@ import java.math.RoundingMode
  * not JCS (it leaves keys unquoted), so this is the owner wherever an identifier is defined over JCS.
  *
  * Throws [IllegalArgumentException] on input JCS cannot encode: a non-finite number or a lone surrogate.
+ *
+ * Known limit: a non-integer number takes the shortest digit count that round-trips, rounded once per precision, which
+ * can pick a different last digit than ECMAScript in rare cases (2^-44 is one). Shipped rule JSON holds integers only.
  */
 internal object Jcs {
 

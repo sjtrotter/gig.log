@@ -248,4 +248,21 @@ class ShadowSetTest {
         assertNull(interpreter.generation!!.shadow)
         assertEquals(prepared(live).generation.id, interpreter.generation!!.id)
     }
+    @Test
+    fun `loadDefaults attaches the bundled shadow set from rules shadow`() = runTest {
+        val shadow = shadowFile(otherCandidate)
+        val assets = mock<AssetManager> {
+            on { list("rules") } doReturn arrayOf("doordash.json", "shadow")
+            on { open("rules/doordash.json") } doReturn live.json.byteInputStream()
+            on { list("rules/shadow") } doReturn arrayOf("doordash_shadow.json")
+            on { open("rules/shadow/doordash_shadow.json") } doReturn shadow.json.byteInputStream()
+        }
+        val context = mock<Context>()
+        whenever(context.assets).thenReturn(assets)
+        val interpreter = JsonRuleInterpreter(context, mock<RuleCapabilityGrants>())
+        interpreter.loadDefaults()
+        val generation = interpreter.generation!!
+        assertEquals(listOf("doordash.screen.pickup"), generation.shadow?.candidates?.map { it.id })
+        assertEquals(prepared(live).generation.id, generation.id)
+    }
 }

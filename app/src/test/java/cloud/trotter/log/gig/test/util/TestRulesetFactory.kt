@@ -60,6 +60,7 @@ object TestRulesetFactory {
         val dir = File(rulesDir)
         val assets = mock<AssetManager>()
         whenever(assets.list("rules")).thenReturn(dir.list())
+        whenever(assets.list("rules/shadow")).thenReturn(File(dir, "shadow").list() ?: emptyArray())
         whenever(assets.open(any<String>())).thenAnswer {
             val file = File(dir, it.getArgument<String>(0).removePrefix("rules/"))
             transform(file.name, file.readText()).byteInputStream()
