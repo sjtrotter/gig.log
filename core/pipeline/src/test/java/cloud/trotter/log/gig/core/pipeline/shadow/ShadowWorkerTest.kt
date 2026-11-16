@@ -120,7 +120,7 @@ class ShadowWorkerTest {
         assertEquals(1L, stats.frameCount())
     }
 
-    @Test fun `nothing is queued without a candidate for the frame's platform`() {
+    @Test fun `nothing is queued without a candidate for the frame's platform or without its app version`() {
         val sink = Recording()
         val stats = ShadowStats()
         val worker = ShadowWorker(sink, stats, ShadowWorker.QUEUE_CAPACITY)
@@ -129,6 +129,7 @@ class ShadowWorkerTest {
         worker.offer(screen("Looking for offers"), platform = Platform.Unknown)
         worker.offer(null, Platform.DoorDash, screen("Looking for offers"), null, 1L, "7.1.0", liveWon = true)
         worker.offer(RuleGeneration(), Platform.DoorDash, screen("Looking for offers"), null, 2L, "7.1.0", liveWon = true)
+        worker.offer(generation, Platform.DoorDash, screen("Looking for offers"), null, 2L, null, liveWon = true)
         worker.offer(screen("Looking for offers"), at = 3L)
 
         assertEquals(3L, sink.next().second.timestampMillis)

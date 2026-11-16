@@ -69,7 +69,8 @@ class ShadowWorker internal constructor(
     /**
      * Queue one admitted screen frame. [generation] is the generation that classified it, [timestampMillis] its
      * classification instant, and [liveWon] whether a live rule won it (false for live UNKNOWN). Returns at once and
-     * never throws; nothing is queued when the generation has no candidate for [platform].
+     * never throws. Nothing is queued when the generation has no candidate for [platform], or when the frame has no
+     * [platformAppVersion] (its health row has no key).
      */
     fun offer(
         generation: RuleGeneration?,
@@ -81,6 +82,7 @@ class ShadowWorker internal constructor(
         liveWon: Boolean,
     ) {
         try {
+            if (platformAppVersion == null) return
             val set = generation?.shadow ?: return
             if (set.candidatesFor(platform).isEmpty()) return
             val clock = TransformRegistry.TransformClock(timestampMillis, ZoneId.systemDefault())

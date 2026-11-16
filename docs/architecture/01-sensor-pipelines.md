@@ -1465,7 +1465,8 @@ beside live recognition without touching it. *The seam* sits in `AccessibilityPi
 disabled-platform and `FrameGate` gates, and the frame's health row is enqueued first. It calls
 `ShadowWorker.offer(generation, platform, tree, window title, timestamp, platform app version, liveWon)` with the
 generation that classified the frame (`Classified.redaction`, which for a screen is that `RuleGeneration`); `offer` does
-a map lookup and a queue insert, and nothing else, when that generation's `shadow` has candidates for the platform.
+a map lookup and a queue insert, and nothing else, when that generation's `shadow` has candidates for the platform and
+the frame carries a platform app version (without one its health row has no key).
 *The worker* is one daemon thread at minimum priority (`ThreadPoolExecutor`, 1 thread, an `ArrayBlockingQueue` of
 `QUEUE_CAPACITY` = 4); a frame that finds the queue full is dropped and counted, and changes no state. On the worker, a
 frame whose tree or window title carries a `SensitiveTextMarkers` marker is discarded before any candidate sees it,
