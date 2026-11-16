@@ -60,11 +60,11 @@ class ShadowWorker internal constructor(
     /** Touched only by the worker thread: the runner's rotation is per-instance state. */
     private val runner = ShadowFrameRunner()
 
-    // AbortPolicy: offer() learns that a frame was dropped, so a boundary that did not fit is sent again.
+    // The one worker thread starts here and never times out, so offer() puts work straight on the queue: a full queue
+    // returns false (no exception on the pipeline thread), and a boundary that did not fit is sent again.
     private val executor = ThreadPoolExecutor(
         1, 1, 0L, TimeUnit.MILLISECONDS, ArrayBlockingQueue(queueCapacity),
         { task -> Thread(task, THREAD_NAME).apply { isDaemon = true; priority = Thread.MIN_PRIORITY } },
-        ThreadPoolExecutor.AbortPolicy(),
     ).apply { prestartCoreThread() }
 
     /**
@@ -96,7 +96,11 @@ class ShadowWorker internal constructor(
             if (set == null && platform !in withCandidates) return
             val clock = TransformRegistry.TransformClock(timestampMillis, ZoneId.systemDefault())
             val frame = Frame(platform, tree, windowTitle, clock, platformAppVersion, liveWon, sink.resetToken)
-            executor.execute { if (set == null) boundary(frame, generation?.id) else evaluate(frame, set) }
+            val queued = executor.queue.offer(Runnable { if (set == null) boundary(frame, generation?.id) else evaluate(frame, set) })
+            if (!queued) {
+                stats.onDropped()
+                return
+            }
             if (set == null) withCandidates.remove(platform) else withCandidates.add(platform)
         } catch (_: Throwable) {
             stats.onDropped()
