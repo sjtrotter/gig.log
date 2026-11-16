@@ -547,6 +547,44 @@ feed channel and goes through `prepareGeneration` and `activate`.
   until it bumps the contract or re-pins it on purpose. The 1 MB per-file limit (`MAX_RULE_FILE_BYTES`) and
   `MAX_RULES_PER_FILE` hold for every source.
 
+## Shadow rules: the shadow set (#1630)
+
+A shadow rule (candidate) is a screen rule that will be evaluated beside the live rules without its result reaching
+anything live. This layer holds the authoring, the file, the compile and the identifiers; nothing evaluates a
+candidate yet.
+
+- **The flag.** `shadow: true` at rule level in the JSON5 source is the only marker (`docs/rules.schema.json`). Any
+  other value, or the key on a click or notification rule, fails the matchers build, and so do two candidates with
+  one id. A candidate keeps the id it will have when live and may share it with a live rule, so the directory
+  merge's duplicate-id check skips marked rules. Candidates may sit in any sub-file; the flag alone routes them.
+- **The `_shadow` file.** The canonicalizer moves every candidate of a platform into its own generated asset,
+  `<platform>_shadow.json` (`{format_version, platform_id, screens}`), and returns the live element untouched when a
+  platform has none, so the live assets stay byte-identical. `liveShadowErrors` fails the build if a live asset
+  carries a `shadow` key, and the compiler refuses the key in a live file anyway (it is not a known rule key, so the
+  rule isolates and the generation is rejected). A source named `<x>_shadow` is reserved.
+- **The version gate.** The file declares `RuleEngineConstants.SHADOW_FORMAT_VERSION`
+  (`MAX_SUPPORTED_FORMAT_VERSION + 1`; the matchers build writes the same number, pinned by
+  `ShadowFormatVersionPinTest`), so `RulesetLoader.validate` refuses it and a reader built before shadow files never
+  runs its rules. `ShadowSetCompiler` accepts exactly that version, for `_shadow` files only. Remote shadow files are
+  not read: `RulesFeedStager.readsFile` and `VerifiedRulesetBytes.fromFeedFile` take only registered platform names.
+- **Compile and isolation.** `RuleGenerationAssembler` sets `_shadow` files aside before anything compiles, builds
+  the live generation and its id without them, then `ShadowSetCompiler.build` compiles each candidate alone through
+  `RuleCompiler.compileRules` (state, binds, enables, effects and transition overrides validated) with the `shadow`
+  key stripped. The `ShadowSet` hangs off the `RuleGeneration` it was validated against (`RuleGeneration.shadow`,
+  carrying that `generationId`), so a frame reads both from one reference. It is never in `evalOrder`, priority,
+  sensitive coverage, bundled protection, `CapabilityEnumerator`, `ruleCount`, `ParseRotTracker`, incidents, alarms
+  or matched skeletons, and nothing materializes its effects, targets or capability keys. A shadow file that fails a
+  file-level check (size, JSON, keys, version, a platform that matches its name and has live screen rules) adds no
+  candidates; an invalid candidate, or two with one id, is dropped alone (DEBUG line, `droppedCandidates`); no
+  candidate left means no set. Every failure is caught there, so no shadow input can fail the live generation or
+  change which one loads.
+- **Identifiers** (`RuleIdentifiers`, full sha256 hex on the phone, the first 16 on the wire):
+  - candidate digest: sha256 of the RFC 8785 (JCS, `Jcs`) form of the candidate object as the canonicalizer emitted
+    it, `shadow` key included. Two candidates sharing a 16-hex prefix reject the whole set.
+  - generation id (`RuleGeneration.id`): sha256 of the JCS array, in assembly order, of
+    `{"role": "bundled"|"remote", "name": <logical name>, "sha256": <file digest>}` over the live files (shadow files
+    excluded), so a shadow change never moves it and swapping two files' roles does. The generation had no id
+    before; `CapabilityEnumerator`'s canonical form is not JCS, so `Jcs` is a separate owner.
 
 ## The feed channel: transport, cache and consent (#1565)
 

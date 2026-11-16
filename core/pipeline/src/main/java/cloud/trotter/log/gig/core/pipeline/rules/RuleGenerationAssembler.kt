@@ -16,6 +16,10 @@ import java.util.Locale
  * so the #432 readiness gate stays closed. A remote file that names no known platform, or carries a
  * rule [RemoteRuleAdmission] refuses, rejects it too.
  *
+ * **Shadow files** (`<platform>_shadow`, #1630) take no part in any of this: they are set aside before
+ * the live files compile, and [ShadowSetCompiler] builds the generation's [ShadowSet] from them after
+ * the live generation and its id are fixed.
+ *
  * **Protected rules** are the bundled rules whose every compiled branch has the sensitive shape,
  * decided by shape, never by the id. A remote rule with a protected id is dropped with a WARN and the
  * bundled rule stays: a remote set cannot remove a block. That covers the `sensitive.catchall` rules
@@ -34,7 +38,8 @@ import java.util.Locale
  */
 internal object RuleGenerationAssembler {
 
-    fun assemble(bundled: List<RuleFile.Bundled>, remoteFiles: List<RuleFile.Remote>): GenerationResult {
+    fun assemble(bundledFiles: List<RuleFile.Bundled>, remoteFiles: List<RuleFile.Remote>): GenerationResult {
+        val (shadowFiles, bundled) = bundledFiles.partition(ShadowSetCompiler::isShadowFile)
         val bundledCompiled = mutableListOf<Pair<String, JsonRuleInterpreter.CompiledRuleBundle>>()
         for (file in bundled) {
             val compiled = compileRuleFile(file.json, file.source)
@@ -115,18 +120,28 @@ internal object RuleGenerationAssembler {
         val formatVersion = (acceptedBundled.map { it.second.formatVersion } +
             remote.map { it.compiled.bundle.formatVersion }).lastOrNull { it != null }
 
+        val fileRefs = bundled.map { fileRef(RuleIdentifiers.Role.BUNDLED, it) } +
+            remoteFiles.map { fileRef(RuleIdentifiers.Role.REMOTE, it) }
+        val generationId = fileRefs.takeIf { null !in it }?.let { RuleIdentifiers.generationId(it.filterNotNull()) }
+        val livePlatforms = liveScreens.all.map { Platform.fromRuleId(it.id) }.toSet() - Platform.Unknown
+
         return GenerationResult.Prepared(
             generation = RuleGeneration(
                 screens = liveScreens.ruleset(),
                 clicks = clicks.ruleset(),
                 notifications = notifications.ruleset(),
                 formatVersion = formatVersion,
+                id = generationId,
+                shadow = ShadowSetCompiler.build(shadowFiles, generationId, livePlatforms),
             ),
             capabilities = capabilities,
             bundledFiles = acceptedBundled.size,
             remoteFiles = remote.size,
         )
     }
+
+    private fun fileRef(role: RuleIdentifiers.Role, file: RuleFile) =
+        sha256OrNull(file.json)?.let { RuleIdentifiers.FileRef(role, file.logicalName, it) }
 
     private fun wholeFileRefusal(file: RuleFile, compiled: CompiledRuleFile?): String? = when {
         compiled == null -> "'${file.source}' failed to compile"

@@ -112,6 +112,8 @@ that tells phones a known platform change broke recognition before a fix ships. 
 anything else. Readers of format version 1 ignore unknown top-level keys, so the advisory needs no format change.
 When it lands it travels through the same tag and KMS path as the rules and adds no network request of its own.
 The per-rule canary share and the `shadow` mark of ADR-0011 §18 also ride the signed rules manifest (#1630, #1631).
+No manifest generator emits the `shadow` mark yet; when one does, it derives the mark from the rules' `shadow: true`
+flag in the JSON5 source, the only place a rule is marked, and never from hand-written metadata.
 
 ### 7. Self-hosting
 
