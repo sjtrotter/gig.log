@@ -149,7 +149,7 @@ class ShadowFrameRunner(
 
     companion object {
         /** See `docs/architecture/02-rule-engine.md` § Shadow rules for the benchmark these come from. */
-        const val PER_CANDIDATE_FUEL = 300_000L
-        const val PER_FRAME_FUEL = 600_000L
+        const val PER_CANDIDATE_FUEL = 400_000L
+        const val PER_FRAME_FUEL = 800_000L
     }
 }

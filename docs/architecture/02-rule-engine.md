@@ -550,8 +550,8 @@ feed channel and goes through `prepareGeneration` and `activate`.
 ## Shadow rules: the shadow set (#1630)
 
 A shadow rule (candidate) is a screen rule that will be evaluated beside the live rules without its result reaching
-anything live. This layer holds the authoring, the file, the compile and the identifiers; nothing evaluates a
-candidate yet.
+anything live. This layer holds the authoring, the file, the compile, the identifiers and the candidate engine; the
+pipeline does not call the engine yet (the seam, visits and reporting come next).
 
 - **The flag.** `shadow: true` at rule level in the JSON5 source is the only marker (`docs/rules.schema.json`). Any
   other value, or the key on a click or notification rule, fails the matchers build, and so do two candidates with
@@ -573,7 +573,8 @@ candidate yet.
 - **Compile and isolation.** `RuleGenerationAssembler` sets `_shadow` files aside before anything compiles, builds
   the live generation and its id without them, then `ShadowSetCompiler.build` compiles each candidate alone through
   `RuleCompiler.compileRules` (state, binds, enables, effects and transition overrides validated) with the `shadow`
-  key stripped. The `ShadowSet` hangs off the `RuleGeneration` it was validated against (`RuleGeneration.shadow`,
+  key stripped, inside `ShadowFuel.compileMetered`. A platform keeps its first `ShadowSet.MAX_CANDIDATES_PER_PLATFORM`
+  (16) candidates in file order; the rest drop alone. The `ShadowSet` hangs off the `RuleGeneration` it was validated against (`RuleGeneration.shadow`,
   carrying that `generationId`), so a frame reads both from one reference. It is never in `evalOrder`, priority,
   sensitive coverage, bundled protection, `CapabilityEnumerator`, `ruleCount`, `ParseRotTracker`, incidents, alarms
   or matched skeletons, and nothing materializes its effects, targets or capability keys. A shadow file that fails a
@@ -588,6 +589,68 @@ candidate yet.
     `{"role": "bundled"|"remote", "name": <logical name>, "sha256": <file digest>}` over the live files (shadow files
     excluded), so a shadow change never moves it and swapping two files' roles does. The generation had no id
     before; `CapabilityEnumerator`'s canonical form is not JCS, so `Jcs` is a separate owner.
+- **One per-rule evaluation.** `RuleEvaluation.firstSurvivingBranch` holds phases 1-5 (bindings, rejects, require,
+  parse, validators) for live `Ruleset.matchFirst` and the candidate path alike. Each caller supplies its own answer
+  to a thrown parse (live: an empty map and a WARN, as before; candidate: rethrow) and its own use of each
+  predicate-matched branch (live: the #1036 shortfall sink; candidate: remember the first). `matchFirst` builds its
+  result, effects and targets exactly as before; `AllMatchersSuite`, the golden corpus, the approved parse output and
+  the census golden are unchanged.
+- **Candidate outcome** (`ShadowCandidateEngine`). A branch predicate-matches when its bindings resolve, no reject
+  fires and its require holds. Evaluation stops at the first predicate-matched branch that does not Skip, as live
+  does; if every predicate-matched branch Skips, the first of them is the diagnostic branch. The outcome is `NoMatch`
+  (no branch predicate-matched), `Matched(shape, requiredOk, maskScan)` or `Unevaluated(BUDGET | FAILED)`. `requiredOk`
+  is null when the diagnostic branch's shape declares no required fields, else whether `RuleEvaluation
+  .nullRequiredFields` of that branch's own raw parse is empty, so a healthy branch never inherits a skipped sibling's
+  shortfall. A parse exception, a rule regex that could not be evaluated (`BoundedRegex.evaluationFailed` marks the
+  meter even where a fail-null field swallows it) and a stack overflow are `FAILED`. The engine never builds a
+  `RuleMatchResult`: no effects, overrides, targets, node references or capability keys, no `onParseShortfall`,
+  `ParseRotTracker`, `RecognitionHealth` or incident book, no log line. It takes the shadow set of the generation that
+  classified the frame and the frame's `TransformClock` as parameters; `TransformRegistry.withClock` restores an
+  enclosing scope when it ends.
+- **Work budget** (`ShadowFuel`, `FuelMeter`). Metering is chosen when a rule compiles: inside
+  `compileMetered`, `PredicateCompiler`, `ParseExpressionCompiler` and `compileNavigation` wrap each closure they build
+  so it charges the thread's installed meter first; outside it each wrapper returns the closure it was given, so a live
+  closure is the object it was before metering existed (`ShadowFuelTest` pins that a live-compiled rule charges nothing
+  with a meter installed). Prices, about 2.5 ns of JVM time per unit: a dispatch 6; a character a string predicate
+  reads 1; a cached joined-text scan 1 per 4 characters, its construction charged again; a regex character
+  `1 + programSize / 16`; a transform character 1 per step, plus 8 000 per sha256 digest (the hex formatting costs
+  more than the hash); a parse result its size. A charge is admitted before the work, so `used` never passes the
+  limit; the only work past it is the lazily built text cache the meter read to price the refused step. Exhaustion is
+  sticky and is `Unevaluated(BUDGET)`, never `NoMatch`. `ShadowFrameRunner` gives each candidate
+  `min(PER_CANDIDATE_FUEL, what the frame has left)` of `PER_FRAME_FUEL`; when the frame's fuel starved a candidate,
+  the first one starved opens the next frame, otherwise the start moves one place, per platform. The runner is not
+  thread-safe.
+- **Mask scan** (`ShadowMaskScan`, `Matched` only, same meter). The candidate's `CompiledRedact` is applied to the
+  tree (no `CaptureWriter`, file or bus), then every `scrubbableStrings` value of the copy is read by the
+  rules-independent backstops on whole values, each in its own mode: a `CustomerTextMarkers.MARKERS` lead-in is a hit
+  unless everything after it is masked; a value of an `ID_MARKERS` node is a hit unless it ends with a complete mask;
+  `PiiShapes.VALUE_SHAPES` (each shape's mode) and the anchored `FIRST_LAST_INITIAL` run on values up to 256
+  characters, and a longer one is `INCOMPLETE` for that check, never sliced. Only a complete mask token
+  (`MaskTokens.maskLengthAt`) is masked; a value splits at its complete masks and each segment is read whole, so text
+  around a mask stays inspectable. `HIT` outweighs `INCOMPLETE`; `CLEAN` needs every check finished; running out of
+  fuel mid-scan is `INCOMPLETE`. Masking is priced before it runs: each node, its characters, and a digest per value
+  an entry will hash (found by evaluating the entries' metered `find`s once). A shape pass is 80 units per character.
+  It is a sampled diagnostic, never proof of redaction.
+- **Benchmark and caps** (`LiveMatchBenchmarkTest`, `ShadowEngineBenchmarkTest`, run with
+  `-Dgiglog.shadowBench=true`; tables land in `core/pipeline/build/shadow-bench/`). JVM numbers on the dev laptop, a
+  proxy: the on-device check is a field checklist item when the pipeline calls the engine.
+
+  | measure (largest corpus trees, 227-327 nodes) | median | p95 |
+  |---|---:|---:|
+  | live `matchFirst` per frame, master (two runs) | 890 / 874 µs | 1 111 / 1 086 µs |
+  | live `matchFirst` per frame, this engine (two runs) | 875 / 881 µs | 1 097 / 1 089 µs |
+  | a shipped screen rule as a candidate (129 rules), fuel | 5 576 | 43 590 (p99 156 742, max 280 012) |
+  | the 16 costliest shipped rules as one frame, fuel | 748 011 | 1 200 316 |
+  | the same frame, time | 0.9-1.4 ms | 1.7-2.0 ms |
+
+  Worst-case legal candidates (a 999-instruction regex on every subtree, `any` of 200 of them, 64 branches of it,
+  maximum nesting, 200 joined-text scans of 40 phrases, 40 parse fields reading every node) cost 1.7 M to over 2 G
+  units unbounded (up to 5.9 s on the synthetic 4 000-node, depth-60 tree); every one ends `Unevaluated(BUDGET)` at
+  the candidate cap in at most 0.8 ms. Regex-heavy work runs at 2.3-3.0 ns per unit; text scans, joined text and
+  hashing run cheaper than priced. Chosen: `PER_CANDIDATE_FUEL` 400 000 (about 1 ms; every shipped rule finishes alone,
+  the costliest at 280 012), `PER_FRAME_FUEL` 800 000 (a frame of 16 worst-case candidates measured 2.0 ms, about twice
+  live `matchFirst`'s p95), and 16 candidates per platform, as proposed (the frame cap bounds the time; the count
+  bounds how long the rotation takes to come round).
 
 ## The feed channel: transport, cache and consent (#1565)
 

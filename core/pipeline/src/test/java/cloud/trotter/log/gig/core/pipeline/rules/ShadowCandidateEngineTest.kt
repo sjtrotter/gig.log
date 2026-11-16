@@ -174,16 +174,16 @@ class ShadowCandidateEngineTest {
         assertEquals(listOf("acceptButton"), sink.single().refusedBindings)
 
         val logged = mutableListOf<String>()
-        val tree2 = object : Timber.Tree() {
+        val recorder = object : Timber.Tree() {
             override fun log(priority: Int, tag: String?, message: String, t: Throwable?) {
                 logged += message
             }
         }
-        Timber.plant(tree2)
+        Timber.plant(recorder)
         try {
             assertEquals(Matched(null, null, MaskScan.CLEAN), ShadowCandidateEngine.evaluate(candidate(json), tree, FuelMeter(PLENTY)))
         } finally {
-            Timber.uproot(tree2)
+            Timber.uproot(recorder)
         }
         assertTrue("a candidate evaluation logs nothing: $logged", logged.isEmpty())
     }
@@ -215,12 +215,13 @@ class ShadowCandidateEngineTest {
 
     @Test
     fun `the frame cap starves later candidates and the rotation gives the starved one the next frame's first slot`() {
-        // A deep chain makes every node's subtree text long, so the worst case costs more than the light candidate's
+        // A deep chain makes every node's subtree text long, so the heavy candidate costs more than the light one's
         // whole evaluation, its mask scan included.
         var chain = text("end")
         repeat(50) { chain = UiNode(text = "row", children = listOf(chain)) }
         val tree = screen(text("Dash Now"), chain)
-        val heavy = candidate(worstCase)
+        // A near-maximal regex program (999 instructions) prices every character it reads at 63 units.
+        val heavy = candidate(rule(""""require": { "exists": { "hasAnyTextMatchesRegex": "(?:[a-z0-9]{1,41}[ .,-]){1,12}qz" } }"""))
         val light = candidate(rule(""""require": { "exists": { "hasText": "Dash Now" } }"""))
         val heavyCost = FuelMeter(PLENTY).also { assertEquals(NoMatch, ShadowCandidateEngine.evaluate(heavy, tree, it)) }.used
         val lightCost = FuelMeter(PLENTY).also { ShadowCandidateEngine.evaluate(light, tree, it) }.used

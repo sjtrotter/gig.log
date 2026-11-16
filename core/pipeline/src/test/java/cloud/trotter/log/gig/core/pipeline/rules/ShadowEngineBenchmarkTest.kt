@@ -223,15 +223,21 @@ class ShadowEngineBenchmarkTest {
         val set = ShadowSet("bench", List(ShadowSet.MAX_CANDIDATES_PER_PLATFORM) {
             ShadowCandidate(worst, Platform.DoorDash, "%064x".format(it))
         }, 0)
-        val runner = ShadowFrameRunner()
-        repeat(5) { runner.evaluate(set, Platform.DoorDash, maxTree, clock) }
-        val frameNs = List(9) {
-            val start = System.nanoTime()
-            runner.evaluate(set, Platform.DoorDash, maxTree, clock)
-            System.nanoTime() - start
+        lines += "## A frame of ${ShadowSet.MAX_CANDIDATES_PER_PLATFORM} worst-case candidates, " +
+            "caps ${ShadowFrameRunner.PER_CANDIDATE_FUEL} / ${ShadowFrameRunner.PER_FRAME_FUEL}"
+        lines += ""
+        lines += "| tree | frame fuel | median µs | max µs |"
+        lines += "|---|---:|---:|---:|"
+        for ((treeName, tree) in listOf("corpus max" to corpusMax.second, "synthetic 4 000 / depth 60" to maxTree)) {
+            val runner = ShadowFrameRunner()
+            repeat(5) { runner.evaluate(set, Platform.DoorDash, tree, clock) }
+            val frames = List(9) {
+                val start = System.nanoTime()
+                val fuelUsed = runner.evaluate(set, Platform.DoorDash, tree, clock).sumOf { it.fuelUsed }
+                fuelUsed to System.nanoTime() - start
+            }
+            lines += "| $treeName | ${frames.maxOf { it.first }} | ${micros(percentile(frames.map { it.second }, .5))} | ${micros(frames.maxOf { it.second })} |"
         }
-        lines += "## A frame of ${ShadowSet.MAX_CANDIDATES_PER_PLATFORM} worst-case candidates on the synthetic tree, " +
-            "caps ${ShadowFrameRunner.PER_CANDIDATE_FUEL} / ${ShadowFrameRunner.PER_FRAME_FUEL}: median ${micros(percentile(frameNs, .5))} µs, max ${micros(frameNs.max())} µs"
         report("shadow", lines)
     }
 }

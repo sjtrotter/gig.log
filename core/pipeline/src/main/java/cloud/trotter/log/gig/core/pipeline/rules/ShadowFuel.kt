@@ -72,7 +72,7 @@ internal class FuelExhausted : RuntimeException("shadow candidate fuel exhausted
 internal object ShadowFuel {
 
     /** One compiled-closure dispatch: a predicate, expression, validator or navigation call. */
-    const val DISPATCH_UNITS = 4L
+    const val DISPATCH_UNITS = 6L
 
     /** Units per transform input character per step, the `sha256` digest included. */
     const val TRANSFORM_UNITS_PER_CHAR = 1L
