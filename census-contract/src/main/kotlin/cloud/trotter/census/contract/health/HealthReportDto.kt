@@ -26,7 +26,9 @@ import kotlinx.serialization.Serializable
  * One item of `POST /v1/health`: an install's recognition-health counts for one UTC day, platform and platform app
  * version. The property order is the wire key order. Bounds and grammars live in [HealthReportSchema].
  *
- * [trips] counts recognition-health alarm trips, not deliveries; the report carries no count that reads as work done.
+ * [trips] counts recognition-health alarm trips, not deliveries. No count reads as work done, with two exceptions:
+ * [ruleCounts] is exact per rule (gig.log#1658 tracks it), and [shadowDaily] carries coarse levels whose presence on a
+ * day is visible by design.
  */
 @Serializable
 data class HealthReportDto(
@@ -48,33 +50,39 @@ data class HealthReportDto(
      */
     val parseShortfall: Map<String, Int>? = null,
     /**
-     * Shadow-rule tallies (census#102, gig.log#1630): per candidate rule, at most [HealthReportSchema.MAX_SHADOW_ENTRIES]
-     * entries, unique by (generation, rule, digest). Optional; a null value is left off the wire.
+     * Shadow-rule levels for the day (census#104, gig.log#1630): one entry per candidate rule loaded on the phone that
+     * day, zero visits included, at most [HealthReportSchema.MAX_SHADOW_ENTRIES], unique by (generation, rule, digest).
+     * Optional; a null value is left off the wire.
      */
-    val shadow: List<ShadowTallyDto>? = null,
+    val shadowDaily: List<ShadowDailyDto>? = null,
+    /** True when the phone held more candidates than [shadowDaily] carries. Only ever `true`, and only beside it. */
+    val shadowDailyTruncated: Boolean? = null,
     /** Probes the phone refused to evaluate (census#102): configuration status, not screen evidence. Optional. */
     val probeRefused: List<ShadowRefDto>? = null,
 )
 
 /**
- * One shadow rule's tallies for the day. [generation] names the live rules the phone ran and [digest] the candidate's
- * definition, each the first 16 hex of a sha256; [rule] is the candidate's rule id. Each metric is the count among the
- * last [HealthReportSchema.PARSE_SAMPLE] visits where that metric could be measured, `0..PARSE_SAMPLE`; a null metric is
- * unavailable (its sample was not full) and is left off the wire. [tied] and [onUnknown] share one sample, so they are
- * both present or both absent, and an entry carries at least one metric.
+ * One shadow rule's day, in levels ([ShadowLevels]). [generation] names the live rules the phone ran and [digest] the
+ * candidate's definition, each the first 16 hex of a sha256; [rule] is the candidate's rule id. [visits] counts stays
+ * on a screen the candidate matched; [evaluated] counts frames checked against it (recorded evaluation coverage, not a
+ * match result). Each metric is the level of its hits among the visits where it could be measured, and is left off the
+ * wire when there were none: [tied] and [onUnknown] share the visits as their denominator, so they are present exactly
+ * when [visits] is not [CountLevel.NONE].
  */
 @Serializable
-data class ShadowTallyDto(
+data class ShadowDailyDto(
     val generation: String,
     val rule: String,
     val digest: String,
-    val tied: Int? = null,
-    val onUnknown: Int? = null,
-    val emptyParse: Int? = null,
-    val maskFail: Int? = null,
+    val visits: CountLevel,
+    val evaluated: CountLevel,
+    val tied: FractionLevel? = null,
+    val onUnknown: FractionLevel? = null,
+    val emptyParse: FractionLevel? = null,
+    val maskFail: FractionLevel? = null,
 )
 
-/** One refused probe (census#102), named as a [ShadowTallyDto] is. */
+/** One refused probe (census#102), named as a [ShadowDailyDto] is. */
 @Serializable
 data class ShadowRefDto(
     val generation: String,
