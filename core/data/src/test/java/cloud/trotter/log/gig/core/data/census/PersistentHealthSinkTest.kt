@@ -8,6 +8,10 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import cloud.trotter.log.gig.domain.census.CensusUploadStats
 import cloud.trotter.log.gig.domain.census.HealthKey
 import cloud.trotter.log.gig.domain.census.HealthLedger
+import cloud.trotter.log.gig.domain.census.MaskScanResult
+import cloud.trotter.log.gig.domain.census.ShadowFrameRecord
+import cloud.trotter.log.gig.domain.census.ShadowOutcome
+import cloud.trotter.log.gig.domain.census.ShadowResult
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -352,5 +356,62 @@ class PersistentHealthSinkTest {
             assertEquals(HealthLedger(generation = 5).record(key, null), store.load())
             assertEquals(badRow, corruptBefore + 1, stats.healthCorrupt.get())
         }
+    }
+
+    // ── #1630 shadow frames ──────────────────────────────────────────────────────────────────────
+
+    private val generation = "0123456789abcdef"
+    private val digest = "fedcba9876543210"
+    private val candidate = "doordash.screen.waiting_for_offer"
+    private val entry = "$generation:$digest"
+    private val matched = ShadowOutcome.Matched(requiredOk = true, maskScan = MaskScanResult.CLEAN)
+
+    private fun shadow(at: Long, outcome: ShadowOutcome) = ShadowFrameRecord(
+        at, key.platform, key.platformAppVersion, generation, listOf(ShadowResult(candidate, digest, outcome)), liveWon = true,
+    )
+
+    @Test fun `shadow frames become one visit on the row the visit started on`() = runTest {
+        val sink = sink()
+        sink.onScreen(timestamp, key.platform, key.platformAppVersion, candidate)
+        sink.onShadowFrame(shadow(timestamp, matched))
+        sink.onShadowFrame(shadow(timestamp + 1_000, matched))
+        sink.onShadowFrame(shadow(timestamp + 2_000, ShadowOutcome.NoMatch))
+        val counters = sink.snapshot().rows.getValue(key.toString()).shadow.getValue(entry)
+        assertEquals(1, counters.visits)
+        assertEquals(3, counters.evaluated)
+        assertEquals(1, counters.tied)
+        assertEquals(counters, store.load().rows.getValue(key.toString()).shadow.getValue(entry))
+    }
+
+    @Test fun `a census reset during an open visit, then a late closure, writes nothing`() = runTest {
+        val sink = sink()
+        sink.onShadowFrame(shadow(timestamp, matched))
+        runCurrent()
+        sink.reset()
+        sink.onShadowFrame(shadow(timestamp + 1_000, ShadowOutcome.NoMatch))
+        val ledger = sink.snapshot()
+        assertTrue(ledger.rows.values.all { row -> row.shadow.values.all { it.visits == 0 } })
+        assertTrue(store.load().rows.values.all { row -> row.shadow.values.all { it.visits == 0 } })
+    }
+
+    @Test fun `a shadow frame with no platform app version records nothing`() = runTest {
+        val sink = sink()
+        sink.onShadowFrame(shadow(timestamp, matched).copy(platformAppVersion = null))
+        assertTrue(sink.snapshot().rows.isEmpty())
+        assertEquals(1L, stats.healthSkippedNoVersion.get())
+    }
+
+    @Test fun `a persisted shadow map that breaks k le n le visits is dropped and the row keeps its counts`() = runTest {
+        memory.memory.value = emptyPreferences().toMutablePreferences().apply {
+            this[stringPreferencesKey("ledger_json")] =
+                """{"generation":5,"rows":{"$key":{"admitted":2,"ruleCounts":{"$candidate":2},"revision":3,""" +
+                """"shadow":{"$entry":{"rule":"$candidate","visits":1,"tied":2}}}}}"""
+        }
+        val row = store.load().rows.getValue(key.toString())
+        assertEquals(2, row.admitted)
+        assertEquals(mapOf(candidate to 2), row.ruleCounts)
+        assertTrue(row.shadow.isEmpty())
+        assertTrue(row.shadowUnavailable)
+        assertEquals(1L, stats.healthCorrupt.get())
     }
 }

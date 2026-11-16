@@ -1,0 +1,187 @@
+// Shadow check candidate (#1630): a copy of the live doordash.screen.waiting_for_offer rule (dash-lifecycle.json5)
+// marked `shadow: true`, so the phone evaluates it beside the live rules and reports it in the daily health report.
+// Every frame it matches has a live winner, so it reports `tied: all`; it is here to confirm the shadow chain and its
+// cost on a phone. Its `redact` block is the live rule's (BundledGenerationTest pins that). Remove it once a drafted
+// rule takes the shadow path.
+{
+  "$schema": "../../../docs/rules.fragment.schema.json",
+  "screens": [
+    {
+      "id": "doordash.screen.waiting_for_offer",
+      "shadow": true,
+      "priority": 120,
+      "redact": [
+        {
+          "comment": "#1397: the merchant's free-text pickup instruction body, masked whole and plain; reasoning on `doordash.screen.pickup_arrival`.",
+          "find": {
+            "any": [
+              {
+                "hasIdSuffix": "instructions_line_2_expanded"
+              },
+              {
+                "hasIdSuffix": "instructions_line_2_collapsed"
+              }
+            ]
+          },
+          "plainMask": true
+        },
+        {
+          "find": {
+            "hasIdSuffix": "user_name"
+          }
+        },
+        {
+          "find": {
+            "hasIdSuffix": "gift_recipient_name"
+          },
+          "normalize": "customerName"
+        },
+        {
+          "find": {
+            "hasIdSuffix": "address_line_1"
+          }
+        },
+        {
+          "find": {
+            "hasIdSuffix": "address_line_2"
+          }
+        }
+      ],
+      "state": {
+        "flow": "idle",
+        "idleSurface": "no_orders",
+        "modeHint": "online"
+      },
+      "reject": [
+        {
+          "exists": {
+            "hasDesc": "Earnings Mode Switcher"
+          }
+        },
+        {
+          "exists": {
+            "hasText": "Return to dash"
+          }
+        },
+        {
+          "exists": {
+            "hasTextContaining": "look for orders along the way"
+          }
+        }
+      ],
+      "require": {
+        "any": [
+          {
+            "exists": {
+              "hasIdSuffix": "looking_for_order_progress_bar"
+            }
+          },
+          {
+            "exists": {
+              "hasText": "Looking for offers"
+            }
+          },
+          {
+            "all": [
+              {
+                "exists": {
+                  "hasTextContaining": "Finding offers"
+                }
+              },
+              {
+                "any": [
+                  {
+                    "exists": {
+                      "hasTextContaining": "Zone offer wait"
+                    }
+                  },
+                  {
+                    "exists": {
+                      "hasIdSuffix": "running_total_pay"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "parse": {
+        "as": "idle",
+        "fields": {
+          // #1029: the dash running total. Two renders, tried in order.
+          //   1. `running_total_pay` — a single settled TextView. Every committed
+          //      corpus frame carries it and resolves here, byte-identically.
+          //   2. The 8.93.7 `earnings_pill` — an id-less ANIMATED digit-wheel ("$",
+          //      "3",".","1","0" as separate nodes) beside its own label, under one
+          //      id-bearing container. `running_total_pay` appears in 0 of the 6
+          //      fielded waiting-for-offer frames of the 08-24 pull; the pill is
+          //      present in 51. `read: allText` fuses the subtree to "$3.10This dash",
+          //      which `parseGlyphCurrency` strips to the glyphs and accepts only when
+          //      the wheel has SETTLED into a well-formed figure (a mid-spin read is
+          //      null, never a number — see the transform's KDoc).
+          // The `hasAnyText: "This dash"` conjunct is load-bearing, not decoration: the
+          // SAME `earnings_pill` id renders the dasher's WEEK total on the earnings-mode
+          // pill ("This week" — see the committed on_dash_map/idle_map frames), and
+          // reading a weekly figure into the session's running earnings would be a
+          // large, plausible, stable lie — exactly the value a settle gate would happily
+          // commit. This rule is the ONLY one that parses `sessionPay`
+          // (`SessionPayOwnershipTest` pins that).
+          "sessionPay": {
+            "coalesce": [
+              {
+                "find": {
+                  "hasIdSuffix": "running_total_pay"
+                },
+                "read": "text",
+                "transform": "parseCurrency"
+              },
+              {
+                "find": {
+                  "all": [
+                    {
+                      "hasIdSuffix": "earnings_pill"
+                    },
+                    {
+                      "hasAnyText": "This dash"
+                    }
+                  ]
+                },
+                "read": "allText",
+                "transform": "parseGlyphCurrency"
+              }
+            ]
+          },
+          "waitTimeEstimate": {
+            "coalesce": [
+              {
+                "find": {
+                  "hasTextContaining": "Zone offer wait"
+                },
+                "navigate": "sibling(1)",
+                "read": "text"
+              },
+              {
+                "find": {
+                  "hasIdSuffix": "wait_time_button"
+                },
+                "navigate": "findDescendant(textView_prism_button_title)",
+                "read": "text",
+                "transform": {
+                  "stripPrefix": "est. "
+                }
+              }
+            ]
+          },
+          "isHeadingBackToZone": {
+            "presence": {
+              "exists": {
+                "hasIdSuffix": "cross_sp_title"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

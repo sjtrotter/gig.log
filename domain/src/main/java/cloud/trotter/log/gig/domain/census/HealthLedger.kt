@@ -34,6 +34,16 @@ data class HealthRow(
      * `'0'` read every required field, `'1'` left one null. Never longer than PARSE_SAMPLE.
      */
     val parseSamples: Map<String, String> = emptyMap(),
+    /**
+     * The row's shadow roster (#1630): per candidate, keyed `<generation>:<digest>` (16 hex each), its full-day
+     * counters. A candidate joins when this row records a shadow frame while it is active; at most
+     * [ShadowTally.MAX_SHADOW_ROSTER].
+     */
+    val shadow: Map<String, ShadowCounters> = emptyMap(),
+    /** A candidate arrived at a full roster and was not registered. */
+    val shadowTruncated: Boolean = false,
+    /** The persisted shadow map failed validation and was dropped: the row sends no `shadowDaily` for the day. */
+    val shadowUnavailable: Boolean = false,
 )
 
 /** Immutable, JSON object keyed ledger scoped to one census identity generation. */
@@ -72,6 +82,28 @@ data class HealthLedger(val rows: Map<String, HealthRow> = emptyMap(), val gener
                 .takeLast(HealthReportSchema.PARSE_SAMPLE)
             it.copy(parseSamples = it.parseSamples + (ruleId to sample), revision = it.revision + 1)
         }
+    }
+
+    /**
+     * One shadow frame (#1630) on [key]'s row: each active candidate joins the roster, and a definite outcome counts as
+     * evaluated. A row is never created for a frame that changes nothing, nor past [MAX_ROWS].
+     */
+    fun shadowFrame(key: HealthKey, generation: String, results: List<ShadowResult>): HealthLedger {
+        val row = rows[key.toString()]
+        if (row == null && rows.size >= MAX_ROWS) return this
+        val before = row ?: HealthRow()
+        val after = ShadowTally.record(before, key.platform, generation, results)
+        return if (after === before) this else copy(rows = rows + (key.toString() to after))
+    }
+
+    /**
+     * One closed shadow visit, credited once to the row it started on ([startKey]) under roster entry [entryKey]; this
+     * ledger unchanged when that row or entry is gone. The revision moves, so a closed row posts again.
+     */
+    fun creditVisit(startKey: HealthKey, entryKey: String, fold: VisitFold): HealthLedger {
+        val row = rows[startKey.toString()] ?: return this
+        val after = ShadowTally.credit(row, entryKey, fold)
+        return if (after === row) this else copy(rows = rows + (startKey.toString() to after))
     }
 
     fun pruneBefore(dayExclusive: String): HealthLedger = copy(
@@ -128,6 +160,14 @@ data class HealthLedger(val rows: Map<String, HealthRow> = emptyMap(), val gener
                 }
 
         /**
+         * [row] as loaded for [key]: unchanged when its shadow map is one the collector could have built, else without it
+         * and marked unavailable for the day (the base counts are kept).
+         */
+        fun withValidShadow(key: HealthKey, row: HealthRow): HealthRow =
+            if (ShadowTally.wellFormed(key.platform, row)) row
+            else row.copy(shadow = emptyMap(), shadowTruncated = false, shadowUnavailable = true)
+
+        /**
          * Per rule with a full sample, its shortfalls among the last [HealthReportSchema.PARSE_SAMPLE] attempts; null
          * when no rule has a full sample, so the report leaves the field off.
          */
@@ -158,17 +198,22 @@ data class HealthLedger(val rows: Map<String, HealthRow> = emptyMap(), val gener
         fun sendableReportJson(key: HealthKey, row: HealthRow, appVersion: String, rulesetVersion: String): String? =
             HealthReportSchema.encodeFitting(report(key, row, appVersion, rulesetVersion))
 
-        private fun report(key: HealthKey, row: HealthRow, appVersion: String, rulesetVersion: String) = HealthReportDto(
-            day = key.day,
-            platform = key.platform,
-            platformAppVersion = key.platformAppVersion,
-            appVersion = appVersion,
-            rulesetVersion = rulesetVersion,
-            admitted = row.admitted,
-            unknown = row.unknown,
-            trips = row.trips,
-            ruleCounts = row.ruleCounts,
-            parseShortfall = parseShortfall(row),
-        )
+        private fun report(key: HealthKey, row: HealthRow, appVersion: String, rulesetVersion: String): HealthReportDto {
+            val shadow = ShadowTally.daily(row)
+            return HealthReportDto(
+                day = key.day,
+                platform = key.platform,
+                platformAppVersion = key.platformAppVersion,
+                appVersion = appVersion,
+                rulesetVersion = rulesetVersion,
+                admitted = row.admitted,
+                unknown = row.unknown,
+                trips = row.trips,
+                ruleCounts = row.ruleCounts,
+                parseShortfall = parseShortfall(row),
+                shadowDaily = shadow?.first,
+                shadowDailyTruncated = shadow?.second?.takeIf { it },
+            )
+        }
     }
 }

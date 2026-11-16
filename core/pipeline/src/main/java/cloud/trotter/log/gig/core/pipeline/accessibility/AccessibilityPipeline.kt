@@ -16,6 +16,8 @@ import cloud.trotter.log.gig.core.pipeline.PipelineEvent
 import cloud.trotter.log.gig.core.pipeline.PipelineStats
 import cloud.trotter.log.gig.core.pipeline.RecognitionHealthMonitor
 import cloud.trotter.log.gig.core.pipeline.census.SkeletonPublisher
+import cloud.trotter.log.gig.core.pipeline.rules.RuleGeneration
+import cloud.trotter.log.gig.core.pipeline.shadow.ShadowWorker
 import cloud.trotter.log.gig.core.pipeline.accessibility.event.type.window.content_changed.ContentChangedPipeline
 import cloud.trotter.log.gig.core.pipeline.accessibility.event.type.window.state_changed.StateChangedPipeline
 import cloud.trotter.log.gig.core.pipeline.accessibility.event.type.window.windows_changed.WindowsChangedPipeline
@@ -52,6 +54,7 @@ class AccessibilityPipeline @Inject constructor(
     private val stats: PipelineStats,
     private val recognitionHealth: RecognitionHealthMonitor,
     private val skeletonPublisher: SkeletonPublisher,
+    private val shadowWorker: ShadowWorker,
 ) {
     companion object {
         const val SCREEN_PIPELINE_ID = PipelineRegistry.SCREEN_PIPELINE_ID
@@ -172,6 +175,19 @@ class AccessibilityPipeline @Inject constructor(
             // monitor swallows everything, so a broken alarm can never cost a frame.
             if (event is PipelineEvent.Screen) {
                 recognitionHealth.onScreenAdmitted(event.packageName, obs)
+                // #1630 shadow seam, after the health sample so the frame's row exists first: the frame, the
+                // generation that classified it (a screen's redaction source is that generation) and the live result
+                // go to the shadow worker's queue. No candidate runs on this thread; the worker applies the UNKNOWN
+                // sensitive backstops before any candidate sees the frame.
+                shadowWorker.offer(
+                    classified.redaction as? RuleGeneration,
+                    Platform.fromPackage(event.packageName),
+                    event.tree,
+                    event.snapshot.windowContext?.windowTitle,
+                    obs.timestamp,
+                    obs.metadata.platformAppVersion,
+                    liveWon = obs.target != UNKNOWN_TARGET,
+                )
             }
             // #1036 parse-shortfall census, taken HERE for the same reason as the #937 sample
             // above: post-admission, so a dasher parked on a rotted screen contributes the frames

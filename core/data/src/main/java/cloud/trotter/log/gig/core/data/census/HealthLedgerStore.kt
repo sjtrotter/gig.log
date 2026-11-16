@@ -50,11 +50,14 @@ class HealthLedgerStore @Inject constructor(
         val decoded = buildMap {
             document["rows"]?.jsonObject?.forEach { (key, value) ->
                 try {
-                    HealthKey.parse(key)
+                    val healthKey = HealthKey.parse(key)
                     val row = Json.decodeFromJsonElement<HealthRow>(value)
                     // #1571: a sample attempt() could not have built is a corrupt row, like any other decode failure.
                     require(HealthLedger.wellFormedSamples(row))
-                    put(key, row)
+                    // #1630: a shadow map the collector could not have built costs the row its shadow map only.
+                    val checked = HealthLedger.withValidShadow(healthKey, row)
+                    if (checked !== row) stats.healthCorrupt.incrementAndGet()
+                    put(key, checked)
                 } catch (_: IllegalArgumentException) {
                     stats.healthCorrupt.incrementAndGet()
                 }

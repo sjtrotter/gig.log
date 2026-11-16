@@ -17,6 +17,12 @@ interface HealthSink {
         shortfall: Boolean,
     )
 
+    /**
+     * One admitted screen frame's shadow outcomes (#1630), from the shadow worker thread: ids, outcomes and the live
+     * result only. The collector turns them into visits and the row's daily counters.
+     */
+    fun onShadowFrame(frame: ShadowFrameRecord)
+
     object NoOp : HealthSink {
         override fun onScreen(timestampMillis: Long, platformWire: String, platformAppVersion: String?, ruleId: String?) = Unit
         override fun onTrip(timestampMillis: Long, platformWire: String, platformAppVersion: String?) = Unit
@@ -27,5 +33,6 @@ interface HealthSink {
             ruleId: String,
             shortfall: Boolean,
         ) = Unit
+        override fun onShadowFrame(frame: ShadowFrameRecord) = Unit
     }
 }

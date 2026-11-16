@@ -69,6 +69,20 @@ class BundledGenerationTest {
     }
 
     @Test
+    fun `a shipped candidate that shares a live rule's id masks with that rule's redact block`() {
+        val live = shipped.flatMap { (_, json) -> Json.parseToJsonElement(json).jsonObject["screens"]?.jsonArray.orEmpty() }
+            .associateBy { it.jsonObject.getValue("id") }
+        for ((path, json) in shippedShadow) {
+            for (candidate in Json.parseToJsonElement(json).jsonObject["screens"]?.jsonArray.orEmpty()) {
+                val twin = live[candidate.jsonObject.getValue("id")] ?: continue
+                assertEquals("$path ${candidate.jsonObject["id"]}", twin.jsonObject["redact"], candidate.jsonObject["redact"])
+            }
+        }
+        // The #1630 check candidate is one such copy.
+        assertTrue(shippedShadow.any { (_, json) -> "doordash.screen.waiting_for_offer" in json })
+    }
+
+    @Test
     fun `the bundled generation carries every shipped rule`() {
         val result = RuleGenerationAssembler.assemble(shipped.map { (path, json) -> RuleFile.Bundled(path, json) }, emptyList())
         val generation = (result as GenerationResult.Prepared).generation
