@@ -52,14 +52,17 @@ private val SIBLING_SCAN_CAP = Regex("^(.*),\\s*(\\d+)$")
 internal fun compileNavigation(navSpec: JsonElement): (UiNode) -> UiNode? {
     val nav = navSpec.jsonPrimitive.content
     return when {
-        nav == "parent" -> { node -> node.parent }
+        // #1630: a shadow candidate's navigation charges for the nodes it walks; a live one is returned as built.
+        nav == "parent" -> ShadowFuel.navigation({ node -> node.parent }) { 0L }
         nav.startsWith("ancestor(") -> {
             val n = nav.removePrefix("ancestor(").removeSuffix(")").toIntOrNull() ?: 1
-            ;{ node -> node.ancestor(n) }
+            ShadowFuel.ancestor(n)
         }
         nav.startsWith("sibling(") -> {
             val offset = nav.removePrefix("sibling(").removeSuffix(")").toIntOrNull() ?: 1
-            ;{ node -> node.sibling(offset) }
+            ShadowFuel.navigation({ node -> node.sibling(offset) }) { node ->
+                node.parent?.children?.size?.toLong() ?: 0L
+            }
         }
         // #1029 — the SHAPE-anchored sibling read: `nextSiblingMatchingRegex(<pattern>[, <n>])`.
         // `sibling(N)` addresses a slot by POSITION, which is only sound while the row's shape is
@@ -101,7 +104,7 @@ internal fun compileNavigation(navSpec: JsonElement): (UiNode) -> UiNode? {
                 )
             }
             val regex = compileRegex(pattern)
-            ;{ node ->
+            val scan: (UiNode) -> UiNode? = { node ->
                 // #1053 round 5 — an unevaluable match resolves no sibling, never the wrong one.
                 try {
                     node.followingSiblings().asSequence().take(cap)
@@ -110,15 +113,14 @@ internal fun compileNavigation(navSpec: JsonElement): (UiNode) -> UiNode? {
                     null
                 }
             }
+            ShadowFuel.navigation(scan) { node ->
+                node.followingSiblings().take(cap).sumOf { 1L + (it.text?.length ?: 0) * ShadowFuel.regexWeight(regex) }
+            }
         }
-        nav.startsWith("findChild(") -> {
-            val idSuffix = nav.removePrefix("findChild(").removeSuffix(")")
-            ;{ node -> node.findChildById(idSuffix) }
-        }
-        nav.startsWith("findDescendant(") -> {
-            val idSuffix = nav.removePrefix("findDescendant(").removeSuffix(")")
-            ;{ node -> node.findDescendantById(idSuffix) }
-        }
+        nav.startsWith("findChild(") ->
+            ShadowFuel.findChild(nav.removePrefix("findChild(").removeSuffix(")"))
+        nav.startsWith("findDescendant(") ->
+            ShadowFuel.findDescendant(nav.removePrefix("findDescendant(").removeSuffix(")"))
         else -> throw RuleCompileException(
             "Unknown navigation: '$nav'",
             isolable = true, // authoring typo — the rule isolates (#293 item 4)

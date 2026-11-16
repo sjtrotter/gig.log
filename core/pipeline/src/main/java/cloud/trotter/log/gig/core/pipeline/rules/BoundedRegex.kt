@@ -163,6 +163,9 @@ class BoundedRegex internal constructor(private val pattern: Re2Pattern) {
 
         /** Builds the exception and WARNs once per pattern per process. Not inline — it is cold. */
         internal fun BoundedRegex.evaluationFailed(): RegexEvaluationFailed {
+            // #1630: a shadow candidate evaluating on this thread records the failure even where a fail-null
+            // catch inside its compiled parse swallows the exception. Cold path only.
+            ShadowFuel.noteRegexFailure()
             val key = pattern.pattern()
             if (warnedPatterns.add(key)) {
                 Timber.tag("Pipeline").w(

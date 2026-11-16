@@ -143,5 +143,8 @@ subprojects {
                     }
                 }
             }
+        // #1630 — `-Dgiglog.shadowBench=true` runs the shadow engine benchmarks (`LiveMatchBenchmarkTest`,
+        // `ShadowEngineBenchmarkTest`, :core:pipeline), which skip themselves otherwise. Forwarded like the flag above.
+        providers.systemProperty("giglog.shadowBench").orNull?.let { systemProperty("giglog.shadowBench", it) }
     }
 }

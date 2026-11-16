@@ -303,16 +303,19 @@ internal object ParseExpressionCompiler {
      * expression's declared [ParseFieldKind] is preserved untouched — the #1036 shortfall census
      * reads that kind, and an evaluation failure is not the anchor rot that signal exists to name.
      */
-    private fun failNullOnEvaluationFailure(expr: ScreenExpr): ScreenExpr =
-        expr.copy(
+    private fun failNullOnEvaluationFailure(expr: ScreenExpr): ScreenExpr {
+        // #1630: a shadow candidate's expression is metered inside the fail-null catch; a live one is unchanged.
+        val eval = ShadowFuel.expression(expr.eval)
+        return expr.copy(
             eval = { node, bindings ->
                 try {
-                    expr.eval(node, bindings)
+                    eval(node, bindings)
                 } catch (e: RegexEvaluationFailed) {
                     null
                 }
             },
         )
+    }
 
     /** True when a `conditionalEnum` declares an `else` arm — then it always resolves (#1036). */
     private fun hasElseCase(obj: JsonObject): Boolean =
@@ -347,8 +350,10 @@ internal object ParseExpressionCompiler {
     }
 
     private fun compileFind(obj: JsonObject, fromName: String?): (UiNode, Bindings) -> Any? {
+        val applyTransform = ShadowFuel.transform()
         val findPred = compileNodePred(obj["find"]!!)
         val readProp = obj["read"]?.jsonPrimitive?.content
+        val read = readProp?.let { ShadowFuel.propertyReader(it) }
         val transformSpec = obj["transform"]
         val fallbackVal = obj["fallback"]
         val rejectIfSpec = obj["rejectIf"]?.let { compileNodePred(it) }
@@ -369,14 +374,14 @@ internal object ParseExpressionCompiler {
                 foundNode = null
             }
 
-            val rawValue = if (foundNode != null && readProp != null) {
-                readProperty(foundNode, readProp)
+            val rawValue = if (foundNode != null && read != null) {
+                read(foundNode)
             } else if (foundNode != null && readProp == null) {
                 foundNode.text
             } else null
 
             val transformed = if (rawValue != null && transformSpec != null) {
-                TransformRegistry.applyAny(transformSpec, rawValue)
+                applyTransform(transformSpec, rawValue)
             } else rawValue
 
             transformed ?: fallbackVal?.let { resolveLiteral(it) }
@@ -384,9 +389,10 @@ internal object ParseExpressionCompiler {
     }
 
     private fun compileSiblingOf(obj: JsonObject, fromName: String?): (UiNode, Bindings) -> Any? {
+        val applyTransform = ShadowFuel.transform()
         val findPred = compileNodePred(obj["siblingOf"]!!)
         val offset = obj["offset"]?.jsonPrimitive?.intOrNull ?: 1
-        val readProp = obj["read"]?.jsonPrimitive?.content ?: "text"
+        val read = ShadowFuel.propertyReader(obj["read"]?.jsonPrimitive?.content ?: "text")
         val transformSpec = obj["transform"]
 
         return { tree, bindings ->
@@ -395,37 +401,42 @@ internal object ParseExpressionCompiler {
             val siblingNode = labelNode?.sibling(offset)
 
             val rawValue = if (siblingNode != null) {
-                readProperty(siblingNode, readProp)
+                read(siblingNode)
             } else null
 
             if (rawValue != null && transformSpec != null) {
-                TransformRegistry.applyAny(transformSpec, rawValue)
+                applyTransform(transformSpec, rawValue)
             } else rawValue
         }
     }
 
     private fun compileFindAll(obj: JsonObject, fromName: String?): (UiNode, Bindings) -> Any? {
         val findPred = compileNodePred(obj["findAll"]!!)
-        val readProp = obj["read"]?.jsonPrimitive?.content ?: "text"
+        val read = ShadowFuel.propertyReader(obj["read"]?.jsonPrimitive?.content ?: "text")
 
         return { tree, bindings ->
             val startNode = if (fromName != null) bindings[fromName] ?: tree else tree
             val nodes = startNode.findNodes(findPred).take(MAX_EACH_SIZE)
-            nodes.mapNotNull { readProperty(it, readProp) }
+            nodes.mapNotNull(read)
         }
     }
 
     private fun compileTextAfterLabel(obj: JsonObject, fromName: String?): (UiNode, Bindings) -> Any? {
+        val applyTransform = ShadowFuel.transform()
         val label = obj["textAfterLabel"]!!.jsonPrimitive.content
         val offset = obj["offset"]?.jsonPrimitive?.intOrNull ?: 1
         val transformSpec = obj["transform"]
 
-        return { tree, bindings ->
+        val extract: (UiNode, Bindings) -> Any? = { tree, bindings ->
             val startNode = if (fromName != null) bindings[fromName] ?: tree else tree
             val rawValue = startNode.textAfterLabel(label, offset)
             if (rawValue != null && transformSpec != null) {
-                TransformRegistry.applyAny(transformSpec, rawValue)
+                applyTransform(transformSpec, rawValue)
             } else rawValue
+        }
+        // #1630: the label search reads the start node's whole `allText`; a metered candidate pays for it first.
+        return ShadowFuel.expression(extract) { tree, bindings ->
+            ShadowFuel.allTextCost(if (fromName != null) bindings[fromName] ?: tree else tree)
         }
     }
 
@@ -443,7 +454,7 @@ internal object ParseExpressionCompiler {
                 val fn: (UiNode) -> Boolean = { tree ->
                     tree.allTextLowerJoined.contains(text)
                 }
-                fn
+                ShadowFuel.predicate(fn) { tree -> ShadowFuel.joinedScanCost(tree, 1) }
             }
             else -> {
                 val pred = compileTreePred(JsonObject(presenceSpec))
@@ -484,6 +495,7 @@ internal object ParseExpressionCompiler {
     private fun compileEach(obj: JsonObject, fromName: String?, depth: Int = 0): (UiNode, Bindings) -> Any? {
         val findPred = compileNodePred(obj["each"]!!)
         val scopeSpec = obj["scope"]
+        val meteredScope = ShadowFuel.compilingMetered
         val excludeSpec = obj["exclude"]?.let { compileNodePred(it) }
         val extractObj = obj["extract"]?.jsonObject
             ?: throw RuleCompileException("'each' requires 'extract' block")
@@ -502,7 +514,10 @@ internal object ParseExpressionCompiler {
             val scopedNodes = if (scopeSpec != null) {
                 val ancestorN = scopeSpec.jsonPrimitive.content
                     .removePrefix("ancestor(").removeSuffix(")").toIntOrNull() ?: 1
-                rawNodes.mapNotNull { it.ancestor(ancestorN) }.distinct()
+                // #1630: a shadow candidate's scope walk is charged per step and stops at the root.
+                rawNodes.mapNotNull {
+                    if (meteredScope) ShadowFuel.meteredAncestor(it, ancestorN) else it.ancestor(ancestorN)
+                }.distinct()
             } else rawNodes
 
             val filtered = if (excludeSpec != null) {
@@ -520,6 +535,7 @@ internal object ParseExpressionCompiler {
     }
 
     private fun compileJoin(obj: JsonObject, depth: Int = 0): (UiNode, Bindings) -> Any? {
+        val applyTransform = ShadowFuel.transform()
         val partsArray = obj["join"]!!.jsonArray
         val separator = obj["separator"]?.jsonPrimitive?.content ?: ""
         val skipNulls = obj["skipNulls"]?.jsonPrimitive?.booleanOrNull ?: true
@@ -536,7 +552,7 @@ internal object ParseExpressionCompiler {
             }
             val result: Any? = joined.ifBlank { null }
             if (result != null && transformSpec != null) {
-                TransformRegistry.applyAny(transformSpec, result.toString())
+                applyTransform(transformSpec, result.toString())
             } else result
         }
     }
@@ -565,14 +581,15 @@ internal object ParseExpressionCompiler {
     }
 
     private fun compileReadFromBinding(obj: JsonObject, fromName: String): (UiNode, Bindings) -> Any? {
-        val readProp = obj["read"]!!.jsonPrimitive.content
+        val applyTransform = ShadowFuel.transform()
+        val read = ShadowFuel.propertyReader(obj["read"]!!.jsonPrimitive.content)
         val transformSpec = obj["transform"]
 
         return { _, bindings ->
             val node = bindings[fromName]
-            val rawValue = if (node != null) readProperty(node, readProp) else null
+            val rawValue = if (node != null) read(node) else null
             if (rawValue != null && transformSpec != null) {
-                TransformRegistry.applyAny(transformSpec, rawValue)
+                applyTransform(transformSpec, rawValue)
             } else rawValue
         }
     }
@@ -593,7 +610,8 @@ internal object ParseExpressionCompiler {
             )
         }
 
-        return { parsed ->
+        // #1630: a shadow candidate's validator is metered; a live one is returned as built.
+        return ShadowFuel.validator { parsed ->
             val outcome = ValidateRegistry.validate(assertName, obj, parsed)
             when (outcome) {
                 is ValidateOutcome.Pass -> ValidateOutcome.Pass

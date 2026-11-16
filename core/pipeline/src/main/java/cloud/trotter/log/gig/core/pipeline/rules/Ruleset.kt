@@ -135,201 +135,109 @@ class Ruleset<TInput>(
           // RAW, which is the exact fail-open this round exists to close. Each boundary has to
           // choose its own safe answer; see BoundedRegex.evaluating.
           try {
-            // Phase 1: Resolve rule-level bindings (screen rules only)
-            val ruleBindings = resolveBindings(input, rule.bindings) ?: continue
-
-            for (branch in rule.branches) {
-                // Screen constraint filter (click rules)
-                // #1104: `screenIs` is a SET of accepted targets (one entry is the common case).
-                // A null constraint is unconstrained; a null screenTarget satisfies nothing.
-                if (branch.screenIs != null && screenTarget !in branch.screenIs) continue
-
-                // Phase 1b: Resolve branch-level bindings
-                val branchBindings = resolveBindings(input, branch.bindings) ?: continue
-                val allBindings = ruleBindings + branchBindings
-
-                // Phase 2: Reject checks
-                if (branch.rejectChecks.any { it(input) }) continue
-
-                // Phase 3: Require check
-                if (branch.predicate != null && !branch.predicate.invoke(input)) continue
-
-                // Phase 4: Parse
-                val rawFields = try {
-                    branch.parser(input, allBindings)
-                } catch (e: Exception) {
+            // Phases 1-5 (bindings, rejects, require, parse, validators): the shared per-rule evaluation (#1630).
+            val hit = RuleEvaluation.firstSurvivingBranch(
+                rule, input, screenTarget,
+                onParseError = { e ->
                     Timber.w(e, "Parse error in rule '${rule.id}'")
                     emptyMap()
-                }
-
-                // Phase 5: Validate
-                var branchSkip = false
-                var dropParsed = false
-                for (validator in branch.validators) {
-                    when (validator(rawFields)) {
-                        is ValidateOutcome.Pass -> { /* continue */ }
-                        is ValidateOutcome.Skip -> {
-                            branchSkip = true
-                            break
-                        }
-                        is ValidateOutcome.DropParsed -> {
-                            dropParsed = true
-                            break
-                        }
-                    }
-                }
-
+                },
                 // #1036 — matched, but did the declared parse yield anything? Measured against
                 // the RAW parser output, before `DropParsed` applies: a `DropParsed` validator is a
-                // DECLARED decision to discard a parse, not the silent anchor rot this signal names
-                // (validators read `rawFields` as an immutable map, so it is unchanged here). A
-                // thrown parse (rawFields empty above) DOES count — it yielded nothing either.
+                // DECLARED decision to discard a parse, not the silent anchor rot this signal names.
+                // A thrown parse (rawFields empty) DOES count — it yielded nothing either.
                 //
-                // Reported BEFORE the `Skip` continue below (review R5): a branch that matched,
-                // parsed nothing, and was then skipped by its own validator is exactly the case
-                // where a lower-priority text rule claims the frame and the rot leaves no trace
-                // at all — so it must be counted even though this branch returns no result.
-                // #1560: the report now carries whether the branch was skipped, so the parse-rot
-                // tracker can tell a rotted winner from a skipped sibling branch of a healthy one.
-                // #1093: an OPTIONAL bind that resolved nothing rides the same sink — the target
-                // anchor can rot exactly like a parse anchor, and an optional bind is the one
-                // place a rot leaves no trace at all (a mandatory one skips the rule).
-                onParseShortfall?.let { sink -> shortfallOf(rule.id, branch, rawFields, allBindings, branchSkip)?.let(sink) }
-                if (branchSkip) continue
+                // Reported for every predicate-matched branch, a `Skip`-discarded one included (review
+                // R5): a branch that matched, parsed nothing, and was then skipped by its own validator
+                // is exactly the case where a lower-priority text rule claims the frame and the rot
+                // leaves no trace at all. #1560: the report carries whether the branch was skipped, so
+                // the parse-rot tracker can tell a rotted winner from a skipped sibling branch of a
+                // healthy one. #1093: an OPTIONAL bind that resolved nothing rides the same sink — the
+                // target anchor can rot exactly like a parse anchor.
+                onPredicateMatched = { m ->
+                    onParseShortfall?.let { sink ->
+                        RuleEvaluation.shortfallOf(rule.id, m.branch, m.rawFields, m.bindings, m.skipped)?.let(sink)
+                    }
+                },
+            ) ?: continue
+            val branch = hit.branch
+            val rawFields = hit.rawFields
+            val dropParsed = hit.dropParsed
+            val allBindings = hit.bindings
+            val effectiveFields = if (dropParsed) emptyMap() else rawFields
 
-                val effectiveFields = if (dropParsed) emptyMap() else rawFields
+            // Add intent to fields so ParsedFieldsFactory can access it
+            val fieldsWithIntent = if (branch.intent != null) {
+                effectiveFields + ("intent" to branch.intent)
+            } else {
+                effectiveFields
+            }
 
-                // Add intent to fields so ParsedFieldsFactory can access it
-                val fieldsWithIntent = if (branch.intent != null) {
-                    effectiveFields + ("intent" to branch.intent)
-                } else {
-                    effectiveFields
-                }
+            // Resolve compiled effects against parsed fields
+            val resolvedEffects = resolveEffects(
+                branch.effects, rule.id, rawFields,
+            )
 
-                // Resolve compiled effects against parsed fields
-                val resolvedEffects = resolveEffects(
-                    branch.effects, rule.id, rawFields,
-                )
+            // Resolve transition overrides
+            val resolvedOverrides = resolveTransitionOverrides(
+                branch.transitionOverrides, rule.id,
+            )
 
-                // Resolve transition overrides
-                val resolvedOverrides = resolveTransitionOverrides(
-                    branch.transitionOverrides, rule.id,
-                )
-
-                // Expose resolved bindings as named targets (#425) —
-                // recognition-layer data for the app-owned action registry.
-                // #1149 review S5: references are built for the RETURNED branch only, after validation,
-                // and only for ACTION-target binds (RuleAction.byTargetBindName) — the owner walk, label
-                // scan and sha256 run once per classification, never for a Skip-discarded branch or a
-                // parse-scope bind. A REFUSED bind (R1: foreign / no owner) emits NO reference; its
-                // refusal and any unprovable fingerprint (R7/S7) are reported from this same branch.
-                val refused = mutableListOf<String>()
-                val unprovable = mutableListOf<Pair<String, String>>()
-                val targets = buildMap {
-                    for ((name, node) in allBindings) {
-                        if (node == null || name !in RuleAction.byTargetBindName) continue
-                        val ref = buildNodeRef(node)
-                        if (ref == null) { refused += name; continue }
-                        put(name, ref)
-                        when {
-                            // T9: an action DESIGNED label-free (a null label expectation, e.g. EXPAND_EARNINGS:
-                            // "the control carries no text") is not unprovable for lacking a label — 2b cannot
-                            // apply and that is known; counting it would WARN on every collapsed receipt.
-                            ref.labelHintHashes.isEmpty() -> if (RuleAction.byTargetBindName.getValue(name).verification.labelPattern != null) {
-                                unprovable += name to "no letter-bearing label"
-                            }
-                            !ref.labelHintsComplete -> unprovable += name to "incomplete bind-time label scan"
+            // Expose resolved bindings as named targets (#425) —
+            // recognition-layer data for the app-owned action registry.
+            // #1149 review S5: references are built for the RETURNED branch only, after validation,
+            // and only for ACTION-target binds (RuleAction.byTargetBindName) — the owner walk, label
+            // scan and sha256 run once per classification, never for a Skip-discarded branch or a
+            // parse-scope bind. A REFUSED bind (R1: foreign / no owner) emits NO reference; its
+            // refusal and any unprovable fingerprint (R7/S7) are reported from this same branch.
+            val refused = mutableListOf<String>()
+            val unprovable = mutableListOf<Pair<String, String>>()
+            val targets = buildMap {
+                for ((name, node) in allBindings) {
+                    if (node == null || name !in RuleAction.byTargetBindName) continue
+                    val ref = buildNodeRef(node)
+                    if (ref == null) { refused += name; continue }
+                    put(name, ref)
+                    when {
+                        // T9: an action DESIGNED label-free (a null label expectation, e.g. EXPAND_EARNINGS:
+                        // "the control carries no text") is not unprovable for lacking a label — 2b cannot
+                        // apply and that is known; counting it would WARN on every collapsed receipt.
+                        ref.labelHintHashes.isEmpty() -> if (RuleAction.byTargetBindName.getValue(name).verification.labelPattern != null) {
+                            unprovable += name to "no letter-bearing label"
                         }
+                        !ref.labelHintsComplete -> unprovable += name to "incomplete bind-time label scan"
                     }
                 }
-                if (refused.isNotEmpty() || unprovable.isNotEmpty()) onParseShortfall?.invoke(
-                    ParseShortfall(
-                        ruleId = rule.id,
-                        refusedBindings = refused.sorted(),
-                        unprovableBindings = unprovable.map { it.first }.sorted(),
-                        unprovableReasons = unprovable.toMap(),
-                        shape = branch.shape,
-                    ),
-                )
-
-                return RuleMatchResult(
-                    ruleId = rule.id,
-                    intent = branch.intent ?: RuleCompiler.deriveTargetFromId(rule.id),
-                    shape = branch.shape,
-                    flow = branch.flow,
-                    modeHint = branch.modeHint,
-                    offerSurface = branch.offerSurface,
-                    idleSurface = branch.idleSurface,
-                    fields = fieldsWithIntent,
-                    effects = resolvedEffects,
-                    targets = targets,
-                    transitionOverrides = resolvedOverrides,
-                )
             }
+            if (refused.isNotEmpty() || unprovable.isNotEmpty()) onParseShortfall?.invoke(
+                ParseShortfall(
+                    ruleId = rule.id,
+                    refusedBindings = refused.sorted(),
+                    unprovableBindings = unprovable.map { it.first }.sorted(),
+                    unprovableReasons = unprovable.toMap(),
+                    shape = branch.shape,
+                ),
+            )
+
+            return RuleMatchResult(
+                ruleId = rule.id,
+                intent = branch.intent ?: RuleCompiler.deriveTargetFromId(rule.id),
+                shape = branch.shape,
+                flow = branch.flow,
+                modeHint = branch.modeHint,
+                offerSurface = branch.offerSurface,
+                idleSurface = branch.idleSurface,
+                fields = fieldsWithIntent,
+                effects = resolvedEffects,
+                targets = targets,
+                transitionOverrides = resolvedOverrides,
+            )
           } catch (e: RegexEvaluationFailed) {
             // WARNed once per pattern inside BoundedRegex; here it is just "this rule is out".
             continue
           }
         }
         return null
-    }
-
-    /**
-     * The #1036 shortfall for one matched branch, or null when its parse is healthy.
-     *
-     * Two independent triggers, either or both (see [ParseShortfall]):
-     *  - **total** — the branch declares at least one evidence field and EVERY one of them came
-     *    back unresolved, judged per field by its compiled [ParseFieldKind] (an `each`/`findAll`
-     *    field is unresolved when its list is EMPTY, which is what a plain null check missed).
-     *  - **partial** — a field the parse's shape contract names as load-bearing is null. Checked
-     *    for null only: every shape-required field today is a scalar, and an emptiness rule for
-     *    one would belong to the shape contract, not here.
-     */
-    private fun shortfallOf(
-        ruleId: String,
-        branch: CompiledBranch<TInput>,
-        rawFields: Map<String, Any?>,
-        bindings: Bindings,
-        branchSkipped: Boolean,
-    ): ParseShortfall? {
-        val evidence = branch.parseEvidenceFields
-        val allNull = evidence.isNotEmpty() &&
-            evidence.all { (name, kind) -> kind.isUnresolved(rawFields[name]) }
-        val nullRequired = branch.requiredParseFields.filter { rawFields[it] == null }
-        // Only an OPTIONAL bind can be present-and-null here: a mandatory miss already skipped
-        // the rule in resolveBindings (#1093).
-        val unresolvedBinds = bindings.filterValues { it == null }.keys.sorted()
-        if (!allNull && nullRequired.isEmpty() && unresolvedBinds.isEmpty()) return null
-        return ParseShortfall(
-            ruleId = ruleId,
-            allNullFieldCount = if (allNull) evidence.size else 0,
-            nullRequiredFields = nullRequired,
-            unresolvedOptionalBindings = unresolvedBinds,
-            shape = branch.shape,
-            branchSkipped = branchSkipped,
-        )
-    }
-
-    /**
-     * Resolve bindings against [input]. Returns null if a mandatory binding
-     * can't be resolved (indicating the rule/branch should be skipped).
-     *
-     * Only screen rules have bindings; for other rule types, this returns
-     * an empty map immediately.
-     */
-    private fun resolveBindings(input: TInput, bindings: List<Binding>): Bindings? {
-        if (bindings.isEmpty()) return emptyMap()
-        // Bindings require a UiNode tree — if TInput isn't UiNode, skip
-        val tree = input as? UiNode ?: return emptyMap()
-        val result = mutableMapOf<String, UiNode?>()
-        for (binding in bindings) {
-            val found = binding.find(tree)
-            if (found == null && !binding.optional) {
-                return null // mandatory binding failed
-            }
-            result[binding.name] = found
-        }
-        return result
     }
 
     // =========================================================================

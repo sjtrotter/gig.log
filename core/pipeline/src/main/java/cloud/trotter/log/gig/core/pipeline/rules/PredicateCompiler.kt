@@ -34,7 +34,8 @@ internal object PredicateCompiler {
         requireSinglePredicateKey(obj, "Tree predicate")
         val value = obj.getValue(key)
 
-        return when (key) {
+        // #1630: a shadow candidate's predicate is metered; a live one is returned as built.
+        return ShadowFuel.treePredicate(key, value, when (key) {
             "exists" -> {
                 val nodePred = compileNodePred(value, depth + 1)
                 ;{ tree -> tree.findNode(nodePred) != null }
@@ -84,7 +85,7 @@ internal object PredicateCompiler {
                 ;{ tree -> !pred(tree) }
             }
             else -> throw RuleCompileException("Unknown tree predicate key: '$key'")
-        }
+        })
     }
 
     // ==========================================================================
@@ -102,7 +103,8 @@ internal object PredicateCompiler {
         requireSinglePredicateKey(obj, "Node predicate")
         val value = obj.getValue(key)
 
-        return when (key) {
+        // #1630: a shadow candidate's predicate is metered; a live one is returned as built.
+        return ShadowFuel.nodePredicate(key, value, when (key) {
             "hasIdSuffix" -> {
                 val s = primOf(value, key).content
                 ;{ node -> node.viewIdResourceName?.endsWith(s, ignoreCase = true) == true }
@@ -295,7 +297,7 @@ internal object PredicateCompiler {
             }
 
             else -> throw RuleCompileException("Unknown node predicate key: '$key'")
-        }
+        })
     }
 
     // ==========================================================================
