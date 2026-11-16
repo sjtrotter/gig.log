@@ -1211,7 +1211,8 @@ approves the signing. Drafting from skeletons adds:
 - **Shadow mode** (#1630). A signed rule marked `shadow` is compiled and evaluated beside the live rules, and its result
   never reaches the state machine, a capture, a tap or any effect. The phone counts matches, ties with a live rule,
   empty parse fields, and frames where a name-shaped value survived the masks; only those counts reach the health
-  report. Shadow rules are bounded in number and evaluation time, and a failure counts as no match.
+  report. Shadow rules are bounded in number and evaluation time, and a failure or a spent budget is counted as
+  unevaluated, never as a non-match.
 - **Canary** (#1631). The signed manifest carries a share per rule. Each phone draws its own bucket once, locally; the
   server never assigns it. Health reports carry the rules generation and whether the phone was in the canary.
   Promotion to every phone is a new signed generation the developer approves.
@@ -1242,6 +1243,21 @@ and a metric with no such visit is left out. At most 32 entries are sent; `shado
 held more. Residual, adopted at any fleet size: a report shows whether the install recorded visits to a candidate's
 screen that UTC day, and within an epoch the operator can attribute that to one install (§17). The levels hide frequency,
 not presence. Nothing sends `shadowDaily` until #1630 ships, which updates PRIVACY.md and the in-app census page.
+
+**Amended 2026-11-16 (#1630).** The phone half ships, for screens only: a candidate is a screen rule in a bundled
+`<platform>_shadow` rules file, and notification and click shadows (#1661) and probes (#1660) are not built. The phone
+evaluates candidates on a background thread, on admitted screen frames only (after the sensitive, noise, platform and
+dedup gates), and discards a frame whose tree or window title carries a `SensitiveTextMarkers` marker before any
+candidate sees it. Trust: a shadow rule is trusted as a live rule is. It ships in the signed app build through the same
+`matchers/` review, nothing on the phone limits what a signed candidate may match, and that review is the control; the
+phone reads no remote shadow file, and a remote one (#641) will need the same signing and review. The census#104
+residual is adopted and disclosed in PRIVACY.md and the in-app census page in this text: "For draft rules the app is
+testing, each daily report says roughly how often your phone saw that rule's screen that day (none, 1-4, 5-19 or 20+)
+and how the draft did there (none, some, half or more, or all of the visits). The exact numbers stay on your phone. A
+report can show that your phone saw a particular kind of screen that day." The technical meanings stay exact in
+PRIVACY.md: each metric's own denominator, `evaluated` as recorded evaluation coverage, an omitted draft as
+unavailable, and no recorded visits never read as never matched. A counter overflow or a stored map that fails
+validation leaves `shadowDaily` off that day's report; the base counts still go.
 
 ### §19 Click evidence as references into skeletons (#1634, census#87)
 
@@ -1280,7 +1296,9 @@ field stays: it counts recognition-health alarm trips (`HealthLedger.kt:27`, `Re
 not deliveries. Its per-rule shortfall count is a tally over a fixed sample
 of the rule's last 20 eligible attempts of the day (`HealthReportSchema.PARSE_SAMPLE`, 0..20), and a rule with fewer than
 20 is left out, so no attempt total or denominator is sent (census#64); the report carries the rules generation. Skeletons are sampled once per layout variant
-per UTC day, as presence (§8).
+per UTC day, as presence (§8). One exception is adopted and disclosed (§18, #1630): `shadowDaily` says, in coarse levels,
+how often the phone saw a draft rule's screen that day, so a draft of a screen seen only while working shows a working
+day; the exact counts stay on the phone.
 
 **Upload timing and transport** (#1620).
 

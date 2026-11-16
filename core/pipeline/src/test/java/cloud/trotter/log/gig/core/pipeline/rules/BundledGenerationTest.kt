@@ -3,6 +3,7 @@ package cloud.trotter.log.gig.core.pipeline.rules
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -66,6 +67,18 @@ class BundledGenerationTest {
         val candidates = shippedShadow.sumOf { (_, json) -> Json.parseToJsonElement(json).jsonObject["screens"]?.jsonArray?.size ?: 0 }
         assertEquals(candidates, prepared.generation.shadow?.candidates?.size ?: 0)
         assertEquals(0, prepared.generation.shadow?.droppedCandidates ?: 0)
+    }
+
+    @Test
+    fun `the check candidate masks with its live twin's redact block`() {
+        fun screens(files: List<Pair<String, String>>) =
+            files.flatMap { (_, json) -> Json.parseToJsonElement(json).jsonObject["screens"]?.jsonArray.orEmpty() }
+                .map { it.jsonObject }
+        val id = "doordash.screen.waiting_for_offer"
+        val live = screens(shipped).single { it["id"]?.jsonPrimitive?.content == id }
+        val candidate = screens(shippedShadow).single { it["id"]?.jsonPrimitive?.content == id }
+        assertNotNull(live["redact"])
+        assertEquals(live["redact"], candidate["redact"])
     }
 
     @Test

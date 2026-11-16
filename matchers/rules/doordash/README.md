@@ -24,6 +24,7 @@ sub-file owns one family of those screens:
 | `ratings-feedback.json5` | Post-delivery ratings and safety feedback |
 | `chrome.json5` | App chrome — side menu, earnings, help, promos, notifications view, camera capture |
 | `notifications.json5` | System notifications (order/tip/earnings/weather/etc.) |
+| `shadow-check.json5` | One shadow candidate (#1630): a `shadow: true` copy of `waiting_for_offer` that checks the shadow chain on a phone; never live |
 
 The canonicalizer merges these (sorted by filename, `_manifest` excepted) into one
 `assets/rules/doordash.json`; splitting a screen family into its own file is purely an authoring

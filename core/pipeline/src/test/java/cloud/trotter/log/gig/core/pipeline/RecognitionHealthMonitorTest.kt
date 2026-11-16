@@ -1,6 +1,7 @@
 package cloud.trotter.log.gig.core.pipeline
 
 import cloud.trotter.log.gig.domain.census.HealthSink
+import cloud.trotter.log.gig.domain.census.ShadowFrameRecord
 import cloud.trotter.log.gig.domain.capture.ReplayMetadata
 import cloud.trotter.log.gig.domain.pipeline.Observation
 import cloud.trotter.log.gig.domain.pipeline.ParseShortfall
@@ -110,6 +111,7 @@ class RecognitionHealthMonitorTest {
         override fun onTrip(timestampMillis: Long, platformWire: String, platformAppVersion: String?) {
             trips += ScreenCall(timestampMillis, platformWire, platformAppVersion, null)
         }
+        override fun onShadowFrame(frame: ShadowFrameRecord) = Unit
     }
 
     /** WARN lines under the monitor's tag. */
@@ -304,6 +306,7 @@ class RecognitionHealthMonitorTest {
             ) {
                 throw AssertionError("private details must never be logged")
             }
+            override fun onShadowFrame(frame: ShadowFrameRecord) = Unit
         }
         val reporter = Recorder()
         monitor(reporter, sink).feed(doordash, true, RecognitionHealth.WINDOW_SIZE * 2)
@@ -644,6 +647,7 @@ class RecognitionHealthMonitorTest {
             ) {
                 throw IllegalStateException("ledger down")
             }
+            override fun onShadowFrame(frame: ShadowFrameRecord) = Unit
         }
         val healthyReporter = Recorder()
         val healthyMonitor = monitor(healthyReporter, Sink())

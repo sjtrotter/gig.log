@@ -551,7 +551,7 @@ feed channel and goes through `prepareGeneration` and `activate`.
 
 A shadow rule (candidate) is a screen rule that will be evaluated beside the live rules without its result reaching
 anything live. This layer holds the authoring, the file, the compile, the identifiers and the candidate engine; the
-pipeline does not call the engine yet (the seam, visits and reporting come next).
+seam, the worker thread, visits and the health report are in `01-sensor-pipelines.md` (#1630).
 
 - **The flag.** `shadow: true` at rule level in the JSON5 source is the only marker (`docs/rules.schema.json`). Any
   other value, or the key on a click or notification rule, fails the matchers build, and so do two candidates with
@@ -640,7 +640,7 @@ pipeline does not call the engine yet (the seam, visits and reporting come next)
   It is a sampled diagnostic, never proof of redaction.
 - **Benchmark and caps** (`LiveMatchBenchmarkTest`, `ShadowEngineBenchmarkTest`, run with
   `-Dgiglog.shadowBench=true`; tables land in `core/pipeline/build/shadow-bench/`). JVM numbers on the dev laptop, a
-  proxy: the on-device check is a field checklist item when the pipeline calls the engine.
+  proxy: the on-device check is the field checklist item `1630-shadow-mode-reports-daily.md`.
 
   | measure (largest corpus trees, 227-327 nodes) | median | p95 |
   |---|---:|---:|

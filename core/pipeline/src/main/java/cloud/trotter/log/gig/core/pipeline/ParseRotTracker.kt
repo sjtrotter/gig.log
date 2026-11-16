@@ -3,6 +3,7 @@ package cloud.trotter.log.gig.core.pipeline
 import cloud.trotter.log.gig.core.pipeline.rules.ParsedFieldsFactory
 import cloud.trotter.log.gig.domain.pipeline.ParseRotCause
 import cloud.trotter.log.gig.domain.pipeline.ParseShortfall
+import cloud.trotter.log.gig.domain.pipeline.VisitTiming
 import java.util.TreeMap
 
 /** A rule's parse rot crossed the trip line ([ParseRotTracker]), or a rotted rule read healthy again (#1560). */
@@ -303,6 +304,6 @@ class ParseRotTracker {
         const val CLEAR_HEALTHY = 3
 
         /** Pre-render discard window, and the minimum spacing of one rule's occurrence starts (frame time). */
-        const val PRE_RENDER_WINDOW_MS = 3_000L
+        const val PRE_RENDER_WINDOW_MS = VisitTiming.PRE_RENDER_WINDOW_MS
     }
 }

@@ -17,6 +17,18 @@ interface HealthSink {
         shortfall: Boolean,
     )
 
+    /**
+     * One admitted screen frame's shadow outcomes (#1630), from the shadow worker thread: ids, outcomes and the live
+     * result only. The collector turns them into visits and the row's daily counters.
+     */
+    fun onShadowFrame(frame: ShadowFrameRecord)
+
+    /**
+     * The census identity epoch, read without a lock on the pipeline thread when a shadow frame is handed off and carried
+     * in [ShadowFrameRecord.resetToken]; a reset moves it, so outcomes computed for the old identity are refused.
+     */
+    val resetToken: Long get() = 0L
+
     object NoOp : HealthSink {
         override fun onScreen(timestampMillis: Long, platformWire: String, platformAppVersion: String?, ruleId: String?) = Unit
         override fun onTrip(timestampMillis: Long, platformWire: String, platformAppVersion: String?) = Unit
@@ -27,5 +39,6 @@ interface HealthSink {
             ruleId: String,
             shortfall: Boolean,
         ) = Unit
+        override fun onShadowFrame(frame: ShadowFrameRecord) = Unit
     }
 }

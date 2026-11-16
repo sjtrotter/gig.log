@@ -8,6 +8,7 @@ import cloud.trotter.log.gig.core.pipeline.accessibility.ForegroundSkipReason
 import cloud.trotter.log.gig.core.pipeline.accessibility.OverlayRejectReason
 import cloud.trotter.log.gig.core.pipeline.census.NotificationSkeletonBuilder
 import cloud.trotter.log.gig.core.pipeline.census.SkeletonBuilder
+import cloud.trotter.log.gig.core.pipeline.shadow.ShadowStats
 import java.util.EnumMap
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
@@ -56,6 +57,9 @@ class PipelineStats @Inject constructor(
      * leaves exactly one injection point.
      */
     constructor() : this(appVersionName = "")
+
+    /** The shadow worker's counters (#1630); its part of [summary] is empty until the worker sees a frame. */
+    val shadow = ShadowStats()
 
     private val droppedSensitive = AtomicLong()
     private val droppedNoise = AtomicLong()
@@ -536,7 +540,8 @@ class PipelineStats @Inject constructor(
             foregroundSkipSuffix() +
             topologySkipSuffix() +
             overlayRejectedSuffix() +
-            censusSuffix()
+            censusSuffix() +
+            shadow.suffix()
 
     private fun mapperLinkageRefusalsSuffix(): String =
         mapperLinkageRefusals.get().let { if (it == 0L) "" else " mapperLinkageRefusals=$it" }

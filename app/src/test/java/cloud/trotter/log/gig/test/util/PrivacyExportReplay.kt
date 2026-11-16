@@ -28,6 +28,7 @@ import cloud.trotter.log.gig.core.network.di.ClientProfile
 import cloud.trotter.log.gig.core.network.di.NetworkClientFactory
 import cloud.trotter.log.gig.core.pipeline.*
 import cloud.trotter.log.gig.core.pipeline.accessibility.AccessibilityPipeline
+import cloud.trotter.log.gig.core.pipeline.shadow.ShadowWorker
 import cloud.trotter.log.gig.core.pipeline.accessibility.TreeSnapshot
 import cloud.trotter.log.gig.core.pipeline.accessibility.event.type.window.content_changed.ContentChangedPipeline
 import cloud.trotter.log.gig.core.pipeline.accessibility.event.type.window.state_changed.StateChangedPipeline
@@ -44,6 +45,7 @@ import cloud.trotter.log.gig.di.AppModule
 import cloud.trotter.log.gig.domain.capture.*
 import cloud.trotter.log.gig.domain.census.CensusUploadScheduler
 import cloud.trotter.log.gig.domain.census.CensusUploadStats
+import cloud.trotter.log.gig.domain.census.HealthSink
 import cloud.trotter.log.gig.domain.model.accessibility.UiNode
 import cloud.trotter.log.gig.domain.pipeline.Observation
 import cloud.trotter.log.gig.domain.pipeline.RecognitionHealthReporter
@@ -147,7 +149,9 @@ class PrivacyExportReplay(
     private val accessibility = AccessibilityPipeline(ContentChangedPipeline(source, platforms, stats),
         StateChangedPipeline(source, platforms, stats), WindowsChangedPipeline(source, platforms, stats),
         source, classifier, writer, platforms, stats, RecognitionHealthMonitor(RecognitionHealthReporter.NoOp, health,
-            RecognitionNoticeStore.NoOp, backgroundScope, io), publisher)
+            RecognitionNoticeStore.NoOp, backgroundScope, io), publisher,
+        // #1630: shadow outcomes stay out of this harness's health rows, which the worker thread would make timing-bound.
+        ShadowWorker(HealthSink.NoOp, stats))
     private val notificationPipeline = NotificationPipeline(notifications, NotificationFilter(platforms), classifier, writer, platforms, stats, publisher)
     val forwarded = mutableListOf<Observation>()
     val requests = CopyOnWriteArrayList<RequestBytes>()

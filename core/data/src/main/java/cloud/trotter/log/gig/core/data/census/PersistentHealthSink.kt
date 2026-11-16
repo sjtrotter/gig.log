@@ -5,6 +5,8 @@ import cloud.trotter.log.gig.domain.census.CensusUploadStats
 import cloud.trotter.log.gig.domain.census.HealthKey
 import cloud.trotter.log.gig.domain.census.HealthLedger
 import cloud.trotter.log.gig.domain.census.HealthSink
+import cloud.trotter.log.gig.domain.census.ShadowFrameRecord
+import cloud.trotter.log.gig.domain.census.ShadowVisits
 import cloud.trotter.log.gig.domain.di.ApplicationScope
 import cloud.trotter.log.gig.domain.di.IoDispatcher
 import kotlinx.coroutines.CancellationException
@@ -25,7 +27,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/** Records locally regardless of upload consent; all ledger mutations and disk writes share one mutex. */
+/**
+ * Records locally regardless of upload consent; all ledger mutations and disk writes share one mutex. The shadow visit
+ * tracker (#1630) lives under the same mutex, so a census reset clears pending visits in the same step as the ledger.
+ */
 @Singleton
 class PersistentHealthSink @Inject constructor(
     private val store: HealthLedgerStore,
@@ -33,14 +38,21 @@ class PersistentHealthSink @Inject constructor(
     @ApplicationScope scope: CoroutineScope,
     @param:IoDispatcher private val io: CoroutineDispatcher,
 ) : HealthSink {
-    private enum class Kind { SCREEN, TRIP, HEALTHY_ATTEMPT, SHORTFALL_ATTEMPT }
-    private data class Event(val key: HealthKey, val ruleId: String?, val kind: Kind, val epoch: Long)
+    private enum class Kind { SCREEN, TRIP, HEALTHY_ATTEMPT, SHORTFALL_ATTEMPT, SHADOW }
+    private data class Event(
+        val key: HealthKey,
+        val ruleId: String?,
+        val kind: Kind,
+        val epoch: Long,
+        val shadow: ShadowFrameRecord? = null,
+    )
     private val mutex = Mutex()
     private val ingress = Any()
-    private var epoch = 0L
+    @Volatile private var epoch = 0L
     private var ledger: HealthLedger? = null
     private var lastPrunedDay: String? = null
     private var dirty = false
+    private val visits = ShadowVisits()
     private val channel = Channel<Event>(
         capacity = 1024,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
@@ -97,7 +109,20 @@ class PersistentHealthSink @Inject constructor(
         if (shortfall) Kind.SHORTFALL_ATTEMPT else Kind.HEALTHY_ATTEMPT,
     )
 
-    private fun enqueue(timestampMillis: Long, platformWire: String, version: String?, ruleId: String?, kind: Kind) {
+    override val resetToken: Long get() = epoch
+
+    override fun onShadowFrame(frame: ShadowFrameRecord) = enqueue(
+        frame.timestampMillis, frame.platformWire, frame.platformAppVersion, null, Kind.SHADOW, frame,
+    )
+
+    private fun enqueue(
+        timestampMillis: Long,
+        platformWire: String,
+        version: String?,
+        ruleId: String?,
+        kind: Kind,
+        shadow: ShadowFrameRecord? = null,
+    ) {
         try {
             if (version == null) {
                 stats.healthSkippedNoVersion.incrementAndGet()
@@ -109,7 +134,9 @@ class PersistentHealthSink @Inject constructor(
             }
             val day = Instant.ofEpochMilli(timestampMillis).atZone(ZoneOffset.UTC).toLocalDate().toString()
             synchronized(ingress) {
-                if (!channel.trySend(Event(HealthKey(day, platformWire, version), ruleId, kind, epoch)).isSuccess) {
+                // A shadow record keeps the epoch it was handed off under, so one evaluated across a reset is dropped.
+                val tagged = shadow?.resetToken ?: epoch
+                if (!channel.trySend(Event(HealthKey(day, platformWire, version), ruleId, kind, tagged, shadow)).isSuccess) {
                     stats.healthDropped.incrementAndGet()
                 }
             }
@@ -140,11 +167,14 @@ class PersistentHealthSink @Inject constructor(
         }
     }
 
-    /** Clears memory, queued old-generation frames and disk as one serialized identity boundary. */
+    /**
+     * Clears memory, queued old-generation frames, pending shadow visits and disk as one serialized identity boundary.
+     */
     suspend fun reset() = withContext(io) {
         mutex.withLock {
             if (ledger == null) ledger = loadLedger()
             synchronized(ingress) { epoch++ }
+            visits.clear()
             ledger = requireNotNull(ledger).clear()
             dirty = true
             store.clear()
@@ -187,9 +217,10 @@ class PersistentHealthSink @Inject constructor(
                 Kind.TRIP -> current.trip(event.key)
                 Kind.HEALTHY_ATTEMPT -> current.attempt(event.key, requireNotNull(event.ruleId), shortfall = false)
                 Kind.SHORTFALL_ATTEMPT -> current.attempt(event.key, requireNotNull(event.ruleId), shortfall = true)
+                Kind.SHADOW -> visits.step(current, event.key, requireNotNull(event.shadow))
             }
             if (updated === current) {
-                // An attempt the ledger ignores (an unreportable rule id, the per-row rule cap) is not a refused row.
+                // An attempt or shadow frame the ledger ignores (an unreportable id, a per-row cap) is not a refused row.
                 if (event.kind == Kind.SCREEN || event.kind == Kind.TRIP) stats.healthRowsRefused.incrementAndGet()
                 return@repeat
             }

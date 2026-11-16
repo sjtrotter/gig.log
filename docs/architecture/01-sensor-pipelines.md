@@ -1459,6 +1459,53 @@ frame's time and platform app version; the attempts never feed the trip or clear
 none has one, so such a row encodes byte for byte as before. A report too large with the field goes without it
 (`HealthLedger.sendableReportJson`); only one too large without it is refused. Screens only.
 
+**#1630: the shadow seam, worker and collector.** Bundled shadow candidates (`02-rule-engine.md` § Shadow rules) run
+beside live recognition without touching it. *The seam* sits in `AccessibilityPipeline` right after
+`RecognitionHealthMonitor.onScreenAdmitted`, so it sees only screen frames past the rules-loaded, sensitive/noise,
+disabled-platform and `FrameGate` gates, and the frame's health row is enqueued first. It calls
+`ShadowWorker.offer(generation, platform, tree, window title, timestamp, platform app version, liveWon)` with the
+generation that classified the frame (`Classified.redaction`, which for a screen is that `RuleGeneration`); `offer` does
+a map lookup, a volatile read of `HealthSink.resetToken` and a queue insert, and nothing else, when that generation's
+`shadow` has candidates for the platform and the frame carries a platform app version (without one its health row has
+no key). When a frame's generation has no candidate for the platform and the last frame queued for it had some, it
+queues one boundary record (no evaluation, empty results), so the collector closes the old visits.
+*The worker* is one daemon thread at minimum priority, started when the worker is built and kept for the process, so
+`offer` never starts a thread (`ThreadPoolExecutor`, 1 thread, no core timeout, an `ArrayBlockingQueue` of
+`QUEUE_CAPACITY` = 4); a frame that finds the queue full is dropped and counted, and changes no state. On the worker, a
+frame whose tree or window title carries a `SensitiveTextMarkers` marker is discarded before any candidate sees it,
+whatever the live result (the UNKNOWN capture backstops, moved off the pipeline thread so live cost stays as it was);
+the rest run through `ShadowFrameRunner` on the frame's own `TransformClock`, and `HealthSink.onShadowFrame` gets a
+`ShadowFrameRecord`: the frame's time, platform and version, the 16-hex generation id, each active candidate's rule id,
+16-hex digest and outcome (`NoMatch`, `Matched(requiredOk, maskScan)` or `Unevaluated`), and whether a live rule won.
+Never the tree, its text or a parsed value. A worker failure is counted and WARNed once per process (tag `Shadow`).
+*The collector* (`PersistentHealthSink`, under its mutex) feeds each record to `ShadowVisits` (`:domain`, pure): per
+(platform, generation, digest) `Idle | Open | Spent` and the last visit start; Idle + Matched opens a visit when the last
+start is unset or ≥ `VisitTiming.PRE_RENDER_WINDOW_MS` (3 s, the one owner `ParseRotTracker` also reads) earlier, else
+Spent; Open + Matched folds; Open + NoMatch closes to Idle; an Open visit 60 s old or from an earlier UTC day closes at
+the candidate's next definite outcome and goes Spent; Spent + NoMatch rearms; `Unevaluated` changes nothing; a new
+generation on the platform closes the old one's Open visits and drops its states, and so does a candidate missing from
+a record's results (a boundary record has none). A visit folds `tied` (any frame had
+a live winner), `onUnknown` (any frame was live UNKNOWN), `emptyParse` (applicable when a frame's shape declares
+required fields; true when no applicable frame read them all) and `maskFail` (assessable when a scan was `CLEAN` or
+`HIT`; true when one was `HIT`). *Counters* (`ShadowTally`): each `HealthRow` holds a roster of at most
+`MAX_SHADOW_ROSTER` = 64 candidates keyed `<generation>:<digest>`; a candidate joins when the row records a shadow frame
+while it is active (a full roster sets `shadowTruncated`). A closed visit credits the row it started on, once, with
+checked Int increments (an overflow marks the entry unavailable and the row sends no `shadowDaily`); `evaluated`
+counts each definite outcome on the frame's own row and saturates at `MAX_COUNT`; every change bumps the revision, so
+a late closure re-posts its start row. `HealthLedgerStore` checks `0 <= k <= n <= visits` per family, the id grammars
+and the roster bound on load; a failing row keeps its base counts and loses its shadow map for the day
+(`shadowUnavailable`). *The report* (`HealthLedger.report`) turns the roster into `shadowDaily` with `ShadowLevels`,
+ordered by visits level, rule, generation and digest, 32 entries at most, `shadowDailyTruncated` when the roster was
+truncated or entries were cut; a row with no roster encodes as before. *Reset* (G2): census deletion and identity reset
+run `PersistentHealthSink.reset()`, which clears the tracker in the same mutex step as the ledger, and a tracker that
+sees a new ledger generation drops its state. Each record carries the sink's epoch as read at handoff
+(`ShadowFrameRecord.resetToken`) and queues under that epoch, so an outcome evaluated across a reset is dropped with
+the rest of the old identity's events, and nothing computed before the reset writes. Process death loses
+Open visits and the last start times. *Stats*: the `PipelineStats` summary gains ` shadow{frames, dropped, skipped,
+matched, noMatch, budget, failed, medianMs (last 256 frames), maxMs}`, counts only. The check candidate
+`matchers/rules/doordash/shadow-check.json5` is a shadow copy of `waiting_for_offer` (same `redact`, pinned by
+`BundledGenerationTest`).
+
 ## Carried from the CLAUDE.md summary (trim v4)
 
 - `SensitiveTextMarkers` drops the dasher's banking screens using `cloud.trotter.census.contract.SensitiveMarkerData`
