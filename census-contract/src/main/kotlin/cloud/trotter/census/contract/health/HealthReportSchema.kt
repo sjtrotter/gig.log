@@ -26,6 +26,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.intOrNull
 import java.time.LocalDate
 import java.time.format.DateTimeParseException
@@ -53,19 +54,23 @@ object HealthReportSchema {
     /** Every daily count is an integer in `0..MAX_COUNT`. */
     const val MAX_COUNT = 1_000_000
 
-    /** At most this many entries in [HealthReportDto.shadow], and again in [HealthReportDto.probeRefused]. */
+    /** At most this many entries in [HealthReportDto.shadowDaily], and again in [HealthReportDto.probeRefused]. */
     const val MAX_SHADOW_ENTRIES = 32
 
     /** The wire keys, in order. */
     val FIELDS: List<String> = listOf(
         "day", "platform", "platformAppVersion", "appVersion", "rulesetVersion",
-        "admitted", "unknown", "trips", "ruleCounts", "parseShortfall", "shadow", "probeRefused",
+        "admitted", "unknown", "trips", "ruleCounts", "parseShortfall",
+        "shadowDaily", "shadowDailyTruncated", "probeRefused",
     )
 
     /** The keys of one [ShadowRefDto], in wire order. */
     val SHADOW_REF_FIELDS: List<String> = listOf("generation", "rule", "digest")
 
-    /** The metrics of one [ShadowTallyDto], in wire order after [SHADOW_REF_FIELDS]. */
+    /** The two count levels of one [ShadowDailyDto], both required, in wire order after [SHADOW_REF_FIELDS]. */
+    val SHADOW_COUNTS: List<String> = listOf("visits", "evaluated")
+
+    /** The fraction-level metrics of one [ShadowDailyDto], in wire order after [SHADOW_COUNTS]. */
     val SHADOW_METRICS: List<String> = listOf("tied", "onUnknown", "emptyParse", "maskFail")
 
     private val DAY = Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}")
@@ -82,27 +87,31 @@ object HealthReportSchema {
         val parse = obj["parseShortfall"]
         return rules.size <= MAX_RULE_COUNTS &&
             (parse == null || (parse as? JsonObject)?.let { it.size <= MAX_PARSE_SHORTFALL_RULES } == true) &&
-            listOf(obj["shadow"], obj["probeRefused"]).all { list ->
+            listOf(obj["shadowDaily"], obj["probeRefused"]).all { list ->
                 list == null || (list as? JsonArray)?.let { it.size <= MAX_SHADOW_ENTRIES } == true
             }
     }
 
     /**
-     * The report the phone sends: [report] whole when it [fits], else without `shadow`, then also without
-     * `probeRefused`, then also without `parseShortfall`; null when even the base report does not fit.
+     * The report the phone sends: [report] whole when it [fits], else without `shadowDaily` and its
+     * `shadowDailyTruncated`, then also without `probeRefused`, then also without `parseShortfall`; null when even the
+     * base report does not fit.
      */
-    fun encodeFitting(report: HealthReportDto): String? = sequenceOf(
-        report,
-        report.copy(shadow = null),
-        report.copy(shadow = null, probeRefused = null),
-        report.copy(shadow = null, probeRefused = null, parseShortfall = null),
-    ).map(::encode).firstOrNull(::fits)
+    fun encodeFitting(report: HealthReportDto): String? {
+        val noShadow = report.copy(shadowDaily = null, shadowDailyTruncated = null)
+        return sequenceOf(
+            report,
+            noShadow,
+            noShadow.copy(probeRefused = null),
+            noShadow.copy(probeRefused = null, parseShortfall = null),
+        ).map(::encode).firstOrNull(::fits)
+    }
 
     /**
      * Validates one report element. [dayAccepted] and [platformAccepted] are the receiver's policy (the server's
      * date window and accepted platforms); the checks run in [HealthReportRejection] order and the first miss wins.
-     * Unknown keys inside `shadow` and `probeRefused` entries are found with the top-level ones. Each optional field is
-     * then checked in wire order: shape, size and values first (`bad_count`), then identifiers (`bad_rule_id`).
+     * Unknown keys inside `shadowDaily` and `probeRefused` entries are found with the top-level ones. Each optional field
+     * is then checked in wire order: shape, size and values first (`bad_count`), then identifiers (`bad_rule_id`).
      */
     fun check(
         element: JsonElement,
@@ -111,7 +120,7 @@ object HealthReportSchema {
     ): HealthReportCheck {
         if (element !is JsonObject) return invalid(HealthReportRejection.BAD_ITEM)
         if (element.keys.any { it !in FIELDS } ||
-            element.entryKeys("shadow").any { it !in SHADOW_REF_FIELDS && it !in SHADOW_METRICS } ||
+            element.entryKeys("shadowDaily").any { it !in SHADOW_REF_FIELDS + SHADOW_COUNTS + SHADOW_METRICS } ||
             element.entryKeys("probeRefused").any { it !in SHADOW_REF_FIELDS }
         ) return invalid(HealthReportRejection.UNKNOWN_FIELD)
         val day = element.string("day")?.takeIf { DAY.matches(it) } ?: return invalid(HealthReportRejection.BAD_DAY)
@@ -147,22 +156,24 @@ object HealthReportSchema {
             }
             rules
         }
-        val shadow = if ("shadow" !in element) null else {
-            val entries = element.entries("shadow") ?: return invalid(HealthReportRejection.BAD_COUNT)
-            val metrics = entries.map { entry ->
-                val values = SHADOW_METRICS.map { key ->
-                    if (key !in entry) null else entry[key].sampleCount() ?: return invalid(HealthReportRejection.BAD_COUNT)
-                }
-                // tied and onUnknown share one sample; an entry with no metric says nothing.
-                if ((values[0] == null) != (values[1] == null) || values.all { it == null }) {
-                    return invalid(HealthReportRejection.BAD_COUNT)
-                }
-                values
-            }
+        val shadowDaily = if ("shadowDaily" !in element) null else {
+            val entries = element.entries("shadowDaily") ?: return invalid(HealthReportRejection.BAD_COUNT)
+            val levels = entries.map { entry -> entry.levels() ?: return invalid(HealthReportRejection.BAD_COUNT) }
             val refs = entries.refs(platform) ?: return invalid(HealthReportRejection.BAD_RULE_ID)
-            refs.zip(metrics) { ref, (tied, onUnknown, emptyParse, maskFail) ->
-                ShadowTallyDto(ref.generation, ref.rule, ref.digest, tied, onUnknown, emptyParse, maskFail)
+            refs.zip(levels) { ref, level ->
+                val (tied, onUnknown, emptyParse, maskFail) = level.metrics
+                ShadowDailyDto(
+                    ref.generation, ref.rule, ref.digest, level.visits, level.evaluated, tied, onUnknown, emptyParse, maskFail,
+                )
             }
+        }
+        // Only the literal true, and only beside the list it qualifies.
+        val shadowDailyTruncated = if ("shadowDailyTruncated" !in element) null else {
+            val flag = element["shadowDailyTruncated"] as? JsonPrimitive
+            if (shadowDaily == null || flag == null || flag.isString || flag.booleanOrNull != true) {
+                return invalid(HealthReportRejection.BAD_COUNT)
+            }
+            true
         }
         val probeRefused = if ("probeRefused" !in element) null else {
             val entries = element.entries("probeRefused") ?: return invalid(HealthReportRejection.BAD_COUNT)
@@ -173,7 +184,7 @@ object HealthReportSchema {
         }
         return HealthReportCheck.Valid(HealthReportDto(
             day, platform, platformAppVersion, appVersion, rulesetVersion, admitted, unknown, trips, ruleCounts, parseShortfall,
-            shadow, probeRefused,
+            shadowDaily, shadowDailyTruncated, probeRefused,
         ))
     }
 
@@ -204,6 +215,26 @@ object HealthReportSchema {
             ShadowRefDto(generation, rule, digest)
         }
         return refs.takeIf { it.toSet().size == it.size }
+    }
+
+    /** One [ShadowDailyDto] without its identifiers. */
+    private class Levels(val visits: CountLevel, val evaluated: CountLevel, val metrics: List<FractionLevel?>)
+
+    /**
+     * One entry's levels: `visits` and `evaluated` count levels, each metric a fraction level when present, `tied` and
+     * `onUnknown` present exactly when `visits` is not `"0"`, and no metric at all on a zero-visit entry (every metric's
+     * denominator is a subset of the visits). Null otherwise.
+     */
+    private fun JsonObject.levels(): Levels? {
+        val visits = string("visits")?.let(CountLevel::fromWire) ?: return null
+        val evaluated = string("evaluated")?.let(CountLevel::fromWire) ?: return null
+        val metrics = SHADOW_METRICS.map { key ->
+            if (key !in this) null else string(key)?.let(FractionLevel::fromWire) ?: return null
+        }
+        val visited = visits != CountLevel.NONE
+        if ((metrics[0] != null) != visited || (metrics[1] != null) != visited) return null
+        if (!visited && metrics.any { it != null }) return null
+        return Levels(visits, evaluated, metrics)
     }
 
     /** A JSON integer in `0..PARSE_SAMPLE`: one count over a fixed sample. */

@@ -1232,6 +1232,17 @@ is left out. `probeRefused` names the probes the phone refused. Both hold at mos
 nothing sends them until #1630 ships. Residual: a reported metric says the rule had at least 20 visits on that phone that
 day, and within an epoch the operator can read one install's answer, as with probes (§17).
 
+**Amended 2026-11-15 (census#104).** `shadowDaily` replaces `shadow`, which no phone build ever sent; a report carrying
+`shadow` is now refused as an unknown key. Every candidate loaded that day gets an entry, zero visits included, and the
+phone computes coarse levels from its exact daily counts (`ShadowLevels` in `census-contract/`), which never leave it:
+`visits` (stays on a screen the candidate matched) and `evaluated` (frames checked against it, recorded evaluation
+coverage) are `"0"`, `"1-4"`, `"5-19"` or `"20+"`; each metric is `none`, `some`, `half_or_more` or `all` of the visits
+where it could be measured, `tied` and `onUnknown` over every visit, `emptyParse` and `maskFail` over their own subsets,
+and a metric with no such visit is left out. At most 32 entries are sent; `shadowDailyTruncated: true` marks a phone that
+held more. Residual, adopted at any fleet size: a report shows whether the install recorded visits to a candidate's
+screen that UTC day, and within an epoch the operator can attribute that to one install (§17). The levels hide frequency,
+not presence. Nothing sends `shadowDaily` until #1630 ships, which updates PRIVACY.md and the in-app census page.
+
 ### §19 Click evidence as references into skeletons (#1634, census#87)
 
 This supersedes §10's "Clicks stay OUT". When a tap lands on a node no click rule recognizes, or a click rule is in an

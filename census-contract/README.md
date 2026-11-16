@@ -46,11 +46,14 @@ that rule's last `PARSE_SAMPLE` (20) eligible attempts of the UTC day, `0..20`. 
 fewer than 20 eligible attempts that day is left out, so the most the field says about volume
 is "this rule had at least 20 eligible attempts today": it carries no attempt total. Its rule
 ids are at most 96 characters (legacy `ruleCounts` keeps its own bound). A report without it
-encodes exactly as before. The optional `shadow` and `probeRefused` lists (census#102) carry shadow-rule
-tallies and refused probes: at most 32 entries each, unique by `(generation, rule, digest)`, 16-hex
-identifiers, rule ids under the report's own platform, and each metric `0..20` over its own sample, left
-out when unavailable. A report too large to send drops `shadow`, then `probeRefused`, then
-`parseShortfall` (`HealthReportSchema.encodeFitting`). `conformance/health-report-vectors.jsonl`
+encodes exactly as before. The optional `shadowDaily` list (census#104) carries, per candidate rule loaded that
+day, zero visits included, coarse levels the phone computes (`ShadowLevels`): `visits` and `evaluated` as
+`"0"`, `"1-4"`, `"5-19"` or `"20+"`, and each metric as `none`, `some`, `half_or_more` or `all` of the
+visits where it could be measured, left out when there were none. `shadowDailyTruncated: true` says the
+phone held more candidates than the list carries. `probeRefused` (census#102) names refused probes. Both
+lists hold at most 32 entries, unique by `(generation, rule, digest)`, with 16-hex identifiers and rule ids
+under the report's own platform. A report too large to send drops `shadowDaily` with its flag, then
+`probeRefused`, then `parseShortfall` (`HealthReportSchema.encodeFitting`). `conformance/health-report-vectors.jsonl`
 pins the verdicts both sides must reach.
 
 ## Consuming from another build
