@@ -260,6 +260,11 @@ class ShadowCandidateEngineTest {
             assertTrue("walked ${meter.charges} of $nodes nodes", meter.charges < nodes / 10)
             assertTrue("$read built the cold tree's text cache", !tree.textCacheBuilt())
         }
+        // Blank strings join nothing but are still read: 100 nodes of 4,096 spaces cannot pass for a cheap NoMatch.
+        val blanks = UiNode(children = List(100) { UiNode(text = " ".repeat(4_096)) })
+        val meter = FuelMeter(1_000)
+        assertEquals(Unevaluated(Reason.BUDGET), ShadowCandidateEngine.evaluate(candidate(rule(reads.first())), blanks, meter))
+        assertTrue("charged ${meter.used} past its cap", meter.used <= meter.limit)
     }
 
     @Test(timeout = 5_000)

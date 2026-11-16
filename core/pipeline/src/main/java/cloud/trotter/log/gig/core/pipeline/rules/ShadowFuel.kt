@@ -338,12 +338,13 @@ internal object ShadowFuel {
         val pending = ArrayDeque<UiNode>().apply { addLast(node) }
         while (pending.isNotEmpty()) {
             val next = pending.removeLast()
+            // Raw lengths are charged before the blank checks read them; only non-blank strings join.
+            charge(TEXT_NODE_UNITS + ((next.text?.length ?: 0).toLong() + (next.contentDescription?.length ?: 0)) * weight)
             val text = next.text?.takeIf { it.isNotBlank() }?.length ?: -1
             val desc = next.contentDescription?.takeIf { it.isNotBlank() }?.length ?: -1
             val strings = (if (text >= 0) 1 else 0) + (if (desc >= 0) 1 else 0)
-            val chars = maxOf(text, 0).toLong() + maxOf(desc, 0)
-            charge(TEXT_NODE_UNITS + (2L * strings + chars) * weight)
-            joined += chars + strings
+            charge(2L * strings * weight)
+            joined += maxOf(text, 0).toLong() + maxOf(desc, 0) + strings
             next.children.forEach(pending::addLast)
         }
         return maxOf(joined, 0L)
