@@ -54,10 +54,13 @@ class ShadowMaskScanTest {
     }
 
     @Test
-    fun `a customer-PII id is raw unless its value ends with a complete mask`() {
+    fun `a customer-PII id is raw wherever text outside its masks is not blank`() {
         assertEquals(MaskScan.HIT, value("Riley", idMarked = true))
         assertEquals(MaskScan.CLEAN, value("[redacted:ab12]", idMarked = true))
-        assertEquals(MaskScan.CLEAN, value("Apt/Suite: [redacted:ab12]", idMarked = true))
+        assertEquals(MaskScan.CLEAN, value(" [redacted:ab12] [redacted] ", idMarked = true))
+        // A trailing mask does not cover the raw text before it.
+        assertEquals(MaskScan.HIT, value("Riley [redacted:ab12]", idMarked = true))
+        assertEquals(MaskScan.HIT, value("Apt/Suite: [redacted:ab12]", idMarked = true))
         assertEquals(MaskScan.HIT, value("[redacted:ab12] 4B", idMarked = true))
         assertEquals(MaskScan.HIT, value("Riley [redacted", idMarked = true))
     }

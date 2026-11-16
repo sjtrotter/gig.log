@@ -26,8 +26,8 @@ enum class MaskScan {
  * own matching mode, on whole values:
  *  - **customer lead-ins** ([CustomerTextMarkers.MARKERS], a case-insensitive prefix): a value that opens with one is
  *    a hit unless everything after the lead-in is masked;
- *  - **customer-PII view ids** ([CustomerTextMarkers.ID_MARKERS]): a value of such a node is a hit unless it ends with
- *    a complete mask ([MaskTokens.endsWithMask], the runtime id scrub's own test);
+ *  - **customer-PII view ids** ([CustomerTextMarkers.ID_MARKERS]): a value of such a node is a hit when any text
+ *    outside its complete masks is not blank, so a trailing mask never covers raw text before it;
  *  - **customer-PII shapes** ([PiiShapes.VALUE_SHAPES] in each shape's mode, and the anchored name shape
  *    [PiiShapes.FIRST_LAST_INITIAL] the redact side uses): bounded at [PII_SHAPE_MAX_CHARS]; a longer value is
  *    [MaskScan.INCOMPLETE] for this check, never sliced.
@@ -71,7 +71,7 @@ internal object ShadowMaskScan {
         ShadowFuel.charge(1L + value.length)
         val segments = segmentsOf(value)
         if (leadInHit(segments)) return MaskScan.HIT
-        if (idMarked && value.isNotBlank() && !MaskTokens.endsWithMask(value.trimEnd())) return MaskScan.HIT
+        if (idMarked && segments.any { it.isNotBlank() }) return MaskScan.HIT
         var incomplete = false
         for (segment in segments) {
             val text = segment.trim()

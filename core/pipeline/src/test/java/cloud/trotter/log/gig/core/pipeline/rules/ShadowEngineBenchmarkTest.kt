@@ -35,6 +35,15 @@ class ShadowEngineBenchmarkTest {
         return Sample(meter.used, System.nanoTime() - start, outcome, rule.id)
     }
 
+    /** A never-read copy of [tree]: every lazy text cache cold, as on a frame live classification has not read. */
+    private fun fresh(tree: UiNode): UiNode {
+        fun rebuild(node: UiNode): UiNode = node.copy(children = node.children.map(::rebuild))
+        return rebuild(tree).restoreParents()
+    }
+
+    /** [rule] on a fresh copy of [tree] per run (the copy is built outside the timing). */
+    private fun runFresh(rule: CompiledRule<UiNode>, tree: UiNode, cap: Long): Sample = run(rule, fresh(tree), cap)
+
     /** Median ns per fuel unit of [work] (which charges the meter it is given), after a warm-up. */
     private fun nsPerUnit(work: (FuelMeter) -> Unit): Pair<Long, Double> {
         repeat(20) { work(FuelMeter(Long.MAX_VALUE)) }
@@ -202,8 +211,9 @@ class ShadowEngineBenchmarkTest {
         val corpusMax = trees.first()
         lines += "## Worst-case legal candidates (regex `$maxProgramPattern`, program ${RegexSafety.compileRegex(maxProgramPattern).programSize()})"
         lines += ""
-        lines += "| candidate | tree | unbounded fuel | unbounded µs | ns/unit | µs to exhaust ${ShadowFrameRunner.PER_CANDIDATE_FUEL} | outcome at cap |"
-        lines += "|---|---|---:|---:|---:|---:|---|"
+        lines += "| candidate | tree | unbounded fuel | unbounded µs | ns/unit | µs to exhaust ${ShadowFrameRunner.PER_CANDIDATE_FUEL} | " +
+            "same, fresh tree | outcome at cap |"
+        lines += "|---|---|---:|---:|---:|---:|---:|---|"
         val ceiling = 2_000_000_000L
         for ((name, rule) in worstCases()) {
             for ((treeName, tree) in listOf("corpus max (${nodeCount(corpusMax.second)})" to corpusMax.second, "synthetic 4 000 / depth 60" to maxTree)) {
@@ -211,9 +221,10 @@ class ShadowEngineBenchmarkTest {
                 val unbounded = run(rule, tree, ceiling)
                 val capped = List(9) { run(rule, tree, ShadowFrameRunner.PER_CANDIDATE_FUEL) }
                 val cappedNs = percentile(capped.map { it.ns }, .5)
+                val freshNs = percentile(List(9) { runFresh(rule, tree, ShadowFrameRunner.PER_CANDIDATE_FUEL).ns }, .5)
                 val unboundedFuel = if (unbounded.outcome == CandidateOutcome.Unevaluated(CandidateOutcome.Reason.BUDGET)) "> $ceiling" else "${unbounded.fuel}"
                 lines += "| $name | $treeName | $unboundedFuel | ${micros(unbounded.ns)} | ${"%.2f".format(unbounded.ns.toDouble() / unbounded.fuel.coerceAtLeast(1))} | " +
-                    "${micros(cappedNs)} | ${capped.first().outcome} |"
+                    "${micros(cappedNs)} | ${micros(freshNs)} | ${capped.first().outcome} |"
             }
         }
         lines += ""
@@ -228,12 +239,15 @@ class ShadowEngineBenchmarkTest {
         lines += ""
         lines += "| tree | frame fuel | median µs | max µs |"
         lines += "|---|---:|---:|---:|"
-        for ((treeName, tree) in listOf("corpus max" to corpusMax.second, "synthetic 4 000 / depth 60" to maxTree)) {
+        val frameTrees = listOf("corpus max" to corpusMax.second, "synthetic 4 000 / depth 60" to maxTree)
+        for ((treeName, tree) in frameTrees + frameTrees.map { (name, tree) -> "$name, fresh tree" to tree }) {
+            val freshEach = treeName.endsWith("fresh tree")
             val runner = ShadowFrameRunner()
-            repeat(5) { runner.evaluate(set, Platform.DoorDash, tree, clock) }
+            repeat(5) { runner.evaluate(set, Platform.DoorDash, if (freshEach) fresh(tree) else tree, clock) }
             val frames = List(9) {
+                val frameTree = if (freshEach) fresh(tree) else tree
                 val start = System.nanoTime()
-                val fuelUsed = runner.evaluate(set, Platform.DoorDash, tree, clock).sumOf { it.fuelUsed }
+                val fuelUsed = runner.evaluate(set, Platform.DoorDash, frameTree, clock).sumOf { it.fuelUsed }
                 fuelUsed to System.nanoTime() - start
             }
             lines += "| $treeName | ${frames.maxOf { it.first }} | ${micros(percentile(frames.map { it.second }, .5))} | ${micros(frames.maxOf { it.second })} |"

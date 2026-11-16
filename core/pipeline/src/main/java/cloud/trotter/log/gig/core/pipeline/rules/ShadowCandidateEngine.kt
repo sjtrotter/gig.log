@@ -82,6 +82,9 @@ internal object ShadowCandidateEngine {
         } catch (_: Exception) {
             return failed
         }
+        // A redact selector whose regex could not be evaluated masked its node plainly; the scan read a mask the rule
+        // never chose, so the frame says nothing about the candidate's redaction.
+        if (meter.regexFailed) return failed
         val maskScan = if (meter.exhausted && scan != MaskScan.HIT) MaskScan.INCOMPLETE else scan
         return CandidateOutcome.Matched(diagnostic.branch.shape, requiredOk, maskScan)
     }

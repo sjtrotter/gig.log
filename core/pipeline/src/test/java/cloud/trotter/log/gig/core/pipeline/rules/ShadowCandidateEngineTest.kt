@@ -156,6 +156,15 @@ class ShadowCandidateEngineTest {
     }
 
     @Test
+    fun `a redact selector whose regex cannot be evaluated is Unevaluated FAILED`() {
+        val compiled = compile(rule(""""require": { "exists": { "hasText": "Done" } }, "redact": [ { "find": { "hasText": "Done" } } ]"""))
+        val regex = RegexSafety.compileRegex("x")
+        // maskNode catches the failure and writes a plain mask; the scan would read that mask as the rule's own.
+        val failing = compiled.copy(redact = CompiledRedact(listOf(CompiledRedactEntry(find = { throw regex.evaluationFailed() }))))
+        assertEquals(Unevaluated(Reason.FAILED), ShadowCandidateEngine.evaluateRule(failing, screen(text("Done")), FuelMeter(PLENTY)))
+    }
+
+    @Test
     fun `a candidate evaluation materializes no effect or target and calls no live sink`() {
         val json = rule(
             """
@@ -211,6 +220,77 @@ class ShadowCandidateEngineTest {
         assertTrue("charged ${meter.used} past its cap", meter.used <= meter.limit)
         // One charge per node predicate dispatch: the traversal ran, then stopped long before the last node.
         assertTrue("visited ${meter.charges} of $nodes nodes", meter.charges in 2 until nodes / 10)
+    }
+
+    private val doubling = List(30) { """{ "replace": { "pattern": "a", "replacement": "aa" } }""" }.joinToString(",")
+
+    @Test
+    fun `a transform chain that grows its value runs out of fuel before it allocates`() {
+        // Thirty doublings of "a" would be a billion characters; a step admits its output before it allocates it.
+        val transforms = listOf("[ $doubling ]", """{ "regex": { "pattern": "(a)", "group": 1, "then": [ $doubling ] } }""")
+        for (transform in transforms) {
+            val json = rule("""
+                "require": { "exists": { "hasText": "a" } },
+                "parse": { "as": "post_task", "fields": { "totalPay": { "find": { "hasText": "a" }, "transform": $transform } } }
+            """.trimIndent())
+            val meter = FuelMeter(PLENTY)
+            assertEquals(transform, Unevaluated(Reason.BUDGET), ShadowCandidateEngine.evaluate(candidate(json), screen(text("a")), meter))
+            assertTrue("charged ${meter.used} past its cap", meter.used <= meter.limit)
+        }
+    }
+
+    /** Whether [this] node's lazy subtree text ([UiNode.allText] or [UiNode.allTextLowerJoined]) has been built. */
+    private fun UiNode.textCacheBuilt(): Boolean = listOf("allText\$delegate", "allTextLowerJoined\$delegate").any { name ->
+        (UiNode::class.java.getDeclaredField(name).apply { isAccessible = true }.get(this) as Lazy<*>).isInitialized()
+    }
+
+    @Test
+    fun `a nearly spent candidate stops part way through a cold tree before building its text cache`() {
+        val nodes = 5_000
+        val reads = listOf(
+            """"require": { "allTextContains": "absent phrase" }""",
+            """"require": { "exists": { "hasAnyText": "absent phrase" } }""",
+            """"require": { "exists": { "isLeaf": false } }, "parse": { "as": "ratings", "fields": { "all": { "find": { "isLeaf": false }, "read": "allText" } } }""",
+        )
+        for (read in reads) {
+            val tree = wideTree(nodes)
+            val meter = FuelMeter(1_000)
+            assertEquals(read, Unevaluated(Reason.BUDGET), ShadowCandidateEngine.evaluate(candidate(rule(read)), tree, meter))
+            assertTrue("charged ${meter.used} past its cap", meter.used <= meter.limit)
+            assertTrue("walked ${meter.charges} of $nodes nodes", meter.charges < nodes / 10)
+            assertTrue("$read built the cold tree's text cache", !tree.textCacheBuilt())
+        }
+    }
+
+    @Test(timeout = 5_000)
+    fun `ancestor and findDescendant walks are charged and stop within budget`() {
+        // "Done" sits 101 levels down. ancestor(2147483647) pays a unit per step and stops at the root instead of
+        // counting out two billion steps, in a navigation and in an each scope alike.
+        var chain = text("Done")
+        repeat(100) { chain = UiNode(text = "row", children = listOf(chain)) }
+        val tree = screen(chain)
+        fun used(field: String): Long {
+            val json = rule(""""require": { "exists": { "hasText": "Done" } }, "parse": { "as": "ratings", "fields": { $field } }""")
+            val meter = FuelMeter(PLENTY)
+            assertTrue(field, ShadowCandidateEngine.evaluate(candidate(json), tree, meter) is Matched)
+            return meter.used
+        }
+        fun navigate(up: String) = """"f": { "find": { "hasText": "Done" }, "navigate": "ancestor($up)" }"""
+        fun scope(up: String) =
+            """"f": { "each": { "hasText": "Done" }, "scope": "ancestor($up)", "extract": { "t": { "find": { "hasText": "Done" } } } }"""
+        for (field in listOf(::navigate, ::scope)) {
+            val walk = used(field("2147483647")) - used(field("0"))
+            assertTrue("the walk to the root charged $walk", walk in 50L..1_000L)
+        }
+        // A descendant search over a wide tree pays per node and stops part way.
+        val nodes = 5_000
+        val deepSearch = rule(
+            """"require": { "exists": { "isLeaf": false } }, "parse": { "as": "ratings", "fields": { "x": { "find": { "isLeaf": false }, "navigate": "findDescendant(absent_id)" } } }""",
+        )
+        val meter = FuelMeter(2_000)
+        assertEquals(Unevaluated(Reason.BUDGET), ShadowCandidateEngine.evaluate(candidate(deepSearch), wideTree(nodes), meter))
+        assertTrue("charged ${meter.used} past its cap", meter.used <= meter.limit)
+        assertTrue("visited ${meter.charges} of $nodes nodes", meter.charges < nodes / 10)
     }
 
     @Test

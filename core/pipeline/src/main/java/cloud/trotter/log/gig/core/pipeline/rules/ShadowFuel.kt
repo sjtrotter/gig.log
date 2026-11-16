@@ -3,13 +3,17 @@ package cloud.trotter.log.gig.core.pipeline.rules
 import cloud.trotter.log.gig.domain.model.accessibility.UiNode
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * One candidate's work budget for one frame (#1630). [charge] admits work before it is done: a charge that would take
  * [used] past [limit] is refused, the meter turns [exhausted] for good, and [FuelExhausted] stops the evaluation where
- * it stands. [used] therefore never exceeds [limit]; the only work done past it is the unit whose size the meter read
- * to price it (a lazily built text cache).
+ * it stands. [used] therefore never exceeds [limit]: a lazily built text cache is priced by a node-by-node walk that
+ * stops where the fuel does, and a transform's output is admitted before it is allocated.
  *
  * The flags are sticky so a catch inside compiled rule code (a field that fails null) cannot hide an exhaustion or a
  * regex failure from the candidate engine, which reads them after the evaluation.
@@ -54,20 +58,22 @@ internal class FuelExhausted : RuntimeException("shadow candidate fuel exhausted
  * A candidate compiles inside [compileMetered]. While that scope is open, the predicate, parse-expression, transform,
  * validator and navigation compilers wrap each closure they build with one of the functions below, which charge the
  * thread's installed [FuelMeter] before the closure runs. Outside the scope (every live rule) each function returns
- * the closure it was given, so a live closure is the same object it was before metering existed: no wrapper, no
- * flag read, no thread-local lookup per node or per character. `ShadowFuelTest` pins that a live-compiled rule charges
- * nothing even with a meter installed.
+ * the closure it was given (or, for [ancestor], [findDescendant] and [propertyReader], the plain closure live always
+ * built), so a live closure does exactly the work it did before metering existed: no wrapper, no flag read, no
+ * thread-local lookup per node or per character. `ShadowFuelTest` pins that a live-compiled rule charges nothing even
+ * with a meter installed.
  *
  * A metered closure reads the meter from a thread-local ([metering]), so one compiled candidate can be evaluated
  * on any thread; with no meter installed it runs unmetered.
  *
  * Units (one is about 2.5 ns of JVM time; calibrated in `ShadowEngineBenchmarkTest`): a dispatch of a compiled
  * predicate, expression, validator or navigation is [DISPATCH_UNITS]; a character a string predicate reads is 1; a
- * cached joined-text scan is a unit per [JOINED_CHARS_PER_UNIT] characters, and a cache's construction is charged again
- * as if this evaluation built it (nothing tells whether live classification built it first); a regex reads each
- * character at [regexWeight]; a transform reads each input character at [TRANSFORM_UNITS_PER_CHAR] per step (the
- * `sha256` hash included); a parse result costs its size ([materialization]). The mask scan adds its own node and
- * character charges (`ShadowMaskScan`).
+ * read of a subtree's text pays [TEXT_NODE_UNITS] per node, 2 per string and its characters, node by node before the
+ * lazy cache is read (as if this evaluation built it: nothing tells whether live classification built it first); a
+ * cached joined-text scan is a unit per [JOINED_CHARS_PER_UNIT] characters on top; a regex reads each character at
+ * [regexWeight]; a transform step reads each input character at [TRANSFORM_UNITS_PER_CHAR] (a `regex` step at its
+ * weight) and admits its worst-case output before it runs; a navigation pays per node it walks; a parse result costs
+ * its size ([materialization]). The mask scan adds its own node and character charges (`ShadowMaskScan`).
  */
 internal object ShadowFuel {
 
@@ -86,6 +92,9 @@ internal object ShadowFuel {
     /** Characters of a cached joined-text scan (one `String.contains`) per unit. */
     const val JOINED_CHARS_PER_UNIT = 4L
 
+    /** One node of a subtree text walk ([chargeTextWalk]), its characters aside. */
+    const val TEXT_NODE_UNITS = 2L
+
     /**
      * RE2J simulates the compiled program, so a match costs up to the program size per input character. A rule
      * regex reads each character at `1 + programSize / REGEX_PROGRAM_PER_UNIT` units (calibrated in
@@ -94,6 +103,7 @@ internal object ShadowFuel {
     const val REGEX_PROGRAM_PER_UNIT = 16
 
     private val compiling = ThreadLocal<Boolean?>()
+    private val transformRegexWeights = ConcurrentHashMap<String, Long>()
     private val active = ThreadLocal<FuelMeter?>()
 
     /** True while a shadow candidate compiles on this thread. Read at compile time only. */
@@ -172,7 +182,7 @@ internal object ShadowFuel {
                 { n -> siblingCount(n) + len(n.followingSiblings().firstOrNull()?.text) * w }
             }
             "hasAnyText", "hasAnyTextStartsWith" -> { n -> allTextCost(n) }
-            "hasAnyTextMatchesRegex" -> weight().let { w -> { n -> allTextCost(n) * w } }
+            "hasAnyTextMatchesRegex" -> weight().let { w -> { n -> allTextCost(n, w) } }
             "hasDesc", "hasDescContaining" -> { n -> len(n.contentDescription) }
             "hasStateDescription", "hasStateDescriptionContaining" -> { n -> len(n.stateDescription) }
             "hasClassName", "hasClassNameEndsWith" -> { n -> len(n.className) }
@@ -200,13 +210,58 @@ internal object ShadowFuel {
         }
     }
 
-    /** The transform applier a parse expression captures: [TransformRegistry.applyAny], charged when metered. */
+    /** The transform applier a parse expression captures: [TransformRegistry.applyAny], [applyMetered] when metered. */
     fun transform(): (JsonElement, String) -> Any? =
-        if (!compilingMetered) TransformRegistry::applyAny else { spec, value ->
-            val steps = (spec as? JsonArray)?.size ?: 1
-            charge(DISPATCH_UNITS + value.length * TRANSFORM_UNITS_PER_CHAR * steps + hashSteps(spec) * HASH_UNITS)
-            TransformRegistry.applyAny(spec, value)
+        if (!compilingMetered) TransformRegistry::applyAny else ::applyMetered
+
+    /**
+     * [TransformRegistry.applyAny] one step at a time. Each step is charged on its actual input (a dispatch, its
+     * characters, a digest for `sha256`) plus its worst-case output ([outputBound]) before it runs, so a chain that
+     * grows its value (thirty `replace` steps doubling it) runs out of fuel, not memory. A `regex` step's `then` is a
+     * nested spec, metered the same way.
+     */
+    private fun applyMetered(spec: JsonElement, value: String?): Any? {
+        if (value == null) return null
+        if (spec is JsonArray) {
+            var current: Any? = value
+            for (step in spec) current = applyMetered(step, current?.toString())
+            return current
         }
+        val length = value.length.toLong()
+        val regex = (spec as? JsonObject)?.get("regex")?.jsonObject
+        val perChar = regex?.let { transformRegexWeight(it.getValue("pattern").jsonPrimitive.content) }
+            ?: TRANSFORM_UNITS_PER_CHAR
+        val hash = if ((spec as? JsonPrimitive)?.content == "sha256") HASH_UNITS else 0L
+        charge(DISPATCH_UNITS + length * perChar + hash + outputBound(spec, length))
+        val then = regex?.get("then") ?: return TransformRegistry.applyAny(spec, value)
+        val extracted = TransformRegistry.applyAny(JsonObject(mapOf("regex" to JsonObject(regex - "then"))), value)
+        return applyMetered(then, extracted as String?)
+    }
+
+    /** The most characters one transform step (not a chain) can allocate from a [length]-character input. */
+    private fun outputBound(step: JsonElement, length: Long): Long = when (step) {
+        is JsonPrimitive -> when (step.content) {
+            "sha256" -> 64L
+            // Case mapping can widen one character to three ("ß" upper-cases to "SS", "ΐ" to three).
+            "lower", "upper", "normalizeCustomerName" -> 3 * length
+            "trim", "stripDeadlinePrefix" -> length
+            else -> 1L // a parsed number
+        }
+        is JsonObject -> when (step.keys.single()) {
+            // An empty pattern matches at every one of length + 1 positions.
+            "replace" -> {
+                val replacement = step.getValue("replace").jsonObject["replacement"]?.jsonPrimitive?.content.orEmpty()
+                length + (length + 1) * replacement.length
+            }
+            // The parts, and a list entry for each of up to length + 2 of them.
+            "split" -> 2 * length + 2
+            else -> length // a substring: the strip, extract and regex steps
+        }
+        is JsonArray -> error("a chain is metered step by step")
+    }
+
+    private fun transformRegexWeight(pattern: String): Long =
+        transformRegexWeights.getOrPut(pattern) { regexWeight(pattern) }
 
     /** A compiled validator, charged one dispatch plus the parsed map's size. */
     fun validator(validate: (Map<String, Any?>) -> ValidateOutcome): (Map<String, Any?>) -> ValidateOutcome =
@@ -215,6 +270,53 @@ internal object ShadowFuel {
     /** A compiled navigation step, charged one dispatch plus [cost]. */
     fun navigation(nav: (UiNode) -> UiNode?, cost: (UiNode) -> Long): (UiNode) -> UiNode? =
         if (!compilingMetered) nav else { node -> charge(DISPATCH_UNITS + cost(node)); nav(node) }
+
+    /** `ancestor(n)`: a unit per step up, stopping at the root, when metered. */
+    fun ancestor(n: Int): (UiNode) -> UiNode? =
+        if (!compilingMetered) { node -> node.ancestor(n) } else navigation({ meteredAncestor(it, n) }, NO_COST)
+
+    /** [UiNode.ancestor] charging a unit per step; it stops at the root instead of counting the rest of [n]. */
+    fun meteredAncestor(node: UiNode, n: Int): UiNode? {
+        var current = node
+        repeat(n) {
+            charge(1L)
+            current = current.parent ?: return null
+        }
+        return current
+    }
+
+    /** `findChild(id)`: each child's id compared, when metered. */
+    fun findChild(idSuffix: String): (UiNode) -> UiNode? {
+        val live: (UiNode) -> UiNode? = { node -> node.findChildById(idSuffix) }
+        return navigation(live) { node -> node.children.size * (1L + idSuffix.length) }
+    }
+
+    /** `findDescendant(id)`: a charge per node the search visits, before it visits it, when metered. */
+    fun findDescendant(idSuffix: String): (UiNode) -> UiNode? =
+        if (!compilingMetered) {
+            { node -> node.findDescendantById(idSuffix) }
+        } else {
+            navigation({ meteredFindDescendant(it, idSuffix) }, NO_COST)
+        }
+
+    /** [UiNode.findDescendantById]'s pre-order search, charging each node's id comparison first. */
+    private fun meteredFindDescendant(node: UiNode, idSuffix: String): UiNode? {
+        charge(1L + idSuffix.length)
+        if (node.matchesId(idSuffix)) return node
+        for (child in node.children) meteredFindDescendant(child, idSuffix)?.let { return it }
+        return null
+    }
+
+    /**
+     * A compiled property read ([readProperty]). A metered `allText` read walks the node's subtree (built, then joined)
+     * before the lazy cache is read.
+     */
+    fun propertyReader(prop: String): (UiNode) -> String? =
+        if (compilingMetered && prop == "allText") {
+            { node -> chargeTextWalk(node, 2L); readProperty(node, prop) }
+        } else {
+            { node -> readProperty(node, prop) }
+        }
 
     // ── Prices ───────────────────────────────────────────────────────────────────────────────────
 
@@ -225,15 +327,37 @@ internal object ShadowFuel {
 
     private fun regexWeight(pattern: String): Long = regexWeight(RegexSafety.compileRegex(pattern))
 
-    /** One read of [node]'s `allText`: its strings and characters, plus its construction (one entry per string). */
-    fun allTextCost(node: UiNode): Long {
-        val texts = node.allText
-        return 2L * texts.size + texts.sumOf { it.length.toLong() }
+    /**
+     * Charges a walk of [node]'s subtree, node by node and before any lazy text cache is read: [TEXT_NODE_UNITS] per
+     * node, and [weight] for each character and twice for each string `allText` keeps (a regex sets up a search per
+     * string). A walk that runs out stops part way, so a nearly spent candidate never builds a cold tree's cache.
+     * Returns the length of the subtree's joined text.
+     */
+    fun chargeTextWalk(node: UiNode, weight: Long): Long {
+        var joined = -1L
+        val pending = ArrayDeque<UiNode>().apply { addLast(node) }
+        while (pending.isNotEmpty()) {
+            val next = pending.removeLast()
+            val text = next.text?.takeIf { it.isNotBlank() }?.length ?: -1
+            val desc = next.contentDescription?.takeIf { it.isNotBlank() }?.length ?: -1
+            val strings = (if (text >= 0) 1 else 0) + (if (desc >= 0) 1 else 0)
+            val chars = maxOf(text, 0).toLong() + maxOf(desc, 0)
+            charge(TEXT_NODE_UNITS + (2L * strings + chars) * weight)
+            joined += chars + strings
+            next.children.forEach(pending::addLast)
+        }
+        return maxOf(joined, 0L)
     }
 
-    /** [scans] substring scans of [tree]'s joined text, plus the joined text's construction. */
+    /** One read of [node]'s `allText` at [weight] per character: [chargeTextWalk] charges it all, so it returns 0. */
+    fun allTextCost(node: UiNode, weight: Long = 1L): Long {
+        chargeTextWalk(node, weight)
+        return 0L
+    }
+
+    /** [scans] substring scans of [tree]'s joined text, plus its join and lowercase, after the walk that builds it. */
     fun joinedScanCost(tree: UiNode, scans: Int): Long =
-        tree.allTextLowerJoined.length.toLong() * (scans + 1) / JOINED_CHARS_PER_UNIT
+        chargeTextWalk(tree, 1L) * (scans + 1) / JOINED_CHARS_PER_UNIT
 
     /** The size of a parse result: a string's characters, a collection's or map's entries and their contents. */
     fun materialization(value: Any?): Long = when (value) {
@@ -242,12 +366,6 @@ internal object ShadowFuel {
         is Collection<*> -> value.size + value.sumOf { materialization(it) }
         is Map<*, *> -> value.size + value.values.sumOf { materialization(it) }
         else -> 1L
-    }
-
-    private fun hashSteps(spec: JsonElement): Int = when (spec) {
-        is JsonPrimitive -> if (spec.content == "sha256") 1 else 0
-        is JsonArray -> spec.count { (it as? JsonPrimitive)?.content == "sha256" }
-        else -> 0
     }
 
     private fun len(s: String?): Long = s?.length?.toLong() ?: 0L
