@@ -28,7 +28,9 @@ class BundledGenerationTest {
 
     private val generated: List<Pair<String, String>> by lazy {
         rulesDir.listFiles { f -> f.extension == "json" }!!.sortedBy { it.name }
-            .map { "rules/${it.name}" to it.readText() }
+            .map { "rules/${it.name}" to it.readText() } +
+            File(rulesDir, "shadow").listFiles { f -> f.extension == "json" }.orEmpty().sortedBy { it.name }
+                .map { "rules/shadow/${it.name}" to it.readText() }
     }
 
     /** The live files; the `_shadow` files (#1630) are checked on their own below. */

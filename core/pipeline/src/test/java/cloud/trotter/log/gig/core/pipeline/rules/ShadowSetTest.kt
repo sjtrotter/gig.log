@@ -1,6 +1,7 @@
 package cloud.trotter.log.gig.core.pipeline.rules
 
 import android.content.Context
+import android.content.res.AssetManager
 import cloud.trotter.log.gig.domain.capability.RuleCapabilityGrants
 import cloud.trotter.log.gig.domain.model.accessibility.UiNode
 import cloud.trotter.log.gig.domain.pipeline.RuleEngineConstants
@@ -17,7 +18,10 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
+import org.mockito.kotlin.doReturn
+import org.mockito.kotlin.doThrow
 import org.mockito.kotlin.mock
+import org.mockito.kotlin.whenever
 
 /**
  * #1630: the shadow set. Bundled `<platform>_shadow` files compile into a [ShadowSet] attached to the live generation
@@ -228,5 +232,20 @@ class ShadowSetTest {
         assertNotEquals(bundled.id, remote.id)
         assertEquals(remote.id, remote.shadow?.generationId)
         assertEquals(bundled.shadow?.candidates?.map { it.digest }, remote.shadow?.candidates?.map { it.digest })
+    }
+    @Test
+    fun `an unreadable shadow asset directory leaves the bundled load intact`() = runTest {
+        val assets = mock<AssetManager> {
+            on { list("rules") } doReturn arrayOf("doordash.json", "shadow")
+            on { open("rules/doordash.json") } doReturn live.json.byteInputStream()
+            on { list("rules/shadow") } doThrow java.io.IOException("unreadable")
+        }
+        val context = mock<Context>()
+        whenever(context.assets).thenReturn(assets)
+        val interpreter = JsonRuleInterpreter(context, mock<RuleCapabilityGrants>())
+        interpreter.loadDefaults()
+        assertTrue(interpreter.isLoaded)
+        assertNull(interpreter.generation!!.shadow)
+        assertEquals(prepared(live).generation.id, interpreter.generation!!.id)
     }
 }

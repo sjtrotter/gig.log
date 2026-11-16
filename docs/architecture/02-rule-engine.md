@@ -562,6 +562,9 @@ candidate yet.
   platform has none, so the live assets stay byte-identical. `liveShadowErrors` fails the build if a live asset
   carries a `shadow` key, and the compiler refuses the key in a live file anyway (it is not a known rule key, so the
   rule isolates and the generation is rejected). A source named `<x>_shadow` is reserved.
+  `importMatchersRules` puts shadow files in `assets/rules/shadow/`, so every reader of `assets/rules/*.json` (the
+  review-word list, the parity and bounds tests) sees live files only; `loadDefaults` reads that directory in its own
+  try, so a shadow read failure leaves the live load untouched.
 - **The version gate.** The file declares `RuleEngineConstants.SHADOW_FORMAT_VERSION`
   (`MAX_SUPPORTED_FORMAT_VERSION + 1`; the matchers build writes the same number, pinned by
   `ShadowFormatVersionPinTest`), so `RulesetLoader.validate` refuses it and a reader built before shadow files never

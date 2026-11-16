@@ -91,7 +91,18 @@ class JsonRuleInterpreter @Inject constructor(
             Timber.tag("Rules").w("JsonRuleInterpreter: no rule files found in $RULES_DIR/")
             return
         }
-        loadBundled(files)
+        loadBundled(files + readShadowAssets())
+    }
+
+    /** The bundled `<platform>_shadow` files (#1630); a read failure loads no shadow set and never blocks the live rules. */
+    private fun readShadowAssets(): List<RuleFile.Bundled> = try {
+        context.assets.list(SHADOW_DIR).orEmpty().filter { it.endsWith(".json") }.sorted().map { name ->
+            val path = "$SHADOW_DIR/$name"
+            RuleFile.Bundled(path, context.assets.open(path).bufferedReader().use { it.readText() })
+        }
+    } catch (e: Exception) {
+        Timber.tag("Rules").w("Shadow rules not loaded: %s", e.javaClass.simpleName)
+        emptyList()
     }
 
     /** Prepare [files] as a bundled-only generation; when it goes live, they become the bundled floor. */
@@ -203,6 +214,7 @@ class JsonRuleInterpreter @Inject constructor(
 
     companion object {
         private const val RULES_DIR = "rules"
+        private const val SHADOW_DIR = "rules/shadow"
     }
 }
 
