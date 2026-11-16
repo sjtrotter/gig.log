@@ -48,7 +48,7 @@ class PersistentHealthSink @Inject constructor(
     )
     private val mutex = Mutex()
     private val ingress = Any()
-    private var epoch = 0L
+    @Volatile private var epoch = 0L
     private var ledger: HealthLedger? = null
     private var lastPrunedDay: String? = null
     private var dirty = false
@@ -109,6 +109,8 @@ class PersistentHealthSink @Inject constructor(
         if (shortfall) Kind.SHORTFALL_ATTEMPT else Kind.HEALTHY_ATTEMPT,
     )
 
+    override val resetToken: Long get() = epoch
+
     override fun onShadowFrame(frame: ShadowFrameRecord) = enqueue(
         frame.timestampMillis, frame.platformWire, frame.platformAppVersion, null, Kind.SHADOW, frame,
     )
@@ -132,7 +134,9 @@ class PersistentHealthSink @Inject constructor(
             }
             val day = Instant.ofEpochMilli(timestampMillis).atZone(ZoneOffset.UTC).toLocalDate().toString()
             synchronized(ingress) {
-                if (!channel.trySend(Event(HealthKey(day, platformWire, version), ruleId, kind, epoch, shadow)).isSuccess) {
+                // A shadow record keeps the epoch it was handed off under, so one evaluated across a reset is dropped.
+                val tagged = shadow?.resetToken ?: epoch
+                if (!channel.trySend(Event(HealthKey(day, platformWire, version), ruleId, kind, tagged, shadow)).isSuccess) {
                     stats.healthDropped.incrementAndGet()
                 }
             }

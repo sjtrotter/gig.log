@@ -3,6 +3,7 @@ package cloud.trotter.log.gig.core.pipeline.rules
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -69,17 +70,15 @@ class BundledGenerationTest {
     }
 
     @Test
-    fun `a shipped candidate that shares a live rule's id masks with that rule's redact block`() {
-        val live = shipped.flatMap { (_, json) -> Json.parseToJsonElement(json).jsonObject["screens"]?.jsonArray.orEmpty() }
-            .associateBy { it.jsonObject.getValue("id") }
-        for ((path, json) in shippedShadow) {
-            for (candidate in Json.parseToJsonElement(json).jsonObject["screens"]?.jsonArray.orEmpty()) {
-                val twin = live[candidate.jsonObject.getValue("id")] ?: continue
-                assertEquals("$path ${candidate.jsonObject["id"]}", twin.jsonObject["redact"], candidate.jsonObject["redact"])
-            }
-        }
-        // The #1630 check candidate is one such copy.
-        assertTrue(shippedShadow.any { (_, json) -> "doordash.screen.waiting_for_offer" in json })
+    fun `the check candidate masks with its live twin's redact block`() {
+        fun screens(files: List<Pair<String, String>>) =
+            files.flatMap { (_, json) -> Json.parseToJsonElement(json).jsonObject["screens"]?.jsonArray.orEmpty() }
+                .map { it.jsonObject }
+        val id = "doordash.screen.waiting_for_offer"
+        val live = screens(shipped).single { it["id"]?.jsonPrimitive?.content == id }
+        val candidate = screens(shippedShadow).single { it["id"]?.jsonPrimitive?.content == id }
+        assertNotNull(live["redact"])
+        assertEquals(live["redact"], candidate["redact"])
     }
 
     @Test

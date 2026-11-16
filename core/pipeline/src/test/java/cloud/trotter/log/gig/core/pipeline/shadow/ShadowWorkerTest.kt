@@ -43,6 +43,7 @@ class ShadowWorkerTest {
 
     private class Recording(private val gate: CountDownLatch? = null, private val started: CountDownLatch? = null) :
         HealthSink by HealthSink.NoOp {
+        @Volatile override var resetToken: Long = 0L
         val records = LinkedBlockingQueue<Pair<String, ShadowFrameRecord>>()
         override fun onShadowFrame(frame: ShadowFrameRecord) {
             started?.countDown()
@@ -73,6 +74,7 @@ class ShadowWorkerTest {
             ShadowFrameRecord(
                 5_000L, "doordash", "7.1.0", generationId.take(16),
                 listOf(ShadowResult(rule, digest.take(16), ShadowOutcome.Matched(null, MaskScanResult.CLEAN))), liveWon = true,
+                resetToken = 0L,
             ),
             matched,
         )
@@ -136,5 +138,42 @@ class ShadowWorkerTest {
         assertNull(sink.records.poll(200, TimeUnit.MILLISECONDS))
         assertEquals(1L, stats.frameCount())
         assertEquals("", ShadowStats().suffix())
+    }
+
+    @Test fun `the reset token is read at handoff, so a record evaluated across a reset carries the old one`() {
+        val gate = CountDownLatch(1)
+        val started = CountDownLatch(1)
+        val sink = Recording(gate, started).apply { resetToken = 4L }
+        val worker = ShadowWorker(sink, ShadowStats(), ShadowWorker.QUEUE_CAPACITY)
+
+        worker.offer(screen("Looking for offers"), at = 1L)
+        worker.offer(screen("Looking for offers"), at = 2L)
+        assertTrue(started.await(10, TimeUnit.SECONDS))
+        sink.resetToken = 5L // the census reset while the worker holds both frames
+        gate.countDown()
+
+        assertEquals(listOf(4L, 4L), listOf(sink.next(), sink.next()).map { it.second.resetToken })
+    }
+
+    @Test fun `a generation with no candidate after one with candidates queues one boundary record`() {
+        val sink = Recording()
+        val worker = ShadowWorker(sink, ShadowStats(), ShadowWorker.QUEUE_CAPACITY)
+        val without = RuleGeneration(id = "ef".repeat(32))
+
+        worker.offer(screen("Looking for offers"), at = 1L)
+        worker.offer(without, Platform.DoorDash, screen("Looking for offers"), null, 2L, "7.1.0", liveWon = true)
+        worker.offer(without, Platform.DoorDash, screen("Looking for offers"), null, 3L, "7.1.0", liveWon = true)
+
+        assertEquals(1, sink.next().second.results.size)
+        val boundary = sink.next().second
+        assertEquals(2L, boundary.timestampMillis)
+        assertEquals("ef".repeat(8), boundary.generationId)
+        assertTrue(boundary.results.isEmpty())
+        assertNull("one boundary, not one per frame", sink.records.poll(200, TimeUnit.MILLISECONDS))
+    }
+
+    @Test fun `the worker thread starts with the worker, never inside offer`() {
+        val worker = ShadowWorker(Recording(), ShadowStats(), ShadowWorker.QUEUE_CAPACITY)
+        assertTrue(worker.threadStarted())
     }
 }

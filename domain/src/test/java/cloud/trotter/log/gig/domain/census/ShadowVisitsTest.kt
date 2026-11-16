@@ -30,8 +30,14 @@ class ShadowVisitsTest {
         version: String = "7.1.0",
         generation: String = this@ShadowVisitsTest.generation,
     ) {
-        val record = ShadowFrameRecord(at, "doordash", version, generation, listOf(ShadowResult(rule, digest, outcome)), liveWon)
+        val record = ShadowFrameRecord(
+            at, "doordash", version, generation, listOf(ShadowResult(rule, digest, outcome)), liveWon, resetToken = 0L,
+        )
         ledger = visits.step(ledger, key(at, version), record)
+    }
+
+    private fun Run.boundary(at: Long, generation: String) {
+        ledger = visits.step(ledger, key(at), ShadowFrameRecord(at, "doordash", "7.1.0", generation, emptyList(), true, 0L))
     }
 
     private fun Run.counters(at: Long = day1Start, version: String = "7.1.0", entry: String = this@ShadowVisitsTest.entry) =
@@ -147,6 +153,18 @@ class ShadowVisitsTest {
         assertEquals(1, run.counters().visits)
         // The new generation's candidate starts Idle with no last start, so its own match at 1 s opened a visit.
         assertEquals(1, run.counters(entry = ShadowTally.entryKey(next, digest)).visits)
+    }
+
+    @Test fun `a boundary record with no candidates closes the open visit, whatever its generation id`() {
+        val run = Run()
+        run.frame(s(0.0), clean)
+        run.boundary(s(1.0), generation) // a reload with the same live files and no candidate for the platform
+        assertEquals(1, run.counters().visits)
+
+        val other = Run()
+        other.frame(s(0.0), clean)
+        other.boundary(s(1.0), "")
+        assertEquals(1, other.counters().visits)
     }
 
     @Test fun `the fold carries tied, onUnknown, the parse and the mask families`() {

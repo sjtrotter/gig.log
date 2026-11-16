@@ -11,7 +11,9 @@ import cloud.trotter.log.gig.domain.pipeline.VisitTiming
  *   stays; Spent + NoMatch goes Idle. An Unevaluated outcome changes nothing.
  * - An Open visit that is [MAX_VISIT_MS] old, or started on an earlier UTC day, closes at the candidate's next definite
  *   outcome and goes Spent, so a stay across midnight is one visit, counted on the day it started.
- * - A frame under another generation of the platform closes every Open visit of the old one and drops its states.
+ * - A frame under another generation of the platform closes every Open visit of the old one and drops its states; a
+ *   candidate missing from a frame's results (no longer active, or a boundary record with none) has its Open visit
+ *   closed and its state dropped the same way.
  *
  * A closed visit credits the row it started on ([HealthKey] of its first frame), once, through
  * [HealthLedger.creditVisit]. The state lives in memory: process death loses an Open visit and the last start times,
@@ -54,6 +56,12 @@ class ShadowVisits {
         }
         out = out.shadowFrame(key, frame.generationId, frame.results)
         val platformTracks = tracks.getOrPut(platform) { HashMap() }
+        val active = frame.results.mapTo(HashSet()) { it.digest }
+        val gone = platformTracks.keys.filter { it !in active }
+        for (digest in gone) {
+            val open = platformTracks.remove(digest)?.state as? State.Open ?: continue
+            out = out.creditVisit(open.startKey, ShadowTally.entryKey(frame.generationId, digest), open.fold)
+        }
         for (result in frame.results) {
             if (result.outcome == ShadowOutcome.Unevaluated) continue
             val track = platformTracks.getOrPut(result.digest) { Track() }

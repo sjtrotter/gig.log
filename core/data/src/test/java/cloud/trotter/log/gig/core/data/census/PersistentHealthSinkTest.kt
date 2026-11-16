@@ -366,8 +366,9 @@ class PersistentHealthSinkTest {
     private val entry = "$generation:$digest"
     private val matched = ShadowOutcome.Matched(requiredOk = true, maskScan = MaskScanResult.CLEAN)
 
-    private fun shadow(at: Long, outcome: ShadowOutcome) = ShadowFrameRecord(
+    private fun shadow(at: Long, outcome: ShadowOutcome, token: Long = 0L) = ShadowFrameRecord(
         at, key.platform, key.platformAppVersion, generation, listOf(ShadowResult(candidate, digest, outcome)), liveWon = true,
+        resetToken = token,
     )
 
     @Test fun `shadow frames become one visit on the row the visit started on`() = runTest {
@@ -383,15 +384,22 @@ class PersistentHealthSinkTest {
         assertEquals(counters, store.load().rows.getValue(key.toString()).shadow.getValue(entry))
     }
 
-    @Test fun `a census reset during an open visit, then a late closure, writes nothing`() = runTest {
+    @Test fun `outcomes handed off before a census reset and delivered after it write nothing`() = runTest {
         val sink = sink()
-        sink.onShadowFrame(shadow(timestamp, matched))
+        val before = sink.resetToken
+        sink.onShadowFrame(shadow(timestamp, matched, before))
         runCurrent()
+        // A worker held across the reset delivers its outcomes late, still tagged with the old token.
         sink.reset()
-        sink.onShadowFrame(shadow(timestamp + 1_000, ShadowOutcome.NoMatch))
-        val ledger = sink.snapshot()
-        assertTrue(ledger.rows.values.all { row -> row.shadow.values.all { it.visits == 0 } })
-        assertTrue(store.load().rows.values.all { row -> row.shadow.values.all { it.visits == 0 } })
+        assertTrue(sink.resetToken != before)
+        sink.onShadowFrame(shadow(timestamp + 1_000, matched, before))
+        sink.onShadowFrame(shadow(timestamp + 2_000, ShadowOutcome.NoMatch, before))
+        assertTrue(sink.snapshot().rows.isEmpty())
+        assertTrue(store.load().rows.isEmpty())
+
+        // A frame handed off after the reset records under the new identity.
+        sink.onShadowFrame(shadow(timestamp + 3_000, ShadowOutcome.NoMatch, sink.resetToken))
+        assertEquals(1, sink.snapshot().rows.getValue(key.toString()).shadow.getValue(entry).evaluated)
     }
 
     @Test fun `a shadow frame with no platform app version records nothing`() = runTest {

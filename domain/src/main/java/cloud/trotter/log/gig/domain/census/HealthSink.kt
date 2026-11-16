@@ -23,6 +23,12 @@ interface HealthSink {
      */
     fun onShadowFrame(frame: ShadowFrameRecord)
 
+    /**
+     * The census identity epoch, read without a lock on the pipeline thread when a shadow frame is handed off and carried
+     * in [ShadowFrameRecord.resetToken]; a reset moves it, so outcomes computed for the old identity are refused.
+     */
+    val resetToken: Long get() = 0L
+
     object NoOp : HealthSink {
         override fun onScreen(timestampMillis: Long, platformWire: String, platformAppVersion: String?, ruleId: String?) = Unit
         override fun onTrip(timestampMillis: Long, platformWire: String, platformAppVersion: String?) = Unit
