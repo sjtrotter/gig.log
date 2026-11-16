@@ -7,12 +7,14 @@ import cloud.trotter.census.contract.health.HealthReportSchema
 import cloud.trotter.census.contract.health.ShadowDailyDto
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 
 /** #1630: the row's shadow roster and counters, their load validation, and the `shadowDaily` levels they report. */
 class ShadowTallyTest {
@@ -175,5 +177,64 @@ class ShadowTallyTest {
         val again = posted.shadowFrame(key, generation, listOf(result(1)))
         assertEquals(posted.row().revision + 1, again.row().revision)
         assertEquals(listOf(key), again.closedRowsToPost("2026-10-02", "2026-09-25").map { it.first })
+    }
+
+    @Test fun `every accepted contract vector the phone could produce comes back out of the ledger`() {
+        val vectors = sequenceOf(File("../census-contract/conformance/health-report-vectors.jsonl"),
+            File("census-contract/conformance/health-report-vectors.jsonl")).first { it.isFile }.readLines()
+        var checked = 0
+        for (line in vectors.filter { it.isNotBlank() }) {
+            val vector = Json.parseToJsonElement(line).jsonObject
+            if (vector.getValue("verdict").jsonPrimitive.content != "accepted") continue
+            val expected = (HealthReportSchema.check(vector.getValue("report")) as HealthReportCheck.Valid).report
+            val entries = expected.shadowDaily.orEmpty()
+            // The phone never sends an empty list, and one generation holds one candidate per digest.
+            if (entries.isEmpty() || entries.map { it.generation to it.digest }.toSet().size < entries.size) continue
+            val row = HealthRow(
+                admitted = expected.admitted,
+                unknown = expected.unknown,
+                trips = expected.trips,
+                ruleCounts = expected.ruleCounts,
+                shadow = entries.associate { ShadowTally.entryKey(it.generation, it.digest) to counters(it) },
+                shadowTruncated = expected.shadowDailyTruncated == true,
+            )
+            val vectorKey = HealthKey(expected.day, expected.platform, expected.platformAppVersion)
+            val raw = HealthLedger.reportJson(vectorKey, row, expected.appVersion, expected.rulesetVersion, withParseShortfall = false)
+            val produced = (HealthReportSchema.check(Json.parseToJsonElement(raw)) as HealthReportCheck.Valid).report
+            val name = vector.getValue("name").jsonPrimitive.content
+            assertEquals(name, entries.toSet(), produced.shadowDaily.orEmpty().toSet())
+            assertEquals(name, expected.shadowDailyTruncated, produced.shadowDailyTruncated)
+            checked++
+        }
+        assertTrue("shadow vectors checked: $checked", checked >= 5)
+    }
+
+    /** Exact counters whose levels are [entry]'s. */
+    private fun counters(entry: ShadowDailyDto): ShadowCounters {
+        val visits = count(entry.visits)
+        fun hits(level: FractionLevel?): Int = when (level) {
+            null, FractionLevel.NONE -> 0
+            FractionLevel.SOME -> 1
+            FractionLevel.HALF_OR_MORE -> (visits + 1) / 2
+            FractionLevel.ALL -> visits
+        }
+        return ShadowCounters(
+            rule = entry.rule,
+            visits = visits,
+            evaluated = count(entry.evaluated),
+            tied = hits(entry.tied),
+            onUnknown = hits(entry.onUnknown),
+            emptyParseN = if (entry.emptyParse == null) 0 else visits,
+            emptyParseK = hits(entry.emptyParse),
+            maskFailN = if (entry.maskFail == null) 0 else visits,
+            maskFailK = hits(entry.maskFail),
+        )
+    }
+
+    private fun count(level: CountLevel): Int = when (level) {
+        CountLevel.NONE -> 0
+        CountLevel.FEW -> 4
+        CountLevel.SEVERAL -> 5
+        CountLevel.MANY -> 20
     }
 }
