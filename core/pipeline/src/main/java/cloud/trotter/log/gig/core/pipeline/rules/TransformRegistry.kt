@@ -49,18 +49,23 @@ object TransformRegistry {
 
     /**
      * Runs [block] with time transforms anchored to [nowMillis]/[zoneId].
-     * Unscoped callers fall back to the system clock.
+     * Unscoped callers fall back to the system clock. A nested scope restores the enclosing clock when it ends
+     * (#1630: a shadow evaluation may run inside a classification's scope).
      */
     fun <T> withClock(
         nowMillis: Long,
         zoneId: ZoneId = ZoneId.systemDefault(),
         block: () -> T,
-    ): T {
-        scopedClock.set(TransformClock(nowMillis, zoneId))
+    ): T = withClock(TransformClock(nowMillis, zoneId), block)
+
+    /** [withClock] with the clock already built. */
+    fun <T> withClock(clock: TransformClock, block: () -> T): T {
+        val enclosing = scopedClock.get()
+        scopedClock.set(clock)
         return try {
             block()
         } finally {
-            scopedClock.remove()
+            if (enclosing == null) scopedClock.remove() else scopedClock.set(enclosing)
         }
     }
 

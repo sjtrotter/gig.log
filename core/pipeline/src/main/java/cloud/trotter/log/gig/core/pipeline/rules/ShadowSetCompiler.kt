@@ -17,8 +17,9 @@ import timber.log.Timber
  * and this runs after it. A shadow file that fails a file-level check (size, JSON, keys, the exact
  * [RuleEngineConstants.SHADOW_FORMAT_VERSION], a platform that matches its name and has live screen rules) adds no
  * candidates. A candidate that does not compile, has no digest, or shares its logical id with another candidate is
- * dropped alone, with a DEBUG line and a local count. Two candidates whose digests share the wire prefix reject the
- * whole set. No candidates at all: no set.
+ * dropped alone, with a DEBUG line and a local count, and so is each candidate of a platform past
+ * [ShadowSet.MAX_CANDIDATES_PER_PLATFORM]. Two candidates whose digests share the wire prefix reject the whole set. No
+ * candidates at all: no set. Candidates compile metered ([ShadowFuel.compileMetered]).
  */
 internal object ShadowSetCompiler {
 
@@ -70,11 +71,15 @@ internal object ShadowSetCompiler {
             Timber.tag(TAG).d("Shadow candidate '%s' dropped: %s", id ?: "<unreadable-id>", reason)
         }
         val idCounts = raw.mapNotNull { it.id }.groupingBy { it }.eachCount()
+        val kept = mutableMapOf<Platform, Int>()
         val candidates = raw.mapNotNull { r ->
             when {
                 r.id == null || r.obj == null -> null.also { drop(r.id, "not a shadow rule object") }
                 idCounts.getValue(r.id) > 1 -> null.also { drop(r.id, "another candidate has its id") }
-                else -> compile(r, digest) ?: null.also { drop(r.id, "did not compile or hash") }
+                (kept[r.platform] ?: 0) >= ShadowSet.MAX_CANDIDATES_PER_PLATFORM ->
+                    null.also { drop(r.id, "past the per-platform candidate cap") }
+                else -> compile(r, digest)?.also { kept.merge(r.platform, 1, Int::plus) }
+                    ?: null.also { drop(r.id, "did not compile or hash") }
             }
         }
         val prefixes = candidates.map { RuleIdentifiers.wire(it.digest) }
@@ -118,9 +123,11 @@ internal object ShadowSetCompiler {
         val obj = raw.obj ?: return null
         val hex = digest(obj) ?: return null
         val rule = try {
-            RuleCompiler.compileRules<UiNode>(
-                JsonArray(listOf(JsonObject(obj - "shadow"))), RuleContext.SCREEN, raw.platformId,
-            ).singleOrNull()
+            ShadowFuel.compileMetered {
+                RuleCompiler.compileRules<UiNode>(
+                    JsonArray(listOf(JsonObject(obj - "shadow"))), RuleContext.SCREEN, raw.platformId,
+                ).singleOrNull()
+            }
         } catch (_: Exception) {
             null
         } ?: return null

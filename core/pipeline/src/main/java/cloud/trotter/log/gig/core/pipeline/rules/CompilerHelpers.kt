@@ -101,7 +101,7 @@ internal fun compileNavigation(navSpec: JsonElement): (UiNode) -> UiNode? {
                 )
             }
             val regex = compileRegex(pattern)
-            ;{ node ->
+            val scan: (UiNode) -> UiNode? = { node ->
                 // #1053 round 5 — an unevaluable match resolves no sibling, never the wrong one.
                 try {
                     node.followingSiblings().asSequence().take(cap)
@@ -109,6 +109,10 @@ internal fun compileNavigation(navSpec: JsonElement): (UiNode) -> UiNode? {
                 } catch (e: RegexEvaluationFailed) {
                     null
                 }
+            }
+            // #1630: a shadow candidate pays for the siblings the scan can read; a live scan is returned as built.
+            ShadowFuel.navigation(scan) { node ->
+                node.followingSiblings().take(cap).sumOf { 1L + (it.text?.length ?: 0) * ShadowFuel.regexWeight(regex) }
             }
         }
         nav.startsWith("findChild(") -> {

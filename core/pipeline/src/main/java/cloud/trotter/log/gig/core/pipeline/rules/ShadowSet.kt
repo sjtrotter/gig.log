@@ -4,8 +4,9 @@ import cloud.trotter.log.gig.domain.model.accessibility.UiNode
 import cloud.trotter.log.gig.domain.state.Platform
 
 /**
- * One shadow candidate (#1630): a screen rule marked `shadow: true`, compiled in full under the logical id it will
- * have when live. Nothing evaluates it yet, and nothing ever materializes its effects, targets or capability keys.
+ * One shadow candidate (#1630): a screen rule marked `shadow: true`, compiled in full and metered ([ShadowFuel]) under
+ * the logical id it will have when live. [ShadowCandidateEngine] evaluates it; nothing ever materializes its effects,
+ * targets or capability keys.
  */
 class ShadowCandidate internal constructor(
     internal val rule: CompiledRule<UiNode>,
@@ -24,6 +25,19 @@ class ShadowCandidate internal constructor(
 class ShadowSet internal constructor(
     val generationId: String,
     val candidates: List<ShadowCandidate>,
-    /** Candidates dropped at load (invalid, duplicate id, or no digest). A local count, never reported. */
+    /** Candidates dropped at load (invalid, duplicate id, no digest, or past the platform cap). A local count. */
     val droppedCandidates: Int,
-)
+) {
+    private val byPlatform: Map<Platform, List<ShadowCandidate>> = candidates.groupBy { it.platform }
+
+    /** [platform]'s candidates, in file order. */
+    fun candidatesFor(platform: Platform): List<ShadowCandidate> = byPlatform[platform].orEmpty()
+
+    companion object {
+        /**
+         * Candidates kept per platform; the rest of a platform's candidates drop at load, in file order. Sized with
+         * the per-frame fuel cap (`ShadowFrameRunner`) from the benchmark in `docs/architecture/02-rule-engine.md`.
+         */
+        const val MAX_CANDIDATES_PER_PLATFORM = 16
+    }
+}

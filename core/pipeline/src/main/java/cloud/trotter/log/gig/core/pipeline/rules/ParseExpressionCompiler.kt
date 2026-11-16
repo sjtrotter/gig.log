@@ -303,16 +303,19 @@ internal object ParseExpressionCompiler {
      * expression's declared [ParseFieldKind] is preserved untouched — the #1036 shortfall census
      * reads that kind, and an evaluation failure is not the anchor rot that signal exists to name.
      */
-    private fun failNullOnEvaluationFailure(expr: ScreenExpr): ScreenExpr =
-        expr.copy(
+    private fun failNullOnEvaluationFailure(expr: ScreenExpr): ScreenExpr {
+        // #1630: a shadow candidate's expression is metered inside the fail-null catch; a live one is unchanged.
+        val eval = ShadowFuel.expression(expr.eval)
+        return expr.copy(
             eval = { node, bindings ->
                 try {
-                    expr.eval(node, bindings)
+                    eval(node, bindings)
                 } catch (e: RegexEvaluationFailed) {
                     null
                 }
             },
         )
+    }
 
     /** True when a `conditionalEnum` declares an `else` arm — then it always resolves (#1036). */
     private fun hasElseCase(obj: JsonObject): Boolean =
@@ -347,6 +350,7 @@ internal object ParseExpressionCompiler {
     }
 
     private fun compileFind(obj: JsonObject, fromName: String?): (UiNode, Bindings) -> Any? {
+        val applyTransform = ShadowFuel.transform()
         val findPred = compileNodePred(obj["find"]!!)
         val readProp = obj["read"]?.jsonPrimitive?.content
         val transformSpec = obj["transform"]
@@ -376,7 +380,7 @@ internal object ParseExpressionCompiler {
             } else null
 
             val transformed = if (rawValue != null && transformSpec != null) {
-                TransformRegistry.applyAny(transformSpec, rawValue)
+                applyTransform(transformSpec, rawValue)
             } else rawValue
 
             transformed ?: fallbackVal?.let { resolveLiteral(it) }
@@ -384,6 +388,7 @@ internal object ParseExpressionCompiler {
     }
 
     private fun compileSiblingOf(obj: JsonObject, fromName: String?): (UiNode, Bindings) -> Any? {
+        val applyTransform = ShadowFuel.transform()
         val findPred = compileNodePred(obj["siblingOf"]!!)
         val offset = obj["offset"]?.jsonPrimitive?.intOrNull ?: 1
         val readProp = obj["read"]?.jsonPrimitive?.content ?: "text"
@@ -399,7 +404,7 @@ internal object ParseExpressionCompiler {
             } else null
 
             if (rawValue != null && transformSpec != null) {
-                TransformRegistry.applyAny(transformSpec, rawValue)
+                applyTransform(transformSpec, rawValue)
             } else rawValue
         }
     }
@@ -416,16 +421,21 @@ internal object ParseExpressionCompiler {
     }
 
     private fun compileTextAfterLabel(obj: JsonObject, fromName: String?): (UiNode, Bindings) -> Any? {
+        val applyTransform = ShadowFuel.transform()
         val label = obj["textAfterLabel"]!!.jsonPrimitive.content
         val offset = obj["offset"]?.jsonPrimitive?.intOrNull ?: 1
         val transformSpec = obj["transform"]
 
-        return { tree, bindings ->
+        val extract: (UiNode, Bindings) -> Any? = { tree, bindings ->
             val startNode = if (fromName != null) bindings[fromName] ?: tree else tree
             val rawValue = startNode.textAfterLabel(label, offset)
             if (rawValue != null && transformSpec != null) {
-                TransformRegistry.applyAny(transformSpec, rawValue)
+                applyTransform(transformSpec, rawValue)
             } else rawValue
+        }
+        // #1630: the label search reads the start node's whole `allText`; a metered candidate pays for it first.
+        return ShadowFuel.expression(extract) { tree, bindings ->
+            ShadowFuel.allTextCost(if (fromName != null) bindings[fromName] ?: tree else tree)
         }
     }
 
@@ -443,7 +453,7 @@ internal object ParseExpressionCompiler {
                 val fn: (UiNode) -> Boolean = { tree ->
                     tree.allTextLowerJoined.contains(text)
                 }
-                fn
+                ShadowFuel.predicate(fn) { tree -> ShadowFuel.joinedScanCost(tree, 1) }
             }
             else -> {
                 val pred = compileTreePred(JsonObject(presenceSpec))
@@ -520,6 +530,7 @@ internal object ParseExpressionCompiler {
     }
 
     private fun compileJoin(obj: JsonObject, depth: Int = 0): (UiNode, Bindings) -> Any? {
+        val applyTransform = ShadowFuel.transform()
         val partsArray = obj["join"]!!.jsonArray
         val separator = obj["separator"]?.jsonPrimitive?.content ?: ""
         val skipNulls = obj["skipNulls"]?.jsonPrimitive?.booleanOrNull ?: true
@@ -536,7 +547,7 @@ internal object ParseExpressionCompiler {
             }
             val result: Any? = joined.ifBlank { null }
             if (result != null && transformSpec != null) {
-                TransformRegistry.applyAny(transformSpec, result.toString())
+                applyTransform(transformSpec, result.toString())
             } else result
         }
     }
@@ -565,6 +576,7 @@ internal object ParseExpressionCompiler {
     }
 
     private fun compileReadFromBinding(obj: JsonObject, fromName: String): (UiNode, Bindings) -> Any? {
+        val applyTransform = ShadowFuel.transform()
         val readProp = obj["read"]!!.jsonPrimitive.content
         val transformSpec = obj["transform"]
 
@@ -572,7 +584,7 @@ internal object ParseExpressionCompiler {
             val node = bindings[fromName]
             val rawValue = if (node != null) readProperty(node, readProp) else null
             if (rawValue != null && transformSpec != null) {
-                TransformRegistry.applyAny(transformSpec, rawValue)
+                applyTransform(transformSpec, rawValue)
             } else rawValue
         }
     }
@@ -593,7 +605,8 @@ internal object ParseExpressionCompiler {
             )
         }
 
-        return { parsed ->
+        // #1630: a shadow candidate's validator is metered; a live one is returned as built.
+        return ShadowFuel.validator { parsed ->
             val outcome = ValidateRegistry.validate(assertName, obj, parsed)
             when (outcome) {
                 is ValidateOutcome.Pass -> ValidateOutcome.Pass

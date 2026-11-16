@@ -32,6 +32,17 @@ object MaskTokens {
             // ends with the plain mask, but it is user text.
             (value.length == HASHED_MASK_LENGTH && value.startsWith("$REDACTED_PREFIX:") && endsWithMask(value))
 
+    /**
+     * #1630: the length of the complete mask token (the plain [REDACTED] or the hashed `[redacted:<4hex>]`) that
+     * starts at [index] of [value], or 0 when none does. A bare `[redacted` that no complete token follows is 0.
+     */
+    fun maskLengthAt(value: String, index: Int): Int {
+        if (!value.startsWith(REDACTED_PREFIX, index)) return 0
+        if (value.startsWith(REDACTED, index)) return REDACTED.length
+        val end = index + HASHED_MASK_LENGTH
+        return if (end <= value.length && endsWithMask(value.substring(index, end))) HASHED_MASK_LENGTH else 0
+    }
+
     fun endsWithMask(value: String): Boolean {
         if (value.endsWith(REDACTED)) return true
         if (value.length < HASHED_MASK_LENGTH) return false
