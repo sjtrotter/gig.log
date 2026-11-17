@@ -7,3 +7,4 @@ issues: #1610
   - desk (3): a timer leave with no sheet sighting (DEBUG `pooled via EXPIRY_TIMER` with no suffix) followed by work at its store within seconds still links (INFO `#1119 offer … linked to job …`).
   - desk (4): every INFO link line within 60 s of a same-chain sheet decline names a card presented after that decline left the screen.
   - Confirmed: 0/2
+    - desk 11-16 (pull of 11-15 and 11-16, build `7a193657`, DoorDash 8.107.10): S2 was one chain throughout: 0 tie WARNs; two links came 22 s and 54 s after a same-chain sheet decline and each named a card presented after the declined one left. Consistent. Counter unchanged.
