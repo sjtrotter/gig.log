@@ -2,7 +2,7 @@
 
 - **Date:** 2026-11-16 (pull). Shifts on 11-15 (two) and 11-16 (one, short, no offers). DoorDash 8.107.10 on every frame (446 captures). No Uber activity.
 - **Platform(s) tested:** DoorDash.
-- **Branch under test:** `0.233.1+7a193657` (`master` at `7a193657`, post-#1659, clean tree) for every shift. Not on the phone during them: #1662 and #1664–#1667 (census shadow contract, #1630 shadow mode). After the pull the phone got `0.233.1+6b740ee6` (shadow mode), then `0.233.1+48c96793` (post-#1674, the #1672 fix).
+- **Branch under test:** `0.233.1+7a193657` (`master` at `7a193657`, post-#1659, clean tree) for every shift. Not on the phone during them: #1662 and #1664–#1667 (census shadow contract, #1630 shadow mode). After the pull the session installed `0.233.1+6b740ee6` (shadow mode) on 11-16 and `0.233.1+48c96793` (post-#1674, the #1672 fix) on 11-17; `dumpsys package` read `versionName=0.233.1+48c96793` after the second install.
 - **Field conditions:** three shifts.
   - **S1**, 11-15 14:14–16:42: 3 of 5 offers accepted, three single-drop jobs, $65.98, ended on the dash summary. Money reconciles to the cent.
   - **S2**, 11-15 17:47–19:19: DoorDash counts 3 of 6 accepted, the app 2. A two-drop job with a same-store add-on. $42.03 reported. The recorded rows reach it only through a $5.00 delivery the dasher added by hand after the shift (bug 1).
@@ -24,7 +24,7 @@
    - **Status:** open (evidence on the item).
 4. **S3's end was recorded about 11 s after End dash (#1527, #1668).** The offline home drew under a workflow host without its Dash button for 9 s; `idle_map` first matched at 13:43:15. PR #1675 recognizes the button-less home by its "Avg. offer wait" stat, but the frames right after End dash carry only chrome the online home shares and stay UNKNOWN.
    - **Status:** #1668 open for the late end (one possibility: the End dash confirm click).
-5. **A lone street line in an UNKNOWN capture (#1671).** The customer's drop-off street, drawn as a map label on the offer card in the frame caught at the accept; it matches the mask on that delivery's drop-off screen. The census withheld it (a street-shape value); the local debug capture kept it because the address backstop claims only a street plus a city line. The capture was deleted from the pull and the phone.
+5. **A lone street line in an UNKNOWN capture (#1671).** The customer's drop-off street, drawn as a map label on the offer card in the frame caught at the accept; it matches the mask on that delivery's drop-off screen. The census withheld it (a street-shape value); the local debug capture kept it because the address backstop claims only a street plus a city line. The capture was deleted from the pull; the phone's copy went with the post-pull purge of every capture on the device (verified 0 files left).
    - **Status:** filed as #1671.
 6. **Gas price:** the HTTP 403s seen since 11-06 happened only on the two `.dirty` builds; the clean `7a193657` build fetched the price. One possibility: the key differs between local dirty builds and this one. Unconfirmed.
 7. **Rules feed:** four `NoTrustedEpoch` WARNs within 38 s right after install, consistent with Check now taps. Unconfirmed.
