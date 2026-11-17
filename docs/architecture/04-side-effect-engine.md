@@ -226,7 +226,9 @@ nothing and `diffSettleUiTimeout` drops a pending `EXPAND_EARNINGS` fire (DEBUG,
 `CONFIRM_DECLINE` is untouched. Before any expanded frame the arm is unchanged, so a first tap that fails closed
 (the #1102 slide) still retries on the next collapsed frame. A receipt the dasher collapses by hand stays
 collapsed for the rest of the episode. Not covered: an expand that landed while no expanded frame was admitted,
-so the next collapsed frame still arms a tap.
+so the next collapsed frame still arms a tap. Also not covered: when every frame between two receipts is missed, the second receipt
+continues the first one's episode (a PostTask frame always continues it), so its expand is suppressed and the
+dasher expands it by hand.
 
 **Tap target re-resolution (#1149).** From the 2026-09-21 TalkBack study
 (`~/dashbuddy/research/talkback-study/ASTRA-REPORT.md`, wins 1 + 2: refresh the actual action owner before
