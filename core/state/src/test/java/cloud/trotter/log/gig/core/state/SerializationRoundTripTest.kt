@@ -117,6 +117,13 @@ class SerializationRoundTripTest {
         )
     }
 
+    @Test
+    fun `#1672 the receipt expand mark round-trips, and an old region blob decodes it null`() {
+        val region = PlatformRegion(platform = Platform.DoorDash, receiptExpandSeenAt = 1_200L)
+        assertEquals(region, StateJson.decodeFromString<PlatformRegion>(StateJson.encodeToString(region)))
+        assertNull(StateJson.decodeFromString<PlatformRegion>("""{"platform":"DoorDash"}""").receiptExpandSeenAt)
+    }
+
     private val parsedTime = ParsedTime(text = "5:39 PM", time = 1_000_000L)
 
     private fun allSubtypes(): List<ParsedFields> = listOf(

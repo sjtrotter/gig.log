@@ -304,6 +304,13 @@ data class PlatformRegion(
      */
     val openReceiptEvidence: OpenReceiptEvidence? = null,
     /**
+     * #1672: the `obs.timestamp` of the first frame in the current receipt episode that showed the receipt expanded;
+     * null = not seen in this episode. While set, the app schedules no automatic expand tap and a pending one does
+     * nothing, so a dismissal (drawn as a brief collapsed frame) is never re-opened. Kept and cleared on the #1460
+     * continuity rule, like [openReceiptEvidence]. Default null, so an older snapshot decodes.
+     */
+    val receiptExpandSeenAt: Long? = null,
+    /**
      * #1119 S2: the shift-long offer pool. An offer that leaves presentation with no committed decline and no accept
      * click enters it in `OfferLifecycle`; it leaves by a link to work at its store or at `endSession`. Survives
      * recovery. Default-empty so a snapshot decodes, though a pre-S2 snapshot is never restored (`AppState.stateSchema`).
