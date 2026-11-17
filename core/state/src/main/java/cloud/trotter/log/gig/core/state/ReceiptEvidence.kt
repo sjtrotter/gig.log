@@ -152,3 +152,19 @@ internal fun EffectMap.diffReceiptEvidence(
         ),
     )
 }
+
+/**
+ * #1672: keep [PlatformRegion.receiptExpandSeenAt] for the receipt episode. A flow-less observation leaves it alone;
+ * a flow-bearing frame that does not continue the episode ([receiptEpisodeContinues]) clears it; the first receipt
+ * frame read expanded stamps it. Called from the step wrapper, so no early return skips it.
+ */
+internal fun receiptExpandEpisode(region: PlatformRegion, prevFlow: Flow, obs: Observation): PlatformRegion {
+    val flowObs = obs as? Observation.FlowObservation ?: return region
+    val next = flowObs.flow ?: return region
+    if (!receiptEpisodeContinues(prevFlow, next)) {
+        return if (region.receiptExpandSeenAt == null) region else region.copy(receiptExpandSeenAt = null)
+    }
+    if (region.receiptExpandSeenAt != null || obs !is Observation.Screen || next != Flow.PostTask) return region
+    val expanded = (obs.parsed as? ParsedFields.PostTaskFields)?.isExpanded == true
+    return if (expanded) region.copy(receiptExpandSeenAt = obs.timestamp) else region
+}

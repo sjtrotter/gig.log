@@ -132,8 +132,11 @@ class PlatformRegionStepper @Inject constructor() {
             obs,
         )
         val actedPrev = actedFlowEdge(prev, prevFlow, obs).first
-        // #1598: the receipt evidence episode ends on the same frames as the #1460 key.
-        val region = receiptEvidenceEpisode(SessionPaySettleGate.receiptEpisode(stepped, actedPrev, obs), actedPrev, obs)
+        // #1598: the receipt evidence episode ends on the same frames as the #1460 key; #1672: so does the expand mark.
+        val region = receiptExpandEpisode(
+            receiptEvidenceEpisode(SessionPaySettleGate.receiptEpisode(stepped, actedPrev, obs), actedPrev, obs),
+            actedPrev, obs,
+        )
         return PlatformStep(region, sink.build())
     }
 

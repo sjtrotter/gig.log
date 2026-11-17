@@ -104,9 +104,9 @@ class EffectMap @Inject constructor(
 
     fun diff(prev: AppState, next: AppState, obs: Observation, decisions: StepDecisions): List<AppEffect> = buildList {
         addAll(diffRuleEffects(obs))
-        addAll(diffExpandAction(obs))
+        addAll(diffExpandAction(obs, next))
         addAll(diffConfirmDeclineAction(obs, next))
-        addAll(diffSettleUiTimeout(obs))
+        addAll(diffSettleUiTimeout(obs, next))
         // #438 B3: a HUD accept/decline resolves by the tap's OWN carried (platform, offerHash)
         // against that platform's owned offers — no global-flow precondition (vet M4).
         addAll(diffOfferAction(obs, next))
@@ -295,11 +295,15 @@ class EffectMap @Inject constructor(
      * tap behind a SETTLE_UI timeout so the screen finishes animating first
      * (observable + cancellable, unlike a hidden sleep). Replaces the rule's
      * former `click` effect — the decision is the app's, the target is data.
+     *
+     * #1672: once per receipt episode. After a frame of the episode read the receipt expanded, nothing is
+     * scheduled, so the brief collapsed frame of a dismissal never re-opens the receipt.
      */
-    private fun diffExpandAction(obs: Observation): List<AppEffect> {
+    private fun diffExpandAction(obs: Observation, next: AppState): List<AppEffect> {
         val flowObs = obs as? Observation.Screen ?: return emptyList()
         val action = RuleAction.EXPAND_EARNINGS
         val target = flowObs.targets[action.targetBindName] ?: return emptyList()
+        if (next.regions.platforms[flowObs.platform]?.receiptExpandSeenAt != null) return emptyList()
         // Only when the screen itself reports the breakdown collapsed — the
         // gate fails closed on an absent/unparseable field (#345).
         val collapsed = evaluateGate(
@@ -358,14 +362,23 @@ class EffectMap @Inject constructor(
     /**
      * Catch the SETTLE_UI timeout fired by a deferred action (see
      * [diffExpandAction]) and emit the immediate-fire [AppEffect.PerformRuleAction].
+     * #1672: an expand armed before the receipt read expanded performs nothing once it has.
      */
-    private fun diffSettleUiTimeout(obs: Observation): List<AppEffect> {
+    private fun diffSettleUiTimeout(obs: Observation, next: AppState): List<AppEffect> {
         val timeout = obs as? Observation.Timeout ?: return emptyList()
         if (timeout.type != TimeoutType.SETTLE_UI) return emptyList()
         // Typed payload (#366) — the old per-key Map round-trip is gone.
         val deferred = timeout.payload as? ObservationPayload.DeferredAction ?: return emptyList()
         val action = RuleAction.fromWire(deferred.action) ?: return emptyList()
         val platform = Platform.fromWire(deferred.platform) ?: return emptyList()
+        val expandedAt = next.regions.platforms[platform]?.receiptExpandSeenAt
+        if (action == RuleAction.EXPAND_EARNINGS && expandedAt != null) {
+            // P7: action, platform and a timestamp only.
+            Timber.tag("StateMachine").d(
+                "#1672 receipt already expanded at %d: %s on %s dropped", expandedAt, action.wire, platform.wire,
+            )
+            return emptyList()
+        }
         return listOf(
             AppEffect.PerformRuleAction(
                 action = action,
