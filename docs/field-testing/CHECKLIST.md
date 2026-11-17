@@ -25,6 +25,7 @@ A `?` suffix on a status (`status: must-watch?`, `status: superseded?`) marks a 
 
 ## §1 Must-watch (dev-confirmed 2026-10-07 — read these first)
 
+- [🆕 NEW — a dismissed receipt stays dismissed (#1672)](checklist/open/1672-dismissed-receipt-stays-dismissed.md)
 - [🆕 NEW — the bubble headline is the shift's earnings (#1443)](checklist/open/1443-the-bubble-headline-is-the-shift-s-earnings.md)
 - [🆕 NEW — a stacked job counts when the whole job is delivered (#1458)](checklist/open/1458-stacked-job-counts-when-whole-job-delivered.md)
 - [Odometer capability (#1361)](checklist/open/1361-odometer-capability.md)

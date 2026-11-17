@@ -340,7 +340,8 @@ records it through `observeReceiptEvidence` and caches it beside the receipt. Th
 (`PlatformRegion.openReceiptEvidence`) shares the #1460 continuity rule (`receiptEpisodeContinues`, the one
 owner the settle gate's `receiptEpisodeKey` also reads): it survives the receipt and the offer overlay
 reached from it, and any other flow-bearing frame or `endSession` clears it; a flow-less timer does not,
-so a retire committed on its timer keeps the episode, and with it the proof, across the close. It is not
+so a retire committed on its timer keeps the episode, and with it the proof, across the close. The automatic expand's
+once-per-episode mark (`receiptExpandSeenAt`, #1672, `04-side-effect-engine.md`) is the third reader of the rule. It is not
 dropped by recovery: replay re-derives it and the evidence keys dedup. `possibleWorkSeq` counts fresh
 offer presentations (the replace arm of `pushOrReplaceOffer`; never an enrich or a same-presentation
 variant), and a receipt FRAME read after its job closed re-prices only while it still equals the
