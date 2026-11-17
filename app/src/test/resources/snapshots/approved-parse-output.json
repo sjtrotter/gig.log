@@ -2985,6 +2985,30 @@
         "shape": null,
         "fields": {}
     },
+    "earnings/2026-11-15_17-46-06-979__doordash__accessibility.window__UNKNOWN__6307c1.json": {
+        "ruleId": "doordash.screen.earnings",
+        "intent": "earnings",
+        "shape": null,
+        "fields": {}
+    },
+    "earnings/2026-11-15_17-46-10-667__doordash__accessibility.window__UNKNOWN__cc9ac1.json": {
+        "ruleId": "doordash.screen.earnings",
+        "intent": "earnings",
+        "shape": null,
+        "fields": {}
+    },
+    "earnings/2026-11-15_21-10-44-448__doordash__accessibility.window__UNKNOWN__44ba07.json": {
+        "ruleId": "doordash.screen.earnings",
+        "intent": "earnings",
+        "shape": null,
+        "fields": {}
+    },
+    "earnings/2026-11-15_21-10-59-127__doordash__accessibility.window__UNKNOWN__05176d.json": {
+        "ruleId": "doordash.screen.earnings",
+        "intent": "earnings",
+        "shape": null,
+        "fields": {}
+    },
     "earnings_activity/2026-07-21_19-16-35-575__uber__accessibility.window__earnings_activity__721388.json": {
         "ruleId": "uber.screen.earnings_activity",
         "intent": "earnings_activity",
@@ -3130,6 +3154,48 @@
         }
     },
     "idle_map/2026-11-05_18-00-21-913__doordash__accessibility.window__idle_map__0e4ddf.json": {
+        "ruleId": "doordash.screen.idle_map",
+        "intent": "idle_map",
+        "shape": "idle",
+        "fields": {
+            "isHeadingBackToZone": false,
+            "sessionPay": null,
+            "sessionType": null,
+            "spotSaveDeadline": null,
+            "startingSession": false,
+            "waitTimeEstimate": null,
+            "zoneName": null
+        }
+    },
+    "idle_map/2026-11-15_14-14-18-414__doordash__accessibility.window__UNKNOWN__cbdaca.json": {
+        "ruleId": "doordash.screen.idle_map",
+        "intent": "idle_map",
+        "shape": "idle",
+        "fields": {
+            "isHeadingBackToZone": false,
+            "sessionPay": null,
+            "sessionType": null,
+            "spotSaveDeadline": null,
+            "startingSession": false,
+            "waitTimeEstimate": null,
+            "zoneName": null
+        }
+    },
+    "idle_map/2026-11-15_17-47-32-858__doordash__accessibility.window__UNKNOWN__a0778d.json": {
+        "ruleId": "doordash.screen.idle_map",
+        "intent": "idle_map",
+        "shape": "idle",
+        "fields": {
+            "isHeadingBackToZone": false,
+            "sessionPay": null,
+            "sessionType": null,
+            "spotSaveDeadline": null,
+            "startingSession": false,
+            "waitTimeEstimate": null,
+            "zoneName": null
+        }
+    },
+    "idle_map/2026-11-16_13-36-04-377__doordash__accessibility.window__UNKNOWN__96043c.json": {
         "ruleId": "doordash.screen.idle_map",
         "intent": "idle_map",
         "shape": "idle",
@@ -8027,6 +8093,62 @@
         "fields": {
             "isHeadingBackToZone": false,
             "sessionPay": 16.7,
+            "sessionType": null,
+            "spotSaveDeadline": null,
+            "startingSession": false,
+            "waitTimeEstimate": "1-2 min",
+            "zoneName": null
+        }
+    },
+    "waiting_for_offer/2026-11-15_16-42-06-520__doordash__accessibility.window__UNKNOWN__9bee5e.json": {
+        "ruleId": "doordash.screen.waiting_for_offer",
+        "intent": "waiting_for_offer",
+        "shape": "idle",
+        "fields": {
+            "isHeadingBackToZone": false,
+            "sessionPay": null,
+            "sessionType": null,
+            "spotSaveDeadline": null,
+            "startingSession": false,
+            "waitTimeEstimate": null,
+            "zoneName": null
+        }
+    },
+    "waiting_for_offer/2026-11-15_18-49-03-557__doordash__accessibility.window__UNKNOWN__d44c7e.json": {
+        "ruleId": "doordash.screen.waiting_for_offer",
+        "intent": "waiting_for_offer",
+        "shape": "idle",
+        "fields": {
+            "isHeadingBackToZone": false,
+            "sessionPay": 5.0,
+            "sessionType": null,
+            "spotSaveDeadline": null,
+            "startingSession": false,
+            "waitTimeEstimate": null,
+            "zoneName": null
+        }
+    },
+    "waiting_for_offer/2026-11-15_19-18-10-387__doordash__accessibility.window__UNKNOWN__da9562.json": {
+        "ruleId": "doordash.screen.waiting_for_offer",
+        "intent": "waiting_for_offer",
+        "shape": "idle",
+        "fields": {
+            "isHeadingBackToZone": false,
+            "sessionPay": 22.55,
+            "sessionType": null,
+            "spotSaveDeadline": null,
+            "startingSession": false,
+            "waitTimeEstimate": null,
+            "zoneName": null
+        }
+    },
+    "waiting_for_offer/2026-11-15_19-19-22-970__doordash__accessibility.window__waiting_for_offer__9c717b.json": {
+        "ruleId": "doordash.screen.waiting_for_offer",
+        "intent": "waiting_for_offer",
+        "shape": "idle",
+        "fields": {
+            "isHeadingBackToZone": false,
+            "sessionPay": null,
             "sessionType": null,
             "spotSaveDeadline": null,
             "startingSession": false,

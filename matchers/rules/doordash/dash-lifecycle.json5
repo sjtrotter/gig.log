@@ -724,9 +724,11 @@
           }
         }
       ],
+      // #1669: `idleSurface: no_orders` lives on branch 0 only. A branch cannot null a rule-level
+      // idleSurface (it inherits), and the card-less render (branch 1) carries none of the
+      // "Finding offers" evidence that surface asserts. Both branches inherit flow and modeHint.
       "state": {
         "flow": "idle",
-        "idleSurface": "no_orders",
         "modeHint": "online"
       },
       "reject": [
@@ -746,43 +748,78 @@
           }
         }
       ],
-      "require": {
-        "any": [
-          {
-            "exists": {
-              "hasIdSuffix": "looking_for_order_progress_bar"
-            }
+      "branches": [
+        {
+          "comment": "Branch 0: the screen with its 'Finding offers' card (or the older progress bar / 'Looking for offers' renders). The pre-#1669 require, verbatim. Only this branch asserts `idleSurface: no_orders`.",
+          "state": {
+            "idleSurface": "no_orders"
           },
-          {
-            "exists": {
-              "hasText": "Looking for offers"
-            }
-          },
-          {
-            "all": [
+          "require": {
+            "any": [
               {
                 "exists": {
-                  "hasTextContaining": "Finding offers"
+                  "hasIdSuffix": "looking_for_order_progress_bar"
                 }
               },
               {
-                "any": [
+                "exists": {
+                  "hasText": "Looking for offers"
+                }
+              },
+              {
+                "all": [
                   {
                     "exists": {
-                      "hasTextContaining": "Zone offer wait"
+                      "hasTextContaining": "Finding offers"
                     }
                   },
                   {
-                    "exists": {
-                      "hasIdSuffix": "running_total_pay"
-                    }
+                    "any": [
+                      {
+                        "exists": {
+                          "hasTextContaining": "Zone offer wait"
+                        }
+                      },
+                      {
+                        "exists": {
+                          "hasIdSuffix": "running_total_pay"
+                        }
+                      }
+                    ]
                   }
                 ]
               }
             ]
           }
-        ]
-      },
+        },
+        {
+          "comment": "Branch 1 (#1669, DoorDash 8.107.10): the same screen drawn without its 'Finding offers' card. What is left is the `legacy_lfo_screen` host and its button row ('Dash Preferences', 'Safety tools', 'Open Settings', 'Help'), with the 'This dash' pill when the pill has drawn. The anchor is one node: `legacy_lfo_screen` whose own subtree carries 'Dash Preferences'. Rejects: `offline_screen` (the start-of-shift transition draws both hosts in one frame, and that frame is not yet online) and `side_nav_compose_view` (the drawer open over this screen belongs to the drawer rule). No idleSurface: a card-less frame does not show that no order is in progress. The rule-level parse applies unchanged; its waitTimeEstimate arms resolve null here because no card is drawn.",
+          "reject": [
+            {
+              "exists": {
+                "hasIdSuffix": "offline_screen"
+              }
+            },
+            {
+              "exists": {
+                "hasIdSuffix": "side_nav_compose_view"
+              }
+            }
+          ],
+          "require": {
+            "exists": {
+              "all": [
+                {
+                  "hasIdSuffix": "legacy_lfo_screen"
+                },
+                {
+                  "hasAnyText": "Dash Preferences"
+                }
+              ]
+            }
+          }
+        }
+      ],
       "parse": {
         "as": "idle",
         "fields": {
@@ -846,6 +883,18 @@
                 "read": "text",
                 "transform": {
                   "stripPrefix": "est. "
+                }
+              },
+              // #1669: 8.107.10 puts a clickable, text-less info View between the label and its
+              // value, so sibling(1) above lands on the View. The value is the next text in
+              // document order; the regex accepts only a wait shape ("1-2 min", "<1 min", "1 hr").
+              {
+                "textAfterLabel": "Zone offer wait",
+                "transform": {
+                  "regex": {
+                    "pattern": "^(<?\\d{1,2}(?:-\\d{1,2})? (?:min|hr))$",
+                    "group": 1
+                  }
                 }
               }
             ]
@@ -979,6 +1028,13 @@
               }
             ]
           }
+        },
+        // #1668: the start-of-shift transition draws the offline home and the waiting-for-offer
+        // host (`legacy_lfo_screen`) in one frame. That frame is not offline.
+        {
+          "exists": {
+            "hasIdSuffix": "legacy_lfo_screen"
+          }
         }
       ],
       "require": {
@@ -988,6 +1044,12 @@
           // main button's whole label, "Dash" (online it reads "Return to Dash"; hasText is a
           // whole-label match). The old "Earnings Mode Switcher" stays as an alternative: before
           // 8.106.9 it appeared only on the offline home.
+          // #1668: 8.107.10 often draws the offline home without its Dash button. The third
+          // alternative is the hero stat "Avg. offer wait" inside `offline_screen` (one node: the
+          // host whose own subtree carries the label). This is positive offline evidence, never a
+          // claim from an absence (#857): in that slot the online home draws "You're dashing now" /
+          // "Return to Dash" instead. It must stay scoped to `offline_screen`, because the online
+          // zone-switch sheet (side nav drawer) also reads "Avg. offer wait".
           {
             "exists": {
               "any": [
@@ -996,6 +1058,16 @@
                 },
                 {
                   "hasDesc": "Earnings Mode Switcher"
+                },
+                {
+                  "all": [
+                    {
+                      "hasIdSuffix": "offline_screen"
+                    },
+                    {
+                      "hasAnyText": "Avg. offer wait"
+                    }
+                  ]
                 }
               ]
             }
