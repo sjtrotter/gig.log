@@ -52,23 +52,140 @@
     {
       "id": "doordash.screen.earnings",
       "priority": 93,
-      "require": {
-        "all": [
-          {
-            "allTextContainsAll": [
-              "earnings",
-              "this week"
-            ]
-          },
-          {
-            "allTextContainsAny": [
-              "past weeks",
-              "balance",
-              "crimson"
+      "comment": "#1670: the dasher's earnings pages, recognize-only (no parse, no state). DoorDash 8.107.10 redrew them ('Earnings history', 'Weekly goal'), and the old require needed 'past weeks', 'balance' or 'crimson'. The 'balance' and 'crimson' alternatives are removed: they could claim a banking frame that `sensitive.known` misses. `sensitive.known` (priority 0, non-overrideable) runs before this rule; `sensitive.catchall` (999, overrideable) runs after it, and the field pull shows the catchall firing on this same weekly page when banking-shaped text scrolls in. So reject 1 is a COPY of `sensitive.catchall`'s `allTextContainsAny` list: any frame carrying one of those terms falls through to the catchall and is blocked. The list now exists twice (CLAUDE.md principle 5); `EarningsCatchallParityTest` fails when the two differ, so change both together. Reject 2 keeps the dash-end summary and the mid-dash 'This dash so far' sheet with their own rules (`dash_summary` is the sole reported-earnings source). Four branches: the old page, the 8.107.10 weekly page, the week detail and the shift detail.",
+      "reject": [
+        {
+          "allTextContainsAny": [
+            "Bank Account",
+            "Routing Number",
+            "Social Security",
+            "Account number",
+            "Verify Identity",
+            "Debit card",
+            "Card status",
+            "Lock card",
+            "View card details",
+            "Linked accounts",
+            "Statements & documents",
+            "Emergency contact details",
+            "Crimson",
+            "Biometric",
+            "Available Balance",
+            "Direct deposit",
+            "Withdraw",
+            "Expiry",
+            "CVV",
+            "Enter the code we sent",
+            "transfer was initiated",
+            "t=completed_view"
+          ]
+        },
+        {
+          "exists": {
+            "any": [
+              {
+                "hasText": "Dash summary"
+              },
+              {
+                "hasText": "This dash so far"
+              }
             ]
           }
-        ]
-      }
+        }
+      ],
+      "branches": [
+        {
+          "comment": "Old page (before 8.107.10).",
+          "require": {
+            "all": [
+              {
+                "allTextContainsAll": [
+                  "earnings",
+                  "this week"
+                ]
+              },
+              {
+                "allTextContainsAny": [
+                  "past weeks"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "comment": "8.107.10 weekly page: the `earnings_screen` host with its 'Earnings history' list.",
+          "require": {
+            "all": [
+              {
+                "exists": {
+                  "hasIdSuffix": "earnings_screen"
+                }
+              },
+              {
+                "exists": {
+                  "hasText": "Earnings history"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "comment": "8.107.10 week detail: the `earnings_recycler_view` list with its 'Completed deliveries' row.",
+          "require": {
+            "all": [
+              {
+                "exists": {
+                  "hasIdSuffix": "earnings_recycler_view"
+                }
+              },
+              {
+                "exists": {
+                  "hasText": "Completed deliveries"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "comment": "8.107.10 shift detail: the shift's stat labels plus its earnings mode.",
+          "require": {
+            "all": [
+              {
+                "exists": {
+                  "hasText": "Start Time"
+                }
+              },
+              {
+                "exists": {
+                  "hasText": "End Time"
+                }
+              },
+              {
+                "exists": {
+                  "hasText": "Dash time"
+                }
+              },
+              {
+                "exists": {
+                  "hasText": "Deliveries"
+                }
+              },
+              {
+                "exists": {
+                  "any": [
+                    {
+                      "hasText": "Earn per offer"
+                    },
+                    {
+                      "hasText": "Earn by time"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      ]
     },
     {
       "id": "doordash.screen.help",

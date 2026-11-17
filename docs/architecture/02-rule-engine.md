@@ -160,9 +160,44 @@ ids are also on both homes. What tells them apart is the main button's whole lab
 Dash` online, with `You're dashing now` above it. `idle_map` now requires the side menu plus either the exact `Dash`
 label or the old `Earnings Mode Switcher` (offline-only before 8.106.9), and rejects `You're dashing now` beside
 `Return to dash`. The earnings mode is read when shown and is otherwise null; nothing requires it, since some zones
-have no such mode. An offline-home frame still drawing, without its button, stays UNKNOWN: one recognised frame
-ends the shift. `on_dash_map` and `waiting_for_offer` keep their `Earnings Mode Switcher` reject, inert on 8.106.9;
-adding `Earn by time` there would reject the online home.
+have no such mode. An offline-home frame still drawing, without its button, stayed UNKNOWN until #1668 (below): one
+recognised frame ends the shift. `on_dash_map` and `waiting_for_offer` keep their `Earnings Mode Switcher` reject,
+inert on 8.106.9; adding `Earn by time` there would reject the online home.
+
+**DoorDash 8.107.10 re-anchors (#1668, #1669, #1670; fielded 2026-11-15/16).**
+- `idle_map` (#1668). 8.107.10 often draws the offline home without its `Dash` button, so the #1527 anchor missed it.
+  A third alternative is the hero stat `Avg. offer wait` inside `offline_screen`, as one node (the host whose own
+  subtree carries the label). That is positive offline evidence (#857): in that slot the online home draws `You're
+  dashing now` / `Return to Dash`. It must stay scoped to `offline_screen`, because the online zone-switch sheet
+  (`side_nav_drawer`) also reads `Avg. offer wait`. A rule-level reject on `legacy_lfo_screen` keeps the
+  start-of-shift frame that draws both hosts UNKNOWN (negative corpus). `sessionType` stays null on 8.107.10: no
+  replacement for the `Time mode on/off` descriptions exists. **Not fixed:** the frames right after End dash carry
+  only chrome the online home shares (no stat, no button), so they stay UNKNOWN and the shift end can still land
+  about 10 s late; #1668 stays open for that.
+- `waiting_for_offer` (#1669). 8.107.10 often draws the screen without its `Finding offers` card. The rule now has
+  two branches. Branch 0 is the old require verbatim and the only one that declares `idleSurface: no_orders` (moved
+  off the rule level, since a branch inherits a rule-level surface and cannot null it). Branch 1 requires one node,
+  `legacy_lfo_screen` whose subtree carries `Dash Preferences`, and rejects `offline_screen` (the start-of-shift
+  frame) and `side_nav_compose_view` (the open drawer). Both inherit `flow: idle`, `modeHint: online` and the one
+  rule-level parse, so the `sessionPay` read (and its `This dash` conjunct) has one definition. `waitTimeEstimate`
+  gained a third arm, `textAfterLabel: "Zone offer wait"` through an anchored wait-shape regex, because 8.107.10
+  puts a text-less clickable info View between the label and its value; on branch 1 every wait arm resolves null.
+  The shadow check candidate (`shadow-check.json5`) stays a copy of the pre-#1669 rule; only its `redact` is pinned
+  to the live twin.
+- `earnings` (#1670), recognize-only. 8.107.10 redrew the pages (`Earnings history`, `Weekly goal`), and the old
+  require needed `past weeks`, `balance` or `crimson`. The `balance` and `crimson` alternatives are removed (they could
+  claim a banking frame `sensitive.known` misses). Four branches: the old page, the weekly page (`earnings_screen` +
+  `Earnings history`), the week detail (`earnings_recycler_view` + `Completed deliveries`) and the shift detail
+  (`Start Time`, `End Time`, `Dash time`, `Deliveries` and an earnings-mode label). The rule (93) runs before
+  `sensitive.catchall` (999, overrideable), and DoorDash scrolls banking-shaped text onto the weekly page, so its
+  first rule-level reject is a copy of the catchall's `allTextContainsAny` list: such a frame falls through and is
+  blocked. The list exists twice; `EarningsCatchallParityTest` pins the copy byte for byte and in order, and checks
+  that a weekly page with any catchall term added classifies sensitive. A second reject keeps `Dash summary` and
+  `This dash so far` with their own rules (`dash_summary` is the sole reported-earnings source).
+
+`DoorDashHome8107ReanchorTest` pins the state the two home rules claim (branch 1 never declares `no_orders`). The
+`waiting_for_offer/` and `idle_map/` corpus folders are past the pruner's 15-variant cap, so their 8.107.10 fixtures
+were placed by hand (the PR #1038 precedent).
 **Node predicates over the #1147 fields** (the TalkBack-study node semantics; see
 `01-sensor-pipelines.md` "Node model fields"): `hasPaneTitle`/`hasPaneTitleContaining`,
 `hasRoleDescription`, `hasClickActionLabel`/`hasClickActionLabelContaining`,

@@ -146,8 +146,11 @@ class RuleCompilerTest {
         val asset = File(root, "core/pipeline/build/generated/assets/importMatchersRules/rules/doordash.json")
         val screens = Json.parseToJsonElement(asset.readText()).jsonObject.getValue("screens").jsonArray
         val rules = RuleCompiler.compileRules<UiNode>(screens, RuleContext.SCREEN, "doordash")
-        assertTrue(rules.single { it.id == "doordash.screen.waiting_for_offer" }.branches
-            .all { it.idleSurface == IdleSurface.NO_ORDERS })
+        // #1669: the card branch marks no orders; the card-less 8.107.10 branch declares no idle surface.
+        assertEquals(
+            listOf(IdleSurface.NO_ORDERS, null),
+            rules.single { it.id == "doordash.screen.waiting_for_offer" }.branches.map { it.idleSurface },
+        )
         assertTrue(rules.single { it.id == "doordash.screen.navigation_generic" }.branches
             .all { it.idleSurface == null })
         assertEquals(setOf("doordash.screen.waiting_for_offer"), rules.filter { rule ->

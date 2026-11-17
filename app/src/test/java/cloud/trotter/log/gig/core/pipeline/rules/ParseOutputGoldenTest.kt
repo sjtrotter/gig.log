@@ -187,7 +187,6 @@ class ParseOutputGoldenTest {
     private val knownUncoveredIntents = setOf(
         // ---- DoorDash — rules added from triage/synthetic fixtures, no capture yet ----
         "doordash:dropoff_pre_arrival_completion",
-        "doordash:earnings",
         "doordash:pickup_picked_up",
         "doordash:pickup_pre_arrival_multi",
         "doordash:pickup_verify",

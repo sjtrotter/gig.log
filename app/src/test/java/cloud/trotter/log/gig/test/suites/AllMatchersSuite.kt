@@ -16,12 +16,14 @@ import cloud.trotter.log.gig.core.pipeline.rules.UberTripRadarBoardRedactTest
 import cloud.trotter.log.gig.core.pipeline.rules.CurrencyShapePinTest
 import cloud.trotter.log.gig.core.pipeline.rules.DashSummaryReanchorTest
 import cloud.trotter.log.gig.core.pipeline.rules.DeliverySummaryReanchorTest
+import cloud.trotter.log.gig.core.pipeline.rules.DoorDashHome8107ReanchorTest
 import cloud.trotter.log.gig.core.pipeline.rules.ClickRulesetTest
 import cloud.trotter.log.gig.core.pipeline.rules.DefaultRulesIntegrationTest
 import cloud.trotter.log.gig.core.pipeline.rules.ChatComposeRedactionTest
 import cloud.trotter.log.gig.core.pipeline.rules.DropoffBannerRedactParityTest
 import cloud.trotter.log.gig.core.pipeline.rules.DropoffGiftSheetRecognitionTest
 import cloud.trotter.log.gig.core.pipeline.rules.DropoffSheetRedactionParityTest
+import cloud.trotter.log.gig.core.pipeline.rules.EarningsCatchallParityTest
 import cloud.trotter.log.gig.core.pipeline.rules.GoPuffRecognitionTest
 import cloud.trotter.log.gig.core.pipeline.rules.PickupWaitArrivalRecognitionTest
 import cloud.trotter.log.gig.core.pipeline.rules.ReceiptAnchorTest
@@ -223,5 +225,7 @@ import org.junit.runners.Suite
     CurrencyShapePinTest::class,
     PickupPreArrivalStoreNameTest::class,
     PickupInstructionBodyRedactTest::class,
+    DoorDashHome8107ReanchorTest::class,
+    EarningsCatchallParityTest::class,
 )
 class AllMatchersSuite
