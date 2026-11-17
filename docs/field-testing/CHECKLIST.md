@@ -84,6 +84,8 @@ Five items the dev confirmed on 2026-10-07. Each full item appears once, with it
 - [A receipt pays a delivery only on proof (#1598)](checklist/open/1598-receipt-pays-only-on-proof.md)
 - [A total offer card whose pay reads with a trailing plus is recorded (#1604)](checklist/open/1604-trailing-plus-pay-offer-recorded.md)
 - [A saved receipt is matched to its deliveries (#1599)](checklist/open/1599-match-a-saved-receipt.md)
+- [Going offline is seen on the offline home drawn without its Dash button (#1668)](checklist/open/1668-offline-home-without-dash-button.md)
+- [The waiting-for-offers screen is recognized without its "Finding offers" card (#1669)](checklist/open/1669-waiting-without-finding-offers-card.md)
 
 - [🆕 NEW — after a GPS dash, the delivery drill-down's rows carry an arrival odometer and…](checklist/open/1310-after-a-gps-dash-the-delivery-drill-down-s-rows.md)
 - [🆕 NEW — a 2-drop job's rows never exceed its odometer span and never show negative…](checklist/open/1108-a-2-drop-job-s-rows-never-exceed-its-odometer-span.md)
