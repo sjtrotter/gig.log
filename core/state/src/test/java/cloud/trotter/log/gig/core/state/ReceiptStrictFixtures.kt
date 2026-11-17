@@ -147,6 +147,8 @@ internal class ReceiptFold(start: PlatformRegion, private var flow: Flow = start
     var decisions: RegionDecisions = RegionDecisions.NONE
     val events = mutableListOf<AppEvent>()
     val keys = mutableListOf<Pair<AppEventType, String?>>()
+    /** Every effect each step's diff emitted, before the idempotency filter, paired with the step's timestamp. */
+    val effects = mutableListOf<Pair<Long, AppEffect>>()
     private val fired = mutableSetOf<String>()
 
     fun step(obs: Observation): ReceiptFold {
@@ -158,11 +160,12 @@ internal class ReceiptFold(start: PlatformRegion, private var flow: Flow = start
         )
         region = stepped.region
         decisions = stepped.decisions
-        val logged = RS.effectMap
-            .diff(
-                RS.appState(prevRegion, prevFlow), RS.appState(region, nextFlow), obs,
-                StepDecisions(mapOf(Platform.DoorDash to decisions)),
-            )
+        val diffed = RS.effectMap.diff(
+            RS.appState(prevRegion, prevFlow), RS.appState(region, nextFlow), obs,
+            StepDecisions(mapOf(Platform.DoorDash to decisions)),
+        )
+        effects += diffed.map { obs.timestamp to it }
+        val logged = diffed
             .filterIsInstance<AppEffect.LogEvent>()
             // The engine's durable idempotency: a key already fired is dropped.
             .filter { it.effectKeyOverride == null || fired.add(it.effectKeyOverride) }
