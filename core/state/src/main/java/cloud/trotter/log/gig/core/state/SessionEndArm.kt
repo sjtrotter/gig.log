@@ -3,6 +3,7 @@ package cloud.trotter.log.gig.core.state
 import cloud.trotter.log.gig.domain.pipeline.Observation
 import cloud.trotter.log.gig.domain.state.DestructiveKind
 import cloud.trotter.log.gig.domain.state.Flow
+import cloud.trotter.log.gig.domain.state.Mode
 import cloud.trotter.log.gig.domain.state.ParsedFields
 import cloud.trotter.log.gig.domain.state.PendingDestructive
 import cloud.trotter.log.gig.domain.state.PlatformRegion
@@ -95,7 +96,11 @@ internal fun Task.honoredRetireInstant(since: Long): Long =
  * commit forward. The end may be delayed to the retire's own deadline, so a contradicting
  * `task:unassigned` frame the retire would still have seen can still disown it.
  */
-internal fun PlatformRegion.armSessionEndGrace(at: Long, policy: TransitionPolicy): PlatformRegion {
+internal fun PlatformRegion.armSessionEndGrace(
+    at: Long,
+    policy: TransitionPolicy,
+    byTap: Boolean = false,
+): PlatformRegion {
     if (session == null || pendingDestructive?.kind == DestructiveKind.SESSION_END) return this
     val absorbed = absorbableRetire()
     val candidate = at + policy.gracePeriodMs(platform)
@@ -107,6 +112,7 @@ internal fun PlatformRegion.armSessionEndGrace(at: Long, policy: TransitionPolic
             absorbedRetireSince = absorbed?.since,
             absorbedRetireDeadline = absorbed?.deadline,
             wakeId = wakeId,
+            armedByTap = byTap,
         )
     }
 }
@@ -117,50 +123,82 @@ internal fun PlatformRegion.armSessionEndGrace(at: Long, policy: TransitionPolic
  * A shift that earned nothing gets no platform summary, so the end used to wait for the offline home,
  * which can render late or in a shape no rule claims. The confirm tap (a click whose rule declares
  * [SessionIntent.END_SHIFT_CONFIRM]; the tap that only OPENS the confirm sheet must not, because the
- * dasher can still cancel there) arms the same non-authoritative grace the offline edge arms. The click
- * does not move mode: a click records intent.
+ * dasher can still cancel there) arms the same non-authoritative grace the offline edge arms, marked
+ * [PendingDestructive.armedByTap]. The click does not move mode: a click records intent.
  *
- * While that grace stands, an offer or task-flow screen cancels it ([yieldToWork]): the platform sent
- * work as the dasher tapped, and the dasher is still working. Any other screen leaves it alone, in
- * particular the timeline's online redraw that follows every confirm tap. The summary tightens it as
- * it tightens any standing `SESSION_END` (authoritative, `since` kept), and the offline home neither
- * re-arms it nor moves `since`.
+ * The mark exists because this end's cancel rule differs from the Offline edge's, whose pending a
+ * resume to Online cancels. While a tap-armed end stands:
+ *  - an offer or task-flow screen cancels it ([yieldToWork]): the platform sent work as the dasher
+ *    tapped, and the dasher is still working;
+ *  - no other frame moves the region toward Online ([holdsMode]), so the timeline's online redraw
+ *    that follows every confirm tap neither cancels it nor arms a Paused resume that would;
+ *  - a flow-less frame's lifecycle, driven only by the inherited acted flow, never clears or replaces
+ *    it ([keepThroughInheritedFlow]);
+ *  - its commit leaves the region Offline with pause safety cleared, from Paused too ([afterCommit]).
+ * The summary tightens it as it tightens any standing `SESSION_END` (authoritative, `since` kept), after
+ * which the summary's own rules apply; the offline home neither re-arms it nor moves `since`.
  */
 internal object EndShiftTap {
+
+    /** The standing tap-armed, still non-authoritative end, or null. */
+    private fun PlatformRegion.tapArmedEnd(): PendingDestructive? = pendingDestructive?.takeIf {
+        it.kind == DestructiveKind.SESSION_END && it.armedByTap && !it.authoritative
+    }
 
     /** True when [obs] is [region]'s own end-shift confirm click. */
     fun isConfirm(obs: Observation, region: PlatformRegion): Boolean =
         obs is Observation.Click && obs.platform == region.platform &&
             (obs.parsed as? ParsedFields.ClickFields)?.intent == SessionIntent.END_SHIFT_CONFIRM
 
-    /** Arm the grace at the tap; a no-op without a live session or with a `SESSION_END` already standing. */
+    /**
+     * Arm the grace at the tap; a no-op without a live session or with a `SESSION_END` already standing.
+     * A graced Paused resume armed before the tap is dropped: the dasher is ending the shift, not resuming it.
+     */
     fun arm(region: PlatformRegion, obs: Observation, policy: TransitionPolicy): PlatformRegion {
-        val armed = region.armSessionEndGrace(obs.timestamp, policy)
-        if (armed !== region) {
-            Timber.tag("StateMachine").d(
-                "End-shift tap armed SESSION_END grace: platform=${region.platform.wire} " +
-                    "session=${region.session?.sessionId} graceMs=${policy.gracePeriodMs(region.platform)}",
-            )
-        }
-        return armed
+        val armed = region.armSessionEndGrace(obs.timestamp, policy, byTap = true)
+        if (armed === region) return region
+        Timber.tag("StateMachine").d(
+            "End-shift tap armed SESSION_END grace: platform=${region.platform.wire} " +
+                "session=${region.session?.sessionId} graceMs=${policy.gracePeriodMs(region.platform)}",
+        )
+        return armed.copy(pendingModeResume = null)
     }
 
     /**
-     * A non-authoritative `SESSION_END` yields to work on screen: an offer or a task-flow screen
-     * cancels it. Offline that already happens on the mode edge (the frame implies Online); this
-     * covers the tap-armed grace, which stands while the region is still Online or Paused. An
-     * authoritative (summary-armed) pending keeps its own cancel rule (a task flow, in the task
-     * lifecycle). Runs after lazy expiry, so a frame past the deadline finds the shift already ended.
+     * A tap-armed end yields to work on screen: an offer or a task-flow screen cancels it. Runs after
+     * lazy expiry, so a frame past the deadline finds the shift already ended.
      */
     fun yieldToWork(region: PlatformRegion, obs: Observation): PlatformRegion {
-        val pend = region.pendingDestructive ?: return region
-        if (pend.kind != DestructiveKind.SESSION_END || pend.authoritative) return region
+        region.tapArmedEnd() ?: return region
         val flow = (obs as? Observation.Screen)?.flow ?: return region
         if (flow != Flow.OfferPresented && !flow.isTaskFlow()) return region
         Timber.tag("StateMachine").d(
-            "Non-authoritative SESSION_END cancelled by ${flow.wire} screen: platform=${region.platform.wire} " +
+            "Tap-armed SESSION_END cancelled by ${flow.wire} screen: platform=${region.platform.wire} " +
                 "session=${region.session?.sessionId}",
         )
         return region.copy(pendingDestructive = null)
     }
+
+    /** True when a tap-armed end stands and [impliedMode] would move a Paused or Offline region Online. */
+    fun holdsMode(region: PlatformRegion, impliedMode: Mode?): Boolean =
+        impliedMode == Mode.Online && region.mode != Mode.Online && region.tapArmedEnd() != null
+
+    /**
+     * A flow-less frame (the timeline's redraw, the tap itself) steps the lifecycle on the INHERITED acted
+     * flow: a phased task's update clears the destructive slot and a receipt replaces it with a retire.
+     * Neither is evidence about the end, so the tap-armed end that stood [before] the lifecycle is kept.
+     */
+    fun keepThroughInheritedFlow(
+        before: PlatformRegion,
+        after: PlatformRegion,
+        obs: Observation.FlowObservation,
+    ): PlatformRegion {
+        if (obs.flow != null || after.session == null) return after
+        val end = before.tapArmedEnd() ?: return after
+        return if (after.pendingDestructive == end) after else after.copy(pendingDestructive = end)
+    }
+
+    /** The committed end of a tap-armed pending leaves the region Offline, pause safety cleared. */
+    fun afterCommit(pending: PendingDestructive?, ended: PlatformRegion): PlatformRegion =
+        if (pending?.armedByTap == true) ended.copy(mode = Mode.Offline, pauseSafety = null) else ended
 }

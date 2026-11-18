@@ -11,16 +11,20 @@ import cloud.trotter.log.gig.domain.state.AppState
 import cloud.trotter.log.gig.domain.state.DestructiveKind
 import cloud.trotter.log.gig.domain.state.Flow
 import cloud.trotter.log.gig.domain.state.FlowRegion
+import cloud.trotter.log.gig.domain.state.Job
 import cloud.trotter.log.gig.domain.state.Mode
 import cloud.trotter.log.gig.domain.state.ParsedFields
 import cloud.trotter.log.gig.domain.state.PendingDestructive
+import cloud.trotter.log.gig.domain.state.PendingWake
 import cloud.trotter.log.gig.domain.state.Platform
 import cloud.trotter.log.gig.domain.state.PlatformRegion
 import cloud.trotter.log.gig.domain.state.Regions
 import cloud.trotter.log.gig.domain.state.Session
 import cloud.trotter.log.gig.domain.state.SessionIntent
+import cloud.trotter.log.gig.domain.state.Task
 import cloud.trotter.log.gig.domain.state.TaskPhase
 import cloud.trotter.log.gig.domain.state.TaskSubFlow
+import cloud.trotter.log.gig.domain.state.mintWakeId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -43,10 +47,15 @@ class EndShiftTapTest {
     private val tap = 1_000_000L
     private val grace = policy.gracePeriodMs(platform)
 
-    private fun state(session: Session? = Session("shift", startedAt = 0L), mode: Mode = Mode.Online) = AppState(
+    private fun state(
+        session: Session? = Session("shift", startedAt = 0L),
+        mode: Mode = Mode.Online,
+        flow: Flow = Flow.Idle,
+        shape: (PlatformRegion) -> PlatformRegion = { it },
+    ) = AppState(
         regions = Regions(
-            flow = FlowRegion(flow = Flow.Idle, activePlatform = platform),
-            platforms = mapOf(platform to PlatformRegion(platform = platform, mode = mode, session = session)),
+            flow = FlowRegion(flow = flow, activePlatform = platform),
+            platforms = mapOf(platform to shape(PlatformRegion(platform = platform, mode = mode, session = session))),
         ),
     )
 
@@ -63,7 +72,8 @@ class EndShiftTapTest {
         flow = flow, modeHint = hint, parsed = parsed,
     )
 
-    private fun timeline(t: Long) = screen(t, Flow.Idle, Mode.Online)
+    /** The fielded timeline redraw: no flow, hint online. */
+    private fun timeline(t: Long) = screen(t, null, Mode.Online)
     private fun offlineHome(t: Long) = screen(t, Flow.Idle, Mode.Offline)
 
     private fun wake(pending: PendingDestructive, at: Long = pending.deadline) = Observation.Timeout(
@@ -74,14 +84,15 @@ class EndShiftTapTest {
     private fun stop(effects: List<AppEffect>): SessionStopPayload = effects.filterIsInstance<AppEffect.LogEvent>()
         .single { it.event.type == AppEventType.DASH_STOP }.event.payload as SessionStopPayload
 
-    private fun tapped(): AppState {
-        val armed = machine.step(state(), click(tap))
+    private fun tapped(from: AppState = state()): AppState {
+        val armed = machine.step(from, click(tap))
         val pending = requireNotNull(armed.newState.region().pendingDestructive)
         assertEquals(DestructiveKind.SESSION_END, pending.kind)
         assertFalse(pending.authoritative)
+        assertTrue(pending.armedByTap)
         assertEquals(tap, pending.since)
         assertEquals(tap + grace, pending.deadline)
-        assertEquals(Mode.Online, armed.newState.region().mode)
+        assertEquals(from.region().mode, armed.newState.region().mode)
         assertNotNull(armed.newState.region().session)
         assertTrue(armed.effects.none { it is AppEffect.LogEvent && it.event.type == AppEventType.DASH_STOP })
         return armed.newState
@@ -120,8 +131,12 @@ class EndShiftTapTest {
         val home = machine.step(armed, offlineHome(tap + 5_000L)).newState
         assertEquals(Mode.Offline, home.region().mode)
         assertEquals(before, home.region().pendingDestructive)
+        // A late online redraw after the home neither resumes the shift nor cancels the end.
+        val late = machine.step(home, timeline(tap + 6_000L)).newState
+        assertEquals(Mode.Offline, late.region().mode)
+        assertEquals(before, late.region().pendingDestructive)
 
-        val commit = machine.step(home, wake(before))
+        val commit = machine.step(late, wake(before))
         assertNull(commit.newState.region().session)
         assertEquals(tap, stop(commit.effects).endedAt)
     }
@@ -203,9 +218,43 @@ class EndShiftTapTest {
     }
 
     @Test
-    fun `a tap while paused arms the end without moving mode`() {
-        val after = machine.step(state(mode = Mode.Paused), click(tap)).newState
-        assertEquals(tap, after.region().pendingDestructive?.since)
-        assertEquals(Mode.Paused, after.region().mode)
+    fun `paused, a tap and its redraw end the shift Offline with pause safety cleared`() {
+        val paused = state(mode = Mode.Paused) { region ->
+            region.copy(wakeSeq = 5L, pauseSafety = PendingWake(tap + 3_600_000L, PlatformRegion(platform, wakeSeq = 4L).mintWakeId().second))
+        }
+        val armed = tapped(paused)
+        val pending = requireNotNull(armed.region().pendingDestructive)
+        // The redraw arms no resume, and past the 8 s resume window it still has not cancelled the end.
+        val redraw = machine.step(armed, timeline(tap + 350L)).newState
+        assertEquals(Mode.Paused, redraw.region().mode)
+        assertNull(redraw.region().pendingModeResume)
+        val later = machine.step(redraw, timeline(tap + policy.pauseResumeGraceMs(platform) + 400L)).newState
+        assertEquals(Mode.Paused, later.region().mode)
+        assertEquals(pending, later.region().pendingDestructive)
+
+        val commit = machine.step(later, wake(pending))
+        val region = commit.newState.region()
+        assertNull(region.session)
+        assertEquals(Mode.Offline, region.mode)
+        assertNull(region.pauseSafety)
+        assertEquals(tap, stop(commit.effects).endedAt)
+    }
+
+    @Test
+    fun `the tap and the flow-less redraw keep the end over an outstanding task or a receipt`() {
+        val drop = Task("drop", "job", TaskPhase.DROPOFF, startedAt = 100L, arrivedAt = 200L)
+        val job = Job("job", offerStoreHint = emptyList(), parentOfferHash = null, startedAt = 100L, tasks = listOf(drop))
+        for (acted in listOf(Flow.TaskDropoffArrived, Flow.PostTask)) {
+            val working = state(flow = acted) { it.copy(activeJob = job, activeTask = drop, lastActedFlow = acted) }
+            val armed = tapped(working)
+            val pending = requireNotNull(armed.region().pendingDestructive)
+            val redraw = machine.step(armed, timeline(tap + 350L)).newState
+            assertEquals(acted.wire, pending, redraw.region().pendingDestructive)
+
+            val commit = machine.step(redraw, wake(pending))
+            assertNull(acted.wire, commit.newState.region().session)
+            assertEquals(acted.wire, Mode.Offline, commit.newState.region().mode)
+            assertEquals(acted.wire, tap, stop(commit.effects).endedAt)
+        }
     }
 }

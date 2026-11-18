@@ -313,17 +313,24 @@ dash) arms the same non-authoritative `SESSION_END` the Online→Offline edge ar
 deadline = `since + gracePeriodMs`, a fresh `WakeId`, and the same `absorbableRetire` absorption. The
 timeline's End dash only opens that sheet, where the dasher can still go back, so its rule carries the
 informational `open_end_dash`. The click does not move mode: the region stays Online (or Paused) while the grace
-stands. **Cancel rule:** an offer or task-flow SCREEN cancels a non-authoritative `SESSION_END`
-(`EndShiftTap.yieldToWork`, after lazy expiry): DoorDash often sends an offer as the dasher taps, and the dasher
-is still working. Offline that was already the mode edge's job (the frame implies Online), so the rule changes
-nothing there; it exists for the tap-armed grace. No field marks the pending as tap-armed, because the cancel
-rule does not need one. The timeline's online redraw, which lands about 0.35 s after every confirm tap, is a
-same-mode Idle frame and must NOT cancel: it would undo every tap. Inside the window the summary tightens the
-standing pending as it tightens any (authoritative, short deadline, `since` kept, so the end is the tap), and
-the offline home neither re-arms nor moves `since`. The commit (wake or lazy expiry) ends the shift at the tap
-through `endSession`, which leaves the region Offline; `diffMode` emits `DASH_STOP` (`early_offline`,
-`endedAt` = the tap), and the #1311 post-end window then graces any hint-only redraw. An offer after the commit
-starts a new shift on the existing path. The intent is not load-validated yet (click intents are #1322).
+stands. The pending is marked `PendingDestructive.armedByTap`, because its cancel rule differs from the Offline
+edge's (whose pending any resume to Online cancels); `EndShiftTap` owns the rule, for a tap-armed end that the
+summary has not made authoritative:
+
+- An offer or task-flow SCREEN cancels it (`yieldToWork`, after lazy expiry): DoorDash often sends an offer as
+  the dasher taps, and the dasher is still working.
+- No other frame moves the region toward Online (`holdsMode`). The timeline's online redraw lands about 0.35 s
+  after every confirm tap with no flow; it must neither cancel the end nor, from Paused, arm the 8 s resume whose
+  commit would cancel the 10 s end. A graced Paused resume standing at the tap is dropped.
+- A flow-less frame (the tap, the redraw) steps the lifecycle on the inherited acted flow, where a phased task's
+  update clears the destructive slot and a receipt replaces it with a retire; the end that stood before the
+  lifecycle is kept (`keepThroughInheritedFlow`).
+- Its commit leaves the region Offline with `pauseSafety` cleared, from Paused too (`afterCommit`).
+
+Inside the window the summary tightens the standing pending as it tightens any (authoritative, short deadline,
+`since` kept, so the end is the tap), and the offline home neither re-arms nor moves `since`. The commit (wake or
+lazy expiry) ends the shift at the tap; `diffMode` emits `DASH_STOP` (`early_offline`, `endedAt` = the tap), and
+the #1311 post-end window then graces any hint-only redraw. An offer after the commit starts a new shift on the existing path. The intent is not load-validated yet (click intents are #1322).
 
 **Graces.** Destructive commits are graced through the unified `pendingDestructive` slot and woken
 by `GRACE_COMMIT` timers (#431), including short authoritative windows for the dash summary AND the

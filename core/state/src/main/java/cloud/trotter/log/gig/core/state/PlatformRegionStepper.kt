@@ -373,6 +373,10 @@ class PlatformRegionStepper @Inject constructor() {
             // Click — records user intent, does NOT drive mode
             flowObs is Observation.Click -> current.copy(lastObservedAt = obs.timestamp)
 
+            // #1668: under a tap-armed end only an offer or task screen (which cancelled it above) moves
+            // the region Online; the timeline's online redraw neither resumes a Paused shift nor cancels.
+            EndShiftTap.holdsMode(current, impliedMode) -> current.copy(lastObservedAt = obs.timestamp)
+
             // #605: a screen-implied resume OUT of Paused is GRACED, not immediate.
             // DoorDash's pause sheet sits on the just-completed delivery summary, so
             // frames flap paused ↔ online; flipping on the first online frame re-mints
@@ -427,8 +431,11 @@ class PlatformRegionStepper @Inject constructor() {
         // lifecycle, not inside it.
         val afterRatings = updateRatings(afterMode, flowObs)
 
-        // Update session/job/task lifecycle based on flow changes
-        return updateLifecycle(sink, afterRatings, prevFlow, nextFlow, flowObs, policy)
+        // Update session/job/task lifecycle based on flow changes. #1668: a flow-less frame's inherited
+        // lifecycle never clears or replaces a tap-armed end.
+        return EndShiftTap.keepThroughInheritedFlow(
+            afterRatings, updateLifecycle(sink, afterRatings, prevFlow, nextFlow, flowObs, policy), flowObs,
+        )
     }
 
     // =========================================================================
@@ -1002,7 +1009,9 @@ class PlatformRegionStepper @Inject constructor() {
         timestamp: Long,
         observedAt: Long,
     ): PlatformRegion = when (kind) {
-        DestructiveKind.SESSION_END -> endSession(sink, region, timestamp, observedAt)
+        // #1668: a tap-armed end commits to Offline even from Paused.
+        DestructiveKind.SESSION_END ->
+            EndShiftTap.afterCommit(region.pendingDestructive, endSession(sink, region, timestamp, observedAt))
         // [timestamp] is the honest completion instant (the grace's `since`, #732); [observedAt] is
         // the frame that commits it, which is what a re-price decided here must be stamped with.
         DestructiveKind.TASK_RETIRE -> retireActiveTask(sink, region, timestamp, observedAt)
