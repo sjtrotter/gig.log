@@ -101,6 +101,9 @@ internal fun observeReceiptEvidence(
         totalIsOffer = parsed.receiptTotalIsOffer,
         possibleWorkSeq = region.possibleWorkSeq,
         observedAt = obs.timestamp,
+        firstSeenAt = next.firstSeenAt,
+        // A new record's snapshot; `trackJobReceiptRead` keeps a tracked record's first one across its revisions.
+        acceptSeqAtFirstSeen = region.acceptResolveSeq,
     )
     return trackJobReceiptRead(sink, region.copy(openReceiptEvidence = next), next.jobId, read)
 }

@@ -901,10 +901,13 @@ the decision all or nothing. With no `JOB_RECEIPT_SETTLED` in the log every row 
   (`STORE_MISSING`, `STORE_MISMATCH`); every read's rule declares its total the whole offer's pay (`SCOPE_UNDECLARED`,
   below); a read names the drop that completed last, and its latest record is the PAYING read (`NO_TERMINAL_READ`);
   every record attributed to the job agrees on the total (`READS_DISAGREE`: a part receipt or a tip change refuses,
-  never picks); no accept resolved after the job's own resolution stamp (`Job.ownAcceptSeq` against
-  `PlatformRegion.acceptResolveSeq`, never `acceptedAt`: `OTHER_ACCEPT`), no non-demoted pool entry presented between the
-  job's accept and its close (`POOLED_OFFER`), and none still waiting at a store of the job's drops, nor an ADD_ON entry
-  with no candidate store presented after the accept (`RIVAL_POOLED`); and no fresh presentation between the terminal
+  never picks); no other work could own the paying read, so each window ends at the paying record's FIRST sighting
+  (work that came after a read was on screen cannot own it): no accept resolved after the job's own resolution stamp and
+  before the paying read (the read's `acceptSeqAtFirstSeen` against `Job.ownAcceptSeq`, never `acceptedAt`:
+  `OTHER_ACCEPT`), no non-demoted pool entry presented after the job's accept and before the paying read
+  (`POOLED_OFFER`), and none presented before the paying read (however long before) still waiting at a store of the
+  job's drops, nor an ADD_ON entry with no candidate store presented after the accept and before the read
+  (`RIVAL_POOLED`); and no fresh presentation between the terminal
   drop's activation (`Job.dropoffActivatedSeq`) and the paying read (`LATE_FRAME`, which also covers #1598's late-frame
   guard for a post-close revision). Shares come from the paying revision alone: its itemization through
   `DropPayApportioner.apportion` only when its items sum to its own total in cents, else `evenSplitCents` in taskId
@@ -965,8 +968,8 @@ the decision all or nothing. With no `JOB_RECEIPT_SETTLED` in the log every row 
 - **Logging (P7).** INFO one line per decision (job id, drop count, cents, revision); DEBUG one line per refused
   candidate at the close with its `JobSettlementGap`; WARN on an apply refusal, ids only.
 - **Stated costs.** Strict by design, each measured on the developer's lifetime data before the build: a stack with an
-  offer presented mid-stack (2 of 20) and one whose next offer is accepted before the close (`OTHER_ACCEPT`, which a T2
-  close always is) stay on the sheet; so does a drop without an arrival or completion-steps witness (about 2 of 41) and
+  offer presented mid-stack before the receipt read (2 of 20) stays on the sheet (a next offer presented and accepted
+  over the receipt does not: a T2 close settles); so does a drop without an arrival or completion-steps witness (about 2 of 41) and
   every multi-offer job (manual in v1). The even split is the platform's own per-drop split only by chance; v1 states no
   tip/base split per drop (the lines' tip and base fields stay empty). A settled row's pay source reads "Receipt split"
   on the shift page (its basis is `DROP_SHARE`).

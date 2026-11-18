@@ -355,15 +355,18 @@ proof (`jobSettlementAt`, §5 "Whole-job settlement") is asked at three points: 
 receipt exit, the T1 retire, the T2 close, an abandon), `endSession`'s teardown, and each changed post-close read. The
 teardown asks on the PRE-flush region: `flushAtShiftEnd` empties the offer pool, which clause 10 reads, so the decision
 runs first (A5); the honored-retire maturity gate is read off the same pre-flush region. Two counters feed the proof:
-`acceptResolveSeq` (bumped wherever an accept resolves; a job keeps its own value as `Job.ownAcceptSeq` at its mint, so
-"another accept since" is processing order, never `acceptedAt`, which a pooled link sets to `min(leftAt, edge)`) and
+`acceptResolveSeq` (bumped wherever an accept resolves; a job keeps its own value as `Job.ownAcceptSeq` at its mint, and
+each tracked record snapshots it when FIRST seen, `JobReceiptRead.acceptSeqAtFirstSeen`, kept across its revisions, so
+"another accept before the paying read" is processing order, never `acceptedAt`, which a pooled link sets to
+`min(leftAt, edge)`; clause 10's pool windows end at the same first sighting) and
 the dropoff activation stamp (`Job.dropoffActivatedSeq`, `possibleWorkSeq` when each dropoff first becomes the active
 task, stamped by the step wrapper). The marker is cleared when another job becomes active (`closeSettlementWindow`,
 beside the #1033 R1 rule) and at `endSession`. **Ordering invariant:** `EffectMap.diffJobSettlement` runs after
 `diffDeliveryCompletion` and `diffReceiptEvidence`, so a `JOB_RECEIPT_SETTLED` always sequences after the same step's
 `DELIVERY_COMPLETED`s and `RECEIPT_OBSERVED` (`JobSettlementSessionTest` pins both); its key is the decision revision
 (`log:JOB_RECEIPT_SETTLED:<jobId>:r<n>`), and decisions travel in `RegionDecisions.jobSettlements`, never in region
-state. Stated cost: a T2 close always refuses (`OTHER_ACCEPT`: the closing accept itself resolved after the job's).
+state. A T2 close settles: the accept that closes the job resolved after the paying read was on screen, so it cannot
+own it.
 
 **A dash end ABSORBS a standing task retire (#1078) — it never discards it.** The destructive slot
 holds ONE pending, and both `SESSION_END` arm sites used to REPLACE whatever stood in it. Fielded

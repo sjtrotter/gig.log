@@ -45,7 +45,8 @@ class JobSettlementProofTest {
         declared: Boolean = true,
         seq: Long = 0,
         at: Long = 4_000L,
-    ) = JobReceiptRead(id, 1, subject, cents, pay, declared, seq, at)
+        acceptSeq: Long = 1,
+    ) = JobReceiptRead(id, 1, subject, cents, pay, declared, seq, at, firstSeenAt = at, acceptSeqAtFirstSeen = acceptSeq)
 
     private val t1 = drop("t1", "Alpha Burger #55", completedAt = 3_500L)
     private val t2 = drop("t2", "Beta Tacos #2", completedAt = null)
@@ -66,8 +67,7 @@ class JobSettlementProofTest {
         copies: List<Task> = job.tasks,
         minted: Set<String> = setOf("t1", "t2"),
         pool: List<PooledOffer> = emptyList(),
-        acceptSeq: Long = 1,
-    ) = jobSettlementAt(job, copies, minted, pool, acceptSeq, closedAt = 5_000L)
+    ) = jobSettlementAt(job, copies, minted, pool)
 
     private fun assertGap(gap: JobSettlementGap, proof: JobSettlementProof) =
         assertEquals(JobSettlementProof.Refused(gap), proof)
@@ -167,15 +167,20 @@ class JobSettlementProofTest {
         assertTrue(prove(job(reads = listOf(repeat, read()))) is JobSettlementProof.Proven)
     }
 
-    @Test fun `clause 10a - an accept resolved after the job's own resolution stamp`() {
-        assertGap(JobSettlementGap.OTHER_ACCEPT, prove(acceptSeq = 2))
+    @Test fun `clause 10a - an accept resolved between the job's own accept and the paying read`() {
+        assertGap(JobSettlementGap.OTHER_ACCEPT, prove(job(reads = listOf(read(acceptSeq = 2)))))
         assertGap(JobSettlementGap.OTHER_ACCEPT, prove(job(ownAccept = null)))
+        // The read's first-seen snapshot holds across its revisions; an accept after the read (a T2 close) cannot own it.
+        assertTrue(prove(job(reads = listOf(read(acceptSeq = 1).copy(revision = 3)))) is JobSettlementProof.Proven)
     }
 
-    @Test fun `clause 10b - a non-demoted pool entry presented between the accept and the close, any store`() {
+    @Test fun `clause 10b - a non-demoted pool entry presented between the accept and the paying read, any store`() {
         assertGap(JobSettlementGap.POOLED_OFFER, prove(pool = listOf(pooled(presentedAt = 3_200L, stores = setOf("store z")))))
         // A demoted entry (a decline inferred from the confirm sheet) is not a rival.
         assertTrue(prove(pool = listOf(pooled(3_200L, setOf("store z"), demoted = true))) is JobSettlementProof.Proven)
+        // Presented after the read was first seen (4 000): it cannot own the read, whatever its store.
+        val chain = StoreKeys.normalizedChain("Alpha Burger #55")
+        assertTrue(prove(pool = listOf(pooled(4_500L, setOf(chain)))) is JobSettlementProof.Proven)
     }
 
     @Test fun `A1 - an offer pooled BEFORE the accept at a store of the job's drops is a rival`() {
@@ -185,10 +190,9 @@ class JobSettlementProofTest {
         assertTrue(prove(pool = listOf(pooled(50L, setOf("store z")))) is JobSettlementProof.Proven)
     }
 
-    @Test fun `A1 - an ADD_ON entry with no candidate store presented after the accept is a rival`() {
-        // Presented after the close, so clause 10b's window does not catch it; its empty store set might be this job's.
-        assertGap(JobSettlementGap.RIVAL_POOLED, prove(pool = listOf(pooled(6_000L, emptySet(), scope = OfferScope.ADD_ON))))
-        assertTrue(prove(pool = listOf(pooled(6_000L, emptySet()))) is JobSettlementProof.Proven)
+    @Test fun `an ADD_ON entry with no candidate store counts only when presented before the paying read`() {
+        assertGap(JobSettlementGap.POOLED_OFFER, prove(pool = listOf(pooled(3_900L, emptySet(), scope = OfferScope.ADD_ON))))
+        assertTrue(prove(pool = listOf(pooled(6_000L, emptySet(), scope = OfferScope.ADD_ON))) is JobSettlementProof.Proven)
     }
 
     @Test fun `clause 11 - a presentation between the terminal drop's activation and the paying read`() {

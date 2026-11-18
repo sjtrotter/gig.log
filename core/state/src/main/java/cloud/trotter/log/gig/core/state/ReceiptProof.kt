@@ -102,9 +102,12 @@ internal sealed interface JobSettlementProof {
  *     platform that declares nothing never settles);
  *  8. a read names the last of the N drops to complete (`NO_TERMINAL_READ`); the latest such record is the PAYING read;
  *  9. every tracked record agrees on the total (`READS_DISAGREE`: a part receipt or a tip change refuses, never picks);
- *  10. no accept resolved after the job's own resolution stamp (`OTHER_ACCEPT`); no non-demoted pool entry presented
- *     between the job's accept and its close (`POOLED_OFFER`); no non-demoted pool entry still waiting at a store of
- *     the job's drops, nor an ADD_ON entry with no candidate store presented after the accept (`RIVAL_POOLED`, A1);
+ *  10. no other work could own the paying read, so every window ends at the paying record's FIRST sighting (work that
+ *     came after a read was on screen cannot own it): no accept resolved after the job's own resolution stamp and
+ *     before the paying read (`OTHER_ACCEPT`, the read's [JobReceiptRead.acceptSeqAtFirstSeen]); no non-demoted pool
+ *     entry presented after the job's accept and before the paying read (`POOLED_OFFER`); no non-demoted pool entry
+ *     presented before the paying read, whenever before, still waiting at a store of the job's drops, nor an ADD_ON
+ *     entry with no candidate store presented after the accept and before the read (`RIVAL_POOLED`, A1);
  *  11. no fresh presentation between the terminal drop's activation and the paying read (`LATE_FRAME`), which also
  *     covers the #1598 late-frame guard for a revision read after the close.
  *
@@ -119,8 +122,6 @@ internal fun jobSettlementAt(
     mintedTaskIds: Set<String>,
     /** The pool as the decision sees it; at a teardown, BEFORE the shift-end flush (A5). */
     offerPool: List<PooledOffer>,
-    acceptResolveSeq: Long,
-    closedAt: Long,
 ): JobSettlementProof {
     val reads = job.receiptReads ?: return refused(JobSettlementGap.READS_UNTRACKED)
     val offer = job.acceptedOffers.singleOrNull()?.takeIf { it.quoteBasis == OfferQuoteBasis.TOTAL }
@@ -156,11 +157,10 @@ internal fun jobSettlementAt(
     if (reads.any { it.totalCents != paying.totalCents }) return refused(JobSettlementGap.READS_DISAGREE)
 
     val ownAccept = job.ownAcceptSeq ?: return refused(JobSettlementGap.OTHER_ACCEPT)
-    if (acceptResolveSeq > ownAccept) return refused(JobSettlementGap.OTHER_ACCEPT)
-    val live = offerPool.filterNot { it.demoted }
-    if (live.any { it.offer.presentedAt > offer.acceptedAt && it.offer.presentedAt <= closedAt }) {
-        return refused(JobSettlementGap.POOLED_OFFER)
-    }
+    if (paying.acceptSeqAtFirstSeen > ownAccept) return refused(JobSettlementGap.OTHER_ACCEPT)
+    // Only work presented before the paying read was first seen can own it.
+    val live = offerPool.filter { !it.demoted && it.offer.presentedAt < paying.firstSeenAt }
+    if (live.any { it.offer.presentedAt > offer.acceptedAt }) return refused(JobSettlementGap.POOLED_OFFER)
     val chains = stores.values.map(StoreKeys::normalizedChain).toSet()
     val rival = live.any { e ->
         e.candidateStoreKeys.any { it in chains } ||

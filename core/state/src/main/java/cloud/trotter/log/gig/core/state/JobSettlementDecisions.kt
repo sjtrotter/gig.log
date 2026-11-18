@@ -34,8 +34,8 @@ import timber.log.Timber
  * in region state, so a replay rebuilds them with the transition.
  */
 
-/** The marker for [job] closing at [at] out of [region] (pre-close). [honored]: a teardown's honored active drop. */
-internal fun closedJobMarker(region: PlatformRegion, job: Job, at: Long, honored: Task? = null): ClosedJobSettlement {
+/** The marker for [job] closing out of [region] (pre-close). [honored]: a teardown's honored active drop. */
+internal fun closedJobMarker(region: PlatformRegion, job: Job, honored: Task? = null): ClosedJobSettlement {
     val active = region.activeTask?.takeIf { it.jobId == job.jobId }
     val activeCopy = if (honored != null && active?.taskId == honored.taskId) honored else active
     val recent = region.recentTasks.filter { it.jobId == job.jobId }
@@ -52,7 +52,6 @@ internal fun closedJobMarker(region: PlatformRegion, job: Job, at: Long, honored
         copies = copies,
         mintedTaskIds = minted,
         sessionId = region.session?.sessionId,
-        closedAt = at,
     )
 }
 
@@ -71,7 +70,7 @@ internal fun decideJobSettlement(
     if (prior?.withdrawn == true) return marker
     val jobId = marker.job.jobId
     return when (val proof = jobSettlementAt(
-        marker.job, marker.copies, marker.mintedTaskIds, region.offerPool, region.acceptResolveSeq, marker.closedAt,
+        marker.job, marker.copies, marker.mintedTaskIds, region.offerPool,
     )) {
         is JobSettlementProof.Proven -> {
             val decided = JobSettlementDecided(
@@ -135,7 +134,7 @@ private val NOT_CANDIDATE = setOf(
 
 /** The close-time ask (`completeActiveJob`): decide and return the marker the closed region keeps. */
 internal fun settleAtClose(sink: DecisionSink, region: PlatformRegion, job: Job, at: Long): ClosedJobSettlement =
-    decideJobSettlement(sink, closedJobMarker(region, job, at), region, at, atClose = true)
+    decideJobSettlement(sink, closedJobMarker(region, job), region, at, atClose = true)
 
 /**
  * #1601: record one receipt revision ([read], of [jobId]) on the job it is attributed to. While the job is live the
@@ -161,8 +160,12 @@ internal fun trackJobReceiptRead(
     return region.copy(closedJobSettlement = decideJobSettlement(sink, updated, region, read.observedAt, atClose = false))
 }
 
-private fun List<JobReceiptRead>.upsert(read: JobReceiptRead): List<JobReceiptRead> =
-    filterNot { it.evidenceId == read.evidenceId } + read
+/** The latest revision of each record replaces the last; the record's first-seen snapshot stays (clause 10). */
+private fun List<JobReceiptRead>.upsert(read: JobReceiptRead): List<JobReceiptRead> {
+    val first = firstOrNull { it.evidenceId == read.evidenceId }
+    val kept = if (first == null) read else read.copy(firstSeenAt = first.firstSeenAt, acceptSeqAtFirstSeen = first.acceptSeqAtFirstSeen)
+    return filterNot { it.evidenceId == read.evidenceId } + kept
+}
 
 /**
  * #1601: stamp [PlatformRegion.possibleWorkSeq] the first time each dropoff of the live job becomes the active task —

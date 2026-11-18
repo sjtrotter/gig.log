@@ -21,6 +21,10 @@ data class JobReceiptRead(
     /** [PlatformRegion.possibleWorkSeq] when this revision was read: the quiet-window reference (clause 11). */
     val possibleWorkSeq: Long,
     val observedAt: Long,
+    /** `obs.timestamp` when this record was FIRST seen: where clause 10's windows end (work after it cannot own it). */
+    val firstSeenAt: Long = observedAt,
+    /** [PlatformRegion.acceptResolveSeq] when this record was FIRST seen; kept across its revisions (clause 10). */
+    val acceptSeqAtFirstSeen: Long = 0,
 )
 
 /** The first clause of whole-job settlement's proof a job failed (#1601, `jobSettlementAt`), for the DEBUG line. */
@@ -58,8 +62,6 @@ data class ClosedJobSettlement(
     /** The drops whose `DELIVERY_COMPLETED` the close (or an earlier step) minted. */
     val mintedTaskIds: Set<String>,
     val sessionId: String?,
-    /** `obs.timestamp` of the close: the end of clause 10's presentation window. */
-    val closedAt: Long,
     /** The last emitted decision revision; 0 = none yet. */
     val revision: Int = 0,
     val decided: JobSettlementDecided? = null,

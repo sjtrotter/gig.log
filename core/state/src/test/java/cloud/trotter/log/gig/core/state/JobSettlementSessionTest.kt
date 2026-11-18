@@ -189,6 +189,26 @@ class JobSettlementSessionTest {
         assertTrue(fold.settlements().isEmpty())
     }
 
+    @Test fun `a T2 close - the next offer presented and accepted after the receipt read - settles`() {
+        val fold = ReceiptFold(stack())
+            .step(RS.postTask(collapsed(17.55), 4_000L))
+            .step(PF.card(5_000L, "x1", stores = listOf("Gamma Pizza (Main)")))
+            .step(PF.accept(5_100L))
+            .step(PF.pickup(5_200L, store = "Gamma Pizza #1"))
+        assertTrue("a new job was minted", fold.region.activeJob?.jobId != "J1")
+        val settled = fold.settlements().single()
+        assertEquals(lines("t1" to 878L, "t2" to 877L), settled.lines)
+    }
+
+    @Test fun `the same next offer presented BEFORE the receipt read refuses`() {
+        // Presented while the last drop was active, it left without an accept (pooled), and the read came after it.
+        val fold = ReceiptFold(stack())
+            .step(PF.card(3_600L, "x1", stores = listOf("Gamma Pizza (Main)")))
+            .step(RS.screen(Flow.TaskDropoffArrived, 3_700L))
+        closeOnExit(fold)
+        assertTrue(fold.settlements().isEmpty())
+    }
+
     @Test fun `a teardown decides on the pool BEFORE the shift-end flush (A5)`() {
         val read = JobReceiptRead("receipt:t2:3300", 1, "t2", 1755, null, totalIsOffer = true, possibleWorkSeq = 0, observedAt = 3_300L)
         fun end(pool: List<PooledOffer>) = ReceiptFold(stack(priorReads = listOf(read), pool = pool, lastActive = false)).step(

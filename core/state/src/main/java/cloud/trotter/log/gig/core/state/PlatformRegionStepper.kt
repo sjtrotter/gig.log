@@ -1157,7 +1157,7 @@ class PlatformRegionStepper @Inject constructor() {
         // #1601 (A5): a teardown's settlement is decided on the pool BEFORE the flush below empties it.
         live.activeJob?.let { job ->
             val honored = honoredAt?.let { at -> live.activeTask?.completedInline(at)?.copy(honoredRetireAt = at) }
-            decideJobSettlement(sink, closedJobMarker(live, job, observedAt, honored), live, observedAt, atClose = true)
+            decideJobSettlement(sink, closedJobMarker(live, job, honored), live, observedAt, atClose = true)
         }
         // #1119 S2: every offer still without an outcome gets one; the pool and any hold go with the shift.
         val region = flushAtShiftEnd(sink, live, observedAt)
