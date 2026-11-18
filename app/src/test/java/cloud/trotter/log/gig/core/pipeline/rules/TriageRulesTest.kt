@@ -3,6 +3,7 @@ package cloud.trotter.log.gig.core.pipeline.rules
 import cloud.trotter.log.gig.domain.model.accessibility.UiNode
 import cloud.trotter.log.gig.domain.model.notification.RawNotificationData
 import cloud.trotter.log.gig.domain.state.Flow
+import cloud.trotter.log.gig.domain.state.SessionIntent
 import cloud.trotter.log.gig.test.util.TestRulesetFactory
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
@@ -466,6 +467,33 @@ class TriageRulesTest {
             "complete_delivery",
             click(node(id = "complete_delivery_steps_button"), screenTarget = "dropoff_navigation"),
         )
+    }
+
+    // #1668: the confirm sheet's End dash is the stepper's end-shift intent; the timeline's End dash,
+    // which only opens that sheet, is not. Synthetic shape of the fielded click: a text-less button
+    // whose title is a child `textView_prism_button_title`.
+    private fun prismButton(title: String) = node(children = listOf(node(id = "textView_prism_button_title", text = title)))
+
+    @Test
+    fun `end_dash_confirm — the confirm tap carries the end-shift intent`() {
+        assertEquals(
+            SessionIntent.END_SHIFT_CONFIRM,
+            click(prismButton("End dash"), screenTarget = "end_dash_confirm"),
+        )
+    }
+
+    @Test
+    fun `end_dash_confirm — Go back, or the actions container holding both buttons, is not the end`() {
+        assertNull(click(prismButton("Go back"), screenTarget = "end_dash_confirm"))
+        val container = node(id = "prism_sheet_actions_container", children = listOf(prismButton("End dash"), prismButton("Go back")))
+        assertNull(click(container, screenTarget = "end_dash_confirm"))
+    }
+
+    @Test
+    fun `end_dash — the timeline tap that opens the sheet does not carry the end-shift intent`() {
+        val intent = click(node(text = "End dash"), screenTarget = "timeline")
+        assertEquals("open_end_dash", intent)
+        assertNotEquals(SessionIntent.END_SHIFT_CONFIRM, intent)
     }
 
     @Test

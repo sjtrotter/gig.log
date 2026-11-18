@@ -304,6 +304,27 @@ early-offline end. The active pickup the teardown force-stamps is excluded from 
 the end does not repair miles the open shift already accrued, nor split later shifts it absorbed: the stop fold
 keeps the odometer delta from the start.
 
+**The end-shift confirm tap ends the shift, graced (#1668).** A shift that earned nothing gets no dash summary,
+so the end used to wait for the offline home, which DoorDash 8.107.10 often renders in a shape no rule claims
+(11-16: the end landed 11 s late). The confirm tap is the earlier signal. A click whose rule declares
+`SessionIntent.END_SHIFT_CONFIRM` (`doordash.click.end_dash_confirm`, the "End your current dash" sheet's End
+dash) arms the same non-authoritative `SESSION_END` the Online→Offline edge arms, through the one armer
+`armSessionEndGrace` (`SessionEndArm.kt`): live session and no `SESSION_END` standing, `since` = the tap,
+deadline = `since + gracePeriodMs`, a fresh `WakeId`, and the same `absorbableRetire` absorption. The
+timeline's End dash only opens that sheet, where the dasher can still go back, so its rule carries the
+informational `open_end_dash`. The click does not move mode: the region stays Online (or Paused) while the grace
+stands. **Cancel rule:** an offer or task-flow SCREEN cancels a non-authoritative `SESSION_END`
+(`EndShiftTap.yieldToWork`, after lazy expiry): DoorDash often sends an offer as the dasher taps, and the dasher
+is still working. Offline that was already the mode edge's job (the frame implies Online), so the rule changes
+nothing there; it exists for the tap-armed grace. No field marks the pending as tap-armed, because the cancel
+rule does not need one. The timeline's online redraw, which lands about 0.35 s after every confirm tap, is a
+same-mode Idle frame and must NOT cancel: it would undo every tap. Inside the window the summary tightens the
+standing pending as it tightens any (authoritative, short deadline, `since` kept, so the end is the tap), and
+the offline home neither re-arms nor moves `since`. The commit (wake or lazy expiry) ends the shift at the tap
+through `endSession`, which leaves the region Offline; `diffMode` emits `DASH_STOP` (`early_offline`,
+`endedAt` = the tap), and the #1311 post-end window then graces any hint-only redraw. An offer after the commit
+starts a new shift on the existing path. The intent is not load-validated yet (click intents are #1322).
+
 **Graces.** Destructive commits are graced through the unified `pendingDestructive` slot and woken
 by `GRACE_COMMIT` timers (#431), including short authoritative windows for the dash summary AND the
 delivery receipt, plus `JOB_ABANDON` after unassign → marked no-orders idle (#1312,
@@ -381,7 +402,7 @@ only the `DASH_STOP` + `DELIVERY_CONFIRMED`-same-instant signature.
 The fix is a new nullable field, `PendingDestructive.absorbedRetireSince` (`:domain`, additive and
 snapshot-compatible; only meaningful on `SESSION_END`, a `TASK_RETIRE` never carries one). Both arm
 sites — the summary arm (`updateLifecycle`, `Flow.SessionEnded`) and the Online→Offline mode arm —
-absorb through **one predicate**, `PlatformRegionStepper.absorbableRetireSince()`, so they can never
+absorb through **one predicate**, `absorbableRetire()` (`SessionEndArm.kt`), so they can never
 disagree about what a teardown may honor. It takes a standing `TASK_RETIRE`'s own `since`, and only
 when that retire's PROVENANCE (`armedFromFlow`, #596) says the task it retires actually finished:
 

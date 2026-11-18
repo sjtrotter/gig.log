@@ -724,7 +724,7 @@ data class PendingDestructive(
      * own expiry would have) instead of the unqualified force-stamp the T3 guard refuses.
      *
      * **Only a PROVENANCED retire over an ARRIVED dropoff is absorbable** — see
-     * `PlatformRegionStepper`'s `absorbableRetire`, the one predicate both arm sites read: an [armedFromFlow] of
+     * `absorbableRetire` (`:core:state` `SessionEndArm.kt`), the one predicate both arm sites read: an [armedFromFlow] of
      * `OfferPresented` retires an UNDELIVERED drop, a `PostTask` one's completion is already minted
      * on the receipt's exit frame, and a null provenance is not evidence at all. An authoritative
      * abandon (`task:unassigned`) landing on the commit frame CLEARS this, so the teardown falls
