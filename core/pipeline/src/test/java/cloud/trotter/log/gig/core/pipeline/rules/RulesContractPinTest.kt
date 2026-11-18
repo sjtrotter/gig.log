@@ -28,7 +28,8 @@ import java.util.Locale
 class RulesContractPinTest {
 
     private val pinned = mapOf(
-        1 to "89c54fed74e5efb4b94817f3c836264eaede8dbe7170532e534eae71ed2947d8",
+        // #1601 re-pinned under 1: a rule declaring `receiptTotalScope` still loads on an older app (it ignores the field).
+        1 to "12344cc146b43e0f44513f72ef3419317cd0b6f03c51dd0d86acdd340e1c40a7",
     )
 
     @Test

@@ -12,6 +12,7 @@ import cloud.trotter.log.gig.domain.analytics.SessionRecord
 import cloud.trotter.log.gig.domain.analytics.SessionMilesRule
 import cloud.trotter.log.gig.domain.analytics.SessionReportRule
 import cloud.trotter.log.gig.domain.analytics.receipts.ActiveMatchRow
+import cloud.trotter.log.gig.domain.analytics.receipts.MatchOrigin
 import cloud.trotter.log.gig.domain.analytics.receipts.SavedReceipt
 import cloud.trotter.log.gig.domain.model.event.payload.ReceiptMatchRole
 import cloud.trotter.log.gig.domain.state.Platform
@@ -69,6 +70,7 @@ internal fun ReceiptMatchRowEntity.toActive(): ActiveMatchRow = ActiveMatchRow(
     role = ReceiptMatchRole.valueOf(role),
     newPayCents = newPayCents,
     matchedAt = matchedAt,
+    origin = MatchOrigin.valueOf(origin),
 )
 
 /**

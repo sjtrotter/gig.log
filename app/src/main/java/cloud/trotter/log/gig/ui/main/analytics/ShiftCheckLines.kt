@@ -60,8 +60,12 @@ internal fun ShiftChecksBlock(checks: List<ShiftCheck>, onMatch: (evidenceId: St
 
 /** "Receipt $20.50 · 2:14 PM · not matched": one saved receipt the dasher has not matched (#1599). */
 @Composable
-internal fun receiptCheckText(check: ShiftCheck.ReceiptNotMatched): String =
-    stringResource(R.string.shift_check_receipt_format, Formats.money(check.totalCents / 100.0), formatClockTime(check.firstSeenAt))
+internal fun receiptCheckText(check: ShiftCheck.ReceiptNotMatched): String = stringResource(
+    // #1601: a receipt the app had settled reads "changed after settling" instead of "not matched".
+    if (check.changedAfterSettle) R.string.shift_check_receipt_changed_format else R.string.shift_check_receipt_format,
+    Formats.money(check.totalCents / 100.0),
+    formatClockTime(check.firstSeenAt),
+)
 
 /** The lines [ShiftChecksBlock] shows: every check but the money check, whose block shows it. */
 @Composable

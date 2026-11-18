@@ -211,6 +211,19 @@ internal object DeliveryCorrections {
         )
     }
 
+    /**
+     * #1601: a whole-job settlement's share — the app's, never the dasher's: basis `DROP_SHARE`, NO `driverAdjustedAt`,
+     * net against the row's own frozen cpm, tip and base kept. `originalPayBasis` and every other column kept.
+     */
+    fun applySettlementShare(row: DeliveryRecordEntity, cents: Long): DeliveryRecordEntity {
+        val pay = cents / 100.0
+        return row.copy(
+            realizedPay = pay,
+            payBasis = PayBasis.DROP_SHARE,
+            netProfit = NetProfit.realized(pay, row.realizedMiles, row.frozenCostPerMile),
+        )
+    }
+
     /** #1599: an estimate the match removes (it was the matched offer's money). Net keeps the driven cost (#1133). */
     fun clearEstimate(row: DeliveryRecordEntity): DeliveryRecordEntity = row.copy(
         realizedPay = null,

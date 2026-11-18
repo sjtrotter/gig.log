@@ -87,7 +87,7 @@ class SessionDetailViewModel @Inject constructor(
             .distinctUntilChanged()
             .flatMapLatest { running -> shiftTimelineRepository.read(sessionId, running) }
         return combine(detail, timeline, recordsStatusRepository.status, receiptMatchRepository.read(sessionId)) { d, t, records, r ->
-            val receipts = d?.let { ShiftReceipts.of(r.receipts, it.deliveries, r.active) } ?: ShiftReceipts.EMPTY
+            val receipts = d?.let { ShiftReceipts.of(r.receipts, it.deliveries, r.active, r.conflicted) } ?: ShiftReceipts.EMPTY
             val checks = d?.let { ShiftChecks.of(it, t.items, receipts) }.orEmpty()
             SessionDetailUiState(
                 detail = d, timeline = t.items, loading = false, records = records, checks = checks,

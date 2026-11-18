@@ -67,6 +67,7 @@ object AppEventCodec {
         is ReceiptObservedPayload -> json.encodeToString(payload)
         is ReceiptMatchedPayload -> json.encodeToString(payload)
         is ReceiptMatchUndonePayload -> json.encodeToString(payload)
+        is JobReceiptSettledPayload -> json.encodeToString(payload)
         is SessionReportCorrectionPayload -> json.encodeToString(payload)
         is SessionMilesCorrectionPayload -> json.encodeToString(payload)
         is DeliverySessionAssignPayload -> json.encodeToString(payload)

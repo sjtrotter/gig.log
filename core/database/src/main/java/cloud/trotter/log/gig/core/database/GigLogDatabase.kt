@@ -125,6 +125,9 @@ import cloud.trotter.log.gig.core.database.snapshot.AppStateSnapshotEntity
     // OFFER_NOT_TAKEN and the payload's tie list cannot exist in folded history, so NULL is right for all of it.
     // v26→v27 (#1599): one new table, receipt_match_rows. No `PROJECTOR_VERSION` bump: RECEIPT_MATCHED and
     // RECEIPT_MATCH_UNDONE are new event types that cannot exist in folded history, so the table starts empty.
+    // v27→v28 (#1601): receipt_match_rows gains origin (NOT NULL DEFAULT 'DASHER'), settlementRevision and endReason
+    // (NULL). No `PROJECTOR_VERSION` bump: JOB_RECEIPT_SETTLED is a new event type that cannot exist in folded
+    // history, so every existing row is a dasher's match and DASHER/NULL is right for all of it.
     autoMigrations = [
         AutoMigration(from = 8, to = 9),
         AutoMigration(from = 9, to = 10),
@@ -145,6 +148,7 @@ import cloud.trotter.log.gig.core.database.snapshot.AppStateSnapshotEntity
         AutoMigration(from = 24, to = 25), // #1598 receipt_records (new table); no refold
         AutoMigration(from = 25, to = 26), // #1119 offer_records ambiguousJobIds; no refold
         AutoMigration(from = 26, to = 27), // #1599 receipt_match_rows (new table); no refold
+        AutoMigration(from = 27, to = 28), // #1601 receipt_match_rows origin/settlementRevision/endReason; no refold
     ],
 )
 @TypeConverters(DataTypeConverters::class)
@@ -180,7 +184,7 @@ abstract class GigLogDatabase : RoomDatabase() {
          * this in lockstep with a new `schemas/**/<N>.json`, an `AutoMigration(N-1 → N)`, and its
          * `MigrationTestHelper` case — see the release checklist in CLAUDE.md.
          */
-        const val VERSION = 27
+        const val VERSION = 28
     }
 
 }

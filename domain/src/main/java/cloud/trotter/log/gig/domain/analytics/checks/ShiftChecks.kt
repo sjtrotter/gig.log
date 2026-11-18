@@ -28,7 +28,13 @@ sealed interface ShiftCheck {
      * #1599: a saved receipt the app could not place and the dasher has not matched; one per receipt, also when the
      * shift's totals agree.
      */
-    data class ReceiptNotMatched(val evidenceId: String, val totalCents: Long, val firstSeenAt: Long) : ShiftCheck
+    data class ReceiptNotMatched(
+        val evidenceId: String,
+        val totalCents: Long,
+        val firstSeenAt: Long,
+        /** #1601: the app had settled its job from this receipt, and the receipt changed after a row was edited. */
+        val changedAfterSettle: Boolean = false,
+    ) : ShiftCheck
 
     /** The shift's independent total and its delivery pay differ ([MoneyCheck]). */
     data class MoneyDiffers(val higher: MoneyCheck.Higher, val amount: Double) : ShiftCheck
@@ -67,7 +73,9 @@ object ShiftChecks {
         }
         for ((seq, jobs) in tied) jobs.forEach { tiedByJob.getOrPut(it) { mutableListOf() } += seq }
         tiedByJob.forEach { (jobId, seqs) -> checks += ShiftCheck.OfferNotMatched(jobId, seqs.distinct().sorted()) }
-        receipts.open.forEach { checks += ShiftCheck.ReceiptNotMatched(it.receipt.evidenceId, it.receipt.totalCents, it.receipt.firstSeenAt) }
+        receipts.open.forEach {
+            checks += ShiftCheck.ReceiptNotMatched(it.receipt.evidenceId, it.receipt.totalCents, it.receipt.firstSeenAt, it.changedAfterSettle)
+        }
         money?.higher?.let { checks += ShiftCheck.MoneyDiffers(it, money.difference) }
         return checks
     }

@@ -175,6 +175,11 @@ private fun rowOutcome(receipt: SavedReceipt, d: DeliveryRecord, plan: ReceiptMa
             R.string.receipt_match_matched_to_format,
             receipts.totalCentsOf(lock.evidenceId)?.let(::cents) ?: EMPTY_VALUE,
         )
+        // #1601: the app's whole-job settlement placed it; never "Matched by you".
+        is MatchLock.SettledFrom -> stringResource(
+            R.string.receipt_match_settled_from_format,
+            receipts.totalCentsOf(lock.evidenceId)?.let(::cents) ?: EMPTY_VALUE,
+        )
     }
 }
 

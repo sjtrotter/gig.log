@@ -127,4 +127,7 @@
         <item quantity="one">%1$d dólar por hora.</item>
         <item quantity="other">%1$d dólares por hora.</item>
     </plurals>
+    <!-- #1601 -->
+    <string name="shift_check_receipt_changed_format">Recibo %1$s · %2$s · cambió después de saldarse</string>
+    <string name="receipt_match_settled_from_format">Saldado con el recibo %1$s</string>
 </resources>
