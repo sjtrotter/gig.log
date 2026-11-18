@@ -773,8 +773,8 @@ placeholder per merchant row, still proves); its store matches the offer's throu
 (`ReceiptScope.PROVEN_SINGLE`); anything else covers nothing (`UNPROVEN`): no share, no attach, no
 re-price, and it suppresses no estimate (`receiptSuppressesEstimate` needs a covered drop). Residual: a
 hidden offer whose single drop stands in for this offer's drop after its order vanished unseen. Narrow,
-and visible through the per-receipt check. The dasher's matching sheet (#1599) and whole-job settlement
-(#1601) cover everything unproven.
+and visible through the per-receipt check. Whole-job settlement (#1601, below) places a one-offer stack's receipt when its
+own proof holds; the dasher's matching sheet (#1599) covers the rest.
 
 **The marker and its fold gate.** Every new `DELIVERY_COMPLETED` carries `receiptScope`: `PROVEN_SINGLE`
 when receipt money rides it, else `UNPROVEN` (receipt-less or unproven), plus `receiptEvidenceId`.
@@ -877,7 +877,7 @@ summing to the receipt to the cent. With no match in the log every row folds as 
   delivery" pay edit on any of its rows, a cleared one included, refuses it. No second match can write a row of a job
   this one pays, so two active matches never share a row. The job sheet shows "Undo match" under each delivery an undoable match covers.
 - **Driver ownership.** A matched row carries `driverAdjustedAt`, so the machine re-price refuses it (its guard also
-  names `RECEIPT_MATCHED`), and whole-job settlement (#1601) must skip any row an active match names. A later "Fix this
+  names `RECEIPT_MATCHED`), and whole-job settlement (#1601) refuses any job with a row an active match names. A later "Fix this
   delivery" still wins by log order (`DeliveryCorrections.applyPay`/`applyDelivery` are unchanged).
 - **Stated costs.** On a job with two or more offers the suggestion is the receipt's own delivery alone, so two reads
   of one offer's receipt confirmed on that offer's two drops separately count it twice (the app total line and the money
@@ -886,6 +886,90 @@ summing to the receipt to the cent. With no match in the log every row folds as 
   job, the job's other estimates stay and can hold part of the matched offer's quote until their own receipts are
   matched. An even split is the platform's own per-delivery split only by chance; the rows say "Matched by you". A later
   pay edit on a matched row wins, the receipt stays matched and Undo is no longer offered. No amount editing in v1.
+
+### Whole-job settlement (#1601, Room v28)
+
+A one-offer job whose card said N ≥ 2 stops gets its receipt placed on its drops without the dasher, when the state
+machine can prove the receipt paid the whole offer. The proof and the decision are the stepper's; the projector applies
+the decision all or nothing. With no `JOB_RECEIPT_SETTLED` in the log every row folds as before.
+
+- **The proof** (`ReceiptProof.jobSettlementAt`, `:core:state`; the first failed clause is the `JobSettlementGap`):
+  reads tracked from the job's mint (`Job.receiptReads`; `READS_UNTRACKED`); one accepted TOTAL offer (`OFFER_COUNT`); a
+  card count of at least 2 (`CARD_COUNT_MISSING`, `CARD_COUNT_ONE`: one stop is #1598's path); no drop unassigned on any
+  copy, exactly N accountable drops, each minted (`UNASSIGNED`, `DROP_COUNT`, `DROP_NOT_MINTED`); each with arrival or
+  the completion steps (`NO_DELIVERY_WITNESS`, the #1081 class); each at a store the offer quoted
+  (`STORE_MISSING`, `STORE_MISMATCH`); every read's rule declares its total the whole offer's pay (`SCOPE_UNDECLARED`,
+  below); a read names the drop that completed last, and its latest record is the PAYING read (`NO_TERMINAL_READ`);
+  every record attributed to the job agrees on the total (`READS_DISAGREE`: a part receipt or a tip change refuses,
+  never picks); no accept resolved after the job's own resolution stamp (`Job.ownAcceptSeq` against
+  `PlatformRegion.acceptResolveSeq`, never `acceptedAt`: `OTHER_ACCEPT`), no non-demoted pool entry presented between the
+  job's accept and its close (`POOLED_OFFER`), and none still waiting at a store of the job's drops, nor an ADD_ON entry
+  with no candidate store presented after the accept (`RIVAL_POOLED`); and no fresh presentation between the terminal
+  drop's activation (`Job.dropoffActivatedSeq`) and the paying read (`LATE_FRAME`, which also covers #1598's late-frame
+  guard for a post-close revision). Shares come from the paying revision alone: its itemization through
+  `DropPayApportioner.apportion` only when its items sum to its own total in cents, else `evenSplitCents` in taskId
+  order.
+- **The declaration (P8).** A receipt total counts as the offer's pay only when the read's rule declares
+  `receiptTotalScope: "offer"`, a load-validated literal in `StateMachineContract.PARSE_DECLARATION_LITERALS`
+  (`PostTaskFields.receiptTotalIsOffer`). Both DoorDash summary rules declare it: their figure is the one under
+  DoorDash's own "This offer" label. A platform that declares nothing never settles.
+- **Decision points.** The job's close (`completeActiveJob`: the receipt exit, the T1 retire, the T2 close, an
+  abandon), a teardown (`endSession`, on the pool BEFORE the shift-end flush), and every changed read of the same
+  receipt episode after the close (the closed-job marker `PlatformRegion.closedJobSettlement`, cleared when another job
+  becomes active and at the shift end). Never mid-job. An unchanged allocation decides nothing; after a settlement, a
+  quiet revision of the paying record with all records still agreeing is a replacement, records that now disagree
+  withdraw it (and nothing is decided for the job after that), and any other failed clause changes nothing applied.
+- **Event.** `JOB_RECEIPT_SETTLED` (`JobReceiptSettledPayload`: command id `settle:<jobId>`, the shift, the job, the
+  decision revision, `SETTLE` or `WITHDRAW`, the policy version, the receipt's `evidenceId` and revision, its cents,
+  the card count, one line per drop with its cents). Effect key `log:JOB_RECEIPT_SETTLED:<jobId>:r<revision>`, by
+  decision revision (X → Y → X keeps three keys). `EffectMap` emits it after the step's `DELIVERY_COMPLETED`s and its
+  `RECEIPT_OBSERVED`, so the rows and the receipt revision it names precede it. Bookkeeping, machine-owned.
+- **Fold.** `ReceiptMatchFolds.foldJobSettled`: the shift must EXIST at the event's log position (it folds while the
+  shift is live; the #1599 folds require ENDED). A malformed payload is a counted skip: a blank id, a command id that is
+  not the job's, a revision below 1, and on `SETTLE` a receipt of 0 or less, a card count below 2, lines that are not
+  exactly that many distinct drops, a negative share, shares not summing to the receipt, or a tip/base split stated on
+  some lines and not others, or not summing to its line.
+- **Apply** (`JobSettlementApply`, in the batch transaction, in event order; every check before any write, a refusal
+  is a counted skip with a WARN of ids):
+  - **initial** (no row yet for the command): the receipt exists, is of this shift and job, unproven, at exactly the
+    payload's evidence revision and total; `ReceiptMatch.settlement` (the strict whole-group entry point, never `plan`)
+    finds each drop's one row sequenced before the event, no other row of the job, every row an estimate or no pay
+    with no `driverAdjustedAt`, not moved into the shift and named by no active match row of either role, and the job
+    not funded by another receipt. Writes `DeliveryCorrections.applySettlementShare` (basis `DROP_SHARE`, net against
+    the row's own frozen cpm, NO `driverAdjustedAt`: the machine never poses as the dasher) and one
+    `receipt_match_rows` row per drop, origin `APP`, holding the ORIGINAL priors;
+  - **replacement** (a later revision while one is active): the same receipt checks; the revision is past the active
+    one; the payload names exactly the settlement's rows; each still holds the active allocation and no other match
+    names it. Rewrites the shares and the rows' `newPayCents`/`settlementRevision`; the priors stay. Revision numbers
+    may skip;
+  - **withdraw**: while every row holds the active allocation, restore the original priors and end the rows
+    `WITHDRAWN`; otherwise write nothing and end them `CONFLICT`.
+  An ended settlement (undone, withdrawn, in conflict) takes no further revision.
+- **Statuses.** `holdsWritten`, `lock`, `funded` and `ShiftReceipts` read the row's origin (`MatchOrigin`). The paying
+  receipt is MATCHED with origin APP; the job's other reads are SETTLED through `funded`; no check. The sheet shows a
+  settled delivery as "Settled from receipt $X" (`MatchLock.SettledFrom`), never "Matched by you". A CONFLICT
+  settlement neither counts as MATCHED nor funds its job: its paying receipt is OPEN with `changedAfterSettle`, and the
+  check reads "changed after settling". The machine re-price (#1033) also refuses any row an active match names.
+- **Undo.** `RECEIPT_MATCH_UNDONE` on `settle:<jobId>` restores the original priors while every row holds the active
+  revision (the job sheet's existing "Undo match"), on an ended shift. The stepper settles only live, so an undone
+  settlement never comes back; a later revision is refused. A manual match after that is the ordinary #1599 Confirm.
+- **Dasher edits.** A pay, tip or miles edit (`driverAdjustedAt`), a hand-added row or a row moved into the shift
+  refuses the whole settlement before it applies; after it, the edit wins its row by log order, the other rows keep
+  their shares, Undo is no longer offered, and the job stays funded. A cash, store or note edit does not block.
+- **Storage (A4): columns, not a table.** `receipt_match_rows` gains `origin` (`NOT NULL DEFAULT 'DASHER'`),
+  `settlementRevision` and `endReason` (`AutoMigration(27, 28)`, `AnalyticsMigration27to28Test`). `undoneAt` set means
+  inactive for any reason (undo, withdrawal, conflict), so every active-row query is unchanged. The settlement's state
+  is one row set per command id: no rows = none yet; active rows = the active revision; only inactive rows = ended.
+  A separate `job_settlements` table would duplicate that state. No `PROJECTOR_VERSION` bump: the event type cannot
+  exist in folded history, and no history is backfilled (#1602 and the sheet own the past).
+- **Logging (P7).** INFO one line per decision (job id, drop count, cents, revision); DEBUG one line per refused
+  candidate at the close with its `JobSettlementGap`; WARN on an apply refusal, ids only.
+- **Stated costs.** Strict by design, each measured on the developer's lifetime data before the build: a stack with an
+  offer presented mid-stack (2 of 20) and one whose next offer is accepted before the close (`OTHER_ACCEPT`, which a T2
+  close always is) stay on the sheet; so does a drop without an arrival or completion-steps witness (about 2 of 41) and
+  every multi-offer job (manual in v1). The even split is the platform's own per-drop split only by chance; v1 states no
+  tip/base split per drop (the lines' tip and base fields stay empty). A settled row's pay source reads "Receipt split"
+  on the shift page (its basis is `DROP_SHARE`).
 
 ### Session report correction (#1134, Room v17)
 
