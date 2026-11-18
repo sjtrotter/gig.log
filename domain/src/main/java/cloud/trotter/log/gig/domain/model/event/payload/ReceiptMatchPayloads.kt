@@ -30,6 +30,11 @@ data class ReceiptMatchedPayload(
     val evidenceId: String,
     val receiptCents: Long,
     val lines: List<ReceiptMatchLine>,
+    /**
+     * The `delivery_records` PKs the sheet pre-ticked when it opened, ascending; empty when it suggested nothing; null
+     * on events written before this field (#1601). "Confirmed unchanged" means the COVERED lines' ids equal this set.
+     */
+    val suggested: List<Long>? = null,
 ) : AppEventPayload
 
 /** `RECEIPT_MATCH_UNDONE` (#1599): takes back the match [matchCommandId] of shift [sessionId]. */

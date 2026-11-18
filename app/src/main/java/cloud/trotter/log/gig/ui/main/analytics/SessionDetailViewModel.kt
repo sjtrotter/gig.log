@@ -286,11 +286,14 @@ class SessionDetailViewModel @Inject constructor(
         }
     }
 
-    /** #1599: the dasher's Confirm on the receipt sheet: the plan exactly as the sheet showed it. */
-    fun confirmReceiptMatch(commandId: String, plan: ReceiptMatchPlan) {
+    /**
+     * #1599: the dasher's Confirm on the receipt sheet: the plan exactly as the sheet showed it, and the set it
+     * pre-ticked when it opened (#1601).
+     */
+    fun confirmReceiptMatch(commandId: String, plan: ReceiptMatchPlan, suggestedAtOpen: Set<Long>) {
         viewModelScope.launch {
             try {
-                correctionRepository.matchReceipt(sessionId, commandId, plan)
+                correctionRepository.matchReceipt(sessionId, commandId, plan, suggestedAtOpen)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

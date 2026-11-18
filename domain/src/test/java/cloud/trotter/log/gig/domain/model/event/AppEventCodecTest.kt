@@ -217,6 +217,21 @@ class AppEventCodecTest {
     }
 
     @Test
+    fun `#1601 — a match carries the sheet's open-time suggestion, and a match stored without one decodes it as null`() {
+        val line = ReceiptMatchLine(7L, ReceiptMatchRole.COVERED, priorPayCents = 900, priorPayBasis = "OFFER_PAY", newPayCents = 2050)
+        val withSuggestion = ReceiptMatchedPayload("cmd-1", "s1", "receipt:t2:5000", 2050, listOf(line), suggested = listOf(6L, 7L))
+        assertEquals(withSuggestion, roundTrip(AppEventType.RECEIPT_MATCHED, withSuggestion))
+        val suggestedNothing = withSuggestion.copy(suggested = emptyList())
+        assertEquals(suggestedNothing, roundTrip(AppEventType.RECEIPT_MATCHED, suggestedNothing))
+
+        val stored = """{"commandId":"cmd-1","sessionId":"s1","evidenceId":"receipt:t2:5000","receiptCents":2050,""" +
+            """"lines":[{"deliveryEventSequenceId":7,"role":"COVERED","priorPayCents":900,"priorPayBasis":"OFFER_PAY","newPayCents":2050}]}"""
+        val decoded = AppEventCodec.decodePayload(AppEventType.RECEIPT_MATCHED, stored) as ReceiptMatchedPayload
+        assertNull(decoded.suggested)
+        assertEquals(listOf(line), decoded.lines)
+    }
+
+    @Test
     fun `empty and blank payloads decode to null for every type`() {
         for (type in AppEventType.entries) {
             assertNull(AppEventCodec.decodePayload(type, "{}"))
