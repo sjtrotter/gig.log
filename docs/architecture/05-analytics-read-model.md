@@ -822,7 +822,9 @@ summing to the receipt to the cent. With no match in the log every row folds as 
 
 - **Events.** `RECEIPT_MATCHED` (`ReceiptMatchedPayload`: a `commandId` minted when the sheet opens, the shift, the
   receipt's `evidenceId`, `receiptCents`, and one `ReceiptMatchLine` per delivery, `COVERED` with its share in cents or
-  `CLEARED` with none, each with the pay and basis the preview showed) and `RECEIPT_MATCH_UNDONE` (the shift and the
+  `CLEARED` with none, each with the pay and basis the preview showed, and `suggested`: the delivery ids the sheet
+  pre-ticked when it opened, so a match whose COVERED ids equal it confirmed the suggestion unchanged; null on events
+  written before #1601, and never read by the fold or the apply) and `RECEIPT_MATCH_UNDONE` (the shift and the
   match's command id). Both are dasher-owned, append-only and in `RecordFolds.BOOKKEEPING_EVENTS`.
 - **Fold.** `ReceiptMatchFolds` (the `foldSessionReportCorrection` shape): the envelope, the context and the payload
   name one shift that has ENDED at the event's log position, and the outcome carries no context. A malformed match

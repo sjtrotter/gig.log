@@ -281,8 +281,11 @@ class CorrectionRepository @Inject constructor(
         Timber.tag(TAG).i("SESSION_MILES_CORRECTION appended for session %s (op=%s)", sessionId, operation)
     }
 
-    /** #1599: append the dasher's receipt match, exactly [plan] as the sheet showed it. [commandId] is the sheet's. */
-    suspend fun matchReceipt(sessionId: String, commandId: String, plan: ReceiptMatchPlan) {
+    /**
+     * #1599: append the dasher's receipt match, exactly [plan] as the sheet showed it. [commandId] is the sheet's;
+     * [suggested] is the set the sheet pre-ticked when it opened (#1601), recorded sorted.
+     */
+    suspend fun matchReceipt(sessionId: String, commandId: String, plan: ReceiptMatchPlan, suggested: Set<Long>) {
         require(commandId.isNotBlank()) { "command id must not be blank" }
         require(plan.covered.isNotEmpty()) { "a match covers at least one delivery" }
         require(plan.receiptCents > 0) { "receipt must be positive" }
@@ -298,8 +301,13 @@ class CorrectionRepository @Inject constructor(
                 type = AppEventType.RECEIPT_MATCHED,
                 occurredAt = System.currentTimeMillis(),
                 sessionId = sessionId,
-                payload = ReceiptMatchedPayload(commandId, sessionId, plan.evidenceId, plan.receiptCents, lines),
+                payload = ReceiptMatchedPayload(commandId, sessionId, plan.evidenceId, plan.receiptCents, lines, suggested.sorted()),
             ),
+        )
+        // P7: ids and counts only.
+        Timber.tag(TAG).d(
+            "RECEIPT_MATCHED command %s: %d covered, unchanged=%b",
+            commandId, plan.covered.size, plan.covered.map { it.deliveryEventSequenceId }.toSet() == suggested,
         )
         Timber.tag(TAG).i(
             "RECEIPT_MATCHED appended for %s: %d covered, %d cleared", plan.evidenceId, plan.covered.size, plan.cleared.size,

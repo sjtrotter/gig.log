@@ -67,8 +67,8 @@ private fun cents(amount: Long): String = Formats.money(amount / 100.0)
  * "Which deliveries did this receipt pay for?" (#1599): every delivery of the shift, the receipt's own delivery (and on
  * a one-offer job its other drops) ticked and marked Suggested, a locked delivery shown disabled with its reason, and
  * the preview ([ReceiptMatch.plan]) under the list. The one sheet that shows estimates, since it replaces them.
- * Confirm sends the plan exactly as shown; nothing writes on open, Back, a swipe, a scrim tap or Not sure. The
- * selection is UI state; every figure derives from [receipts] (Principle 1).
+ * Confirm sends the plan exactly as shown, with the set pre-ticked at open (#1601); nothing writes on open, Back, a
+ * swipe, a scrim tap or Not sure. The selection is UI state; every figure derives from [receipts] (Principle 1).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -78,15 +78,17 @@ internal fun ReceiptMatchSheet(
     /** `MoneyCheck.of(detail)?.appTotal`: only an independent total. */
     appTotal: Double?,
     appName: String,
-    onConfirm: (commandId: String, plan: ReceiptMatchPlan) -> Unit,
+    onConfirm: (commandId: String, plan: ReceiptMatchPlan, suggestedAtOpen: Set<Long>) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val c = AppTheme.colors
     // One per opening: a second write of the same Confirm is the fold's counted skip.
     val commandId = rememberSaveable(receipt.evidenceId) { UUID.randomUUID().toString() }
-    var selected by rememberSaveable(receipt.evidenceId, saver = longSetSaver) {
+    // The set pre-ticked at open, kept apart from the selection: rotation keeps it, a data refresh does not rewrite it.
+    val suggestedAtOpen by rememberSaveable(receipt.evidenceId, saver = longSetSaver) {
         mutableStateOf(ReceiptMatch.suggestion(receipt, receipts.deliveries, receipts.active))
     }
+    var selected by rememberSaveable(receipt.evidenceId, saver = longSetSaver) { mutableStateOf(suggestedAtOpen) }
     val suggested = remember(receipt, receipts) { ReceiptMatch.suggestion(receipt, receipts.deliveries, receipts.active) }
     val plan = remember(selected, receipt, receipts) {
         ReceiptMatch.plan(receipt, receipts.deliveries, receipts.active, selected, receipts.saved)
@@ -142,7 +144,7 @@ internal fun ReceiptMatchSheet(
                     Text(stringResource(R.string.receipt_match_not_sure))
                 }
                 Button(
-                    onClick = { plan?.let { onConfirm(commandId, it) } },
+                    onClick = { plan?.let { onConfirm(commandId, it, suggestedAtOpen) } },
                     enabled = plan != null,
                     modifier = Modifier.padding(start = 8.dp).testTag(RECEIPT_SHEET_CONFIRM_TAG),
                 ) {

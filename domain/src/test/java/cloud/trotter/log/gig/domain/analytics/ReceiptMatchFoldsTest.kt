@@ -59,6 +59,13 @@ class ReceiptMatchFoldsTest {
         )
     }
 
+    @Test fun `#1601 the recorded suggestion never changes the fold`() {
+        val without = foldMatch(match())
+        assertEquals(without, foldMatch(match().copy(suggested = listOf(6L, 7L))))
+        assertEquals(without, foldMatch(match().copy(suggested = emptyList())))
+        assertEquals(without, foldMatch(match().copy(suggested = listOf(9L))))
+    }
+
     @Test fun `a missing or foreign payload is skipped`() {
         assertEquals("RECEIPT_MATCHED: missing/malformed payload", foldMatch(null).skip)
         assertEquals(

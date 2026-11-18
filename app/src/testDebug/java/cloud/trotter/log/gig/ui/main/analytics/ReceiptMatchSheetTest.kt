@@ -59,7 +59,7 @@ class ReceiptMatchSheetTest {
     private fun string(id: Int, vararg args: Any): String = context.getString(id, *args)
     private lateinit var locale: Locale
     private lateinit var zone: TimeZone
-    private val confirmed = mutableListOf<Pair<String, ReceiptMatchPlan>>()
+    private val confirmed = mutableListOf<Triple<String, ReceiptMatchPlan, Set<Long>>>()
     private val undone = mutableListOf<String>()
 
     @Before fun fix() {
@@ -83,7 +83,7 @@ class ReceiptMatchSheetTest {
                         state, row,
                         ShiftPageActions(
                             onBack = {},
-                            onConfirmReceiptMatch = { cmd, plan -> confirmed += cmd to plan },
+                            onConfirmReceiptMatch = { cmd, plan, suggestedAtOpen -> confirmed += Triple(cmd, plan, suggestedAtOpen) },
                             onUndoReceiptMatch = { undone += it },
                         ),
                     )
@@ -134,8 +134,9 @@ class ReceiptMatchSheetTest {
     @Test fun `Confirm sends the plan as shown and closes the sheet`() { // non-vacuous
         openSheet()
         confirm.click()
-        val (_, plan) = confirmed.single()
+        val (_, plan, suggestedAtOpen) = confirmed.single()
         assertEquals(mapOf(RECEIPT_Y1 to 1025L, RECEIPT_Y2 to 1025L), plan.covered.associate { it.deliveryEventSequenceId to it.newPayCents })
+        assertEquals(setOf(RECEIPT_Y1, RECEIPT_Y2), suggestedAtOpen)
         assertTrue(plan.cleared.isEmpty())
         assertEquals(RECEIPT_EVIDENCE, plan.evidenceId)
         assertEquals(0, count(title))
@@ -148,9 +149,11 @@ class ReceiptMatchSheetTest {
         assertEquals(1, count(string(R.string.receipt_match_estimate_removed)))
         assertEquals(1, count(string(R.string.receipt_match_new_pay_format, "$20.50")))
         confirm.click()
-        val plan = confirmed.single().second
+        val (_, plan, suggestedAtOpen) = confirmed.single()
         assertEquals(mapOf(RECEIPT_Y1 to 2050L), plan.covered.associate { it.deliveryEventSequenceId to it.newPayCents })
         assertEquals(listOf(RECEIPT_Y2), plan.cleared.map { it.deliveryEventSequenceId })
+        // #1601: Confirm reports what the sheet pre-ticked at open, not the dasher's edited selection.
+        assertEquals(setOf(RECEIPT_Y1, RECEIPT_Y2), suggestedAtOpen)
     }
 
     @Test fun `unticking the delivery with no pay clears nothing`() {

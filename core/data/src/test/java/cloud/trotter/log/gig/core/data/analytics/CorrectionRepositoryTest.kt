@@ -257,7 +257,7 @@ class CorrectionRepositoryTest {
 
     @Test
     fun `matchReceipt appends one RECEIPT_MATCHED equal to the plan, covered lines then cleared`() = runTest {
-        repo.matchReceipt("S1", "cmd-1", plan)
+        repo.matchReceipt("S1", "cmd-1", plan, suggested = setOf(7L))
         val captor = argumentCaptor<cloud.trotter.log.gig.domain.model.event.AppEvent>()
         verify(appEventRepo).appendUserEvent(captor.capture(), anyOrNull())
         val event = captor.firstValue
@@ -270,8 +270,21 @@ class CorrectionRepositoryTest {
                     ReceiptMatchLine(7, ReceiptMatchRole.COVERED, 900, "OFFER_PAY", 2050),
                     ReceiptMatchLine(6, ReceiptMatchRole.CLEARED, 900, "OFFER_PAY", null),
                 ),
+                suggested = listOf(7L),
             ),
             event.payload,
+        )
+    }
+
+    @Test
+    fun `#1601 matchReceipt records the sheet's open-time suggestion sorted, empty when it suggested nothing`() = runTest {
+        repo.matchReceipt("S1", "cmd-1", plan, suggested = linkedSetOf(9L, 7L, 8L))
+        repo.matchReceipt("S1", "cmd-2", plan, suggested = emptySet())
+        val captor = argumentCaptor<cloud.trotter.log.gig.domain.model.event.AppEvent>()
+        verify(appEventRepo, times(2)).appendUserEvent(captor.capture(), anyOrNull())
+        assertEquals(
+            listOf(listOf(7L, 8L, 9L), emptyList<Long>()),
+            captor.allValues.map { (it.payload as ReceiptMatchedPayload).suggested },
         )
     }
 
@@ -288,7 +301,7 @@ class CorrectionRepositoryTest {
             "a delivery twice" to ("cmd" to plan.copy(cleared = listOf(PlannedRow(7, 900, "OFFER_PAY", null)))),
         )
         for ((name, input) in bad) {
-            assertThrows(name, IllegalArgumentException::class.java) { runBlocking { repo.matchReceipt("S1", input.first, input.second) } }
+            assertThrows(name, IllegalArgumentException::class.java) { runBlocking { repo.matchReceipt("S1", input.first, input.second, emptySet()) } }
         }
         verify(appEventRepo, never()).appendUserEvent(any(), anyOrNull())
     }

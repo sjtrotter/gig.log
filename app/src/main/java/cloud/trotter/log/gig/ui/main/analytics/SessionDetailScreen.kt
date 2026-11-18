@@ -139,8 +139,8 @@ internal class ShiftPageActions(
     val onRemoveDelivery: (deliveryEventSequenceId: Long) -> Unit = {},
     /** Undoes "It was unassigned" for one offer. */
     val onUndoMarkedUnassigned: (offerEventSequenceId: Long) -> Unit = {},
-    /** #1599: Confirm on the receipt sheet, the plan exactly as it showed. */
-    val onConfirmReceiptMatch: (commandId: String, plan: ReceiptMatchPlan) -> Unit = { _, _ -> },
+    /** #1599: Confirm on the receipt sheet, the plan exactly as it showed, and the set it pre-ticked at open (#1601). */
+    val onConfirmReceiptMatch: (commandId: String, plan: ReceiptMatchPlan, suggestedAtOpen: Set<Long>) -> Unit = { _, _, _ -> },
     /** #1599: Undo match on the job sheet. */
     val onUndoReceiptMatch: (matchCommandId: String) -> Unit = {},
 )
@@ -440,8 +440,8 @@ private fun ShiftPageBody(
             receipts = state.receipts,
             appTotal = check?.appTotal,
             appName = detail.session.platform.displayName,
-            onConfirm = { cmd, plan ->
-                actions.onConfirmReceiptMatch(cmd, plan)
+            onConfirm = { cmd, plan, suggestedAtOpen ->
+                actions.onConfirmReceiptMatch(cmd, plan, suggestedAtOpen)
                 receiptSheet = null
             },
             onDismiss = { receiptSheet = null },
