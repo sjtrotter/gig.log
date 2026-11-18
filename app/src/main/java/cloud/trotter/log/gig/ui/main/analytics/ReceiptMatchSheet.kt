@@ -23,7 +23,7 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -55,9 +55,12 @@ private const val SEPARATOR = " · "
 internal const val RECEIPT_SHEET_CONFIRM_TAG = "receipt_sheet_confirm"
 internal const val RECEIPT_SHEET_NOT_SURE_TAG = "receipt_sheet_not_sure"
 
-/** The ticked delivery ids, saved across recreation. */
-private val longSetSaver = listSaver<MutableState<Set<Long>>, Long>(
-    save = { it.value.toList() },
+/**
+ * A set of delivery ids, saved across recreation. A `LongArray`, not `listSaver`: `listSaver` saves an empty list as
+ * nothing, so an empty set would be recomputed from newer rows on restore.
+ */
+internal val longSetSaver = Saver<MutableState<Set<Long>>, LongArray>(
+    save = { it.value.toLongArray() },
     restore = { mutableStateOf(it.toSet()) },
 )
 
