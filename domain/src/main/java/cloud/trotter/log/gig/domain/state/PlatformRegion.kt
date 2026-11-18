@@ -724,7 +724,7 @@ data class PendingDestructive(
      * own expiry would have) instead of the unqualified force-stamp the T3 guard refuses.
      *
      * **Only a PROVENANCED retire over an ARRIVED dropoff is absorbable** — see
-     * `PlatformRegionStepper`'s `absorbableRetire`, the one predicate both arm sites read: an [armedFromFlow] of
+     * `absorbableRetire` (`:core:state` `SessionEndArm.kt`), the one predicate both arm sites read: an [armedFromFlow] of
      * `OfferPresented` retires an UNDELIVERED drop, a `PostTask` one's completion is already minted
      * on the receipt's exit frame, and a null provenance is not evidence at all. An authoritative
      * abandon (`task:unassigned`) landing on the commit frame CLEARS this, so the teardown falls
@@ -768,6 +768,14 @@ data class PendingDestructive(
      * the pre-#1078 timing).
      */
     val absorbedRetireDeadline: Long? = null,
+    /**
+     * #1668: a `SESSION_END` armed by the dasher's end-shift confirm tap rather than by an Offline
+     * edge. Its cancel rule differs: only an offer or task-flow screen cancels it, so a hint-only
+     * redraw never resumes the shift under it, a flow-less frame's inherited lifecycle never clears
+     * it, and its commit leaves the region Offline (from Paused too). A summary tightening it keeps the
+     * mark. False on every other pending and on any older snapshot.
+     */
+    val armedByTap: Boolean = false,
     /**
      * Which arm of this pending's wake timer belongs to it (#1054 round 5) — see
      * [PlatformRegion.wakeSeq].

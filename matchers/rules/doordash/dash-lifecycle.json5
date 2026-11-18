@@ -1385,15 +1385,40 @@
       }
     },
     {
+      // #1668: the timeline's End dash only OPENS the confirm sheet, where the dasher can still go back,
+      // so it carries an informational intent. The state machine acts on the confirm tap below.
       "id": "doordash.click.end_dash",
       "priority": 6,
       "screenIs": "timeline",
-      "intent": "end_dash",
+      "intent": "open_end_dash",
       "state": {
         "modeHint": "offline"
       },
       "require": {
         "hasText": "End dash"
+      }
+    },
+    {
+      // #1668: the confirm sheet's End dash, the last tap of a shift. A shift that earned nothing gets no
+      // dash summary, so this tap is the earliest end signal; the stepper arms its graced end on the intent
+      // (SessionIntent.END_SHIFT_CONFIRM). The button's title is a child TextView, so the label is matched
+      // in the clicked node's subtree, and a source that also holds 'Go back' (the actions container) is
+      // refused. No state block: a click's modeHint does not drive mode.
+      "id": "doordash.click.end_dash_confirm",
+      "priority": 7,
+      "screenIs": "end_dash_confirm",
+      "intent": "end_shift_confirm",
+      "require": {
+        "all": [
+          {
+            "hasAnyText": "End dash"
+          },
+          {
+            "not": {
+              "hasAnyText": "Go back"
+            }
+          }
+        ]
       }
     },
     {

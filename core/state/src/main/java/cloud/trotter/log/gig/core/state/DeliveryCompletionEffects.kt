@@ -510,7 +510,7 @@ internal fun mintQualified(p: PlatformRegion, retiredTaskId: String?, task: Task
  *   slot holds one pending, so an end arming over a retire used to DISCARD the evidence, and the
  *   teardown's force-stamp was then refused by the amdt-#5 T3 guard — $21.00 of fielded delivery
  *   with no row and no warning (2026-09-08, build 8028691a). Only a PROVENANCED retire over an
- *   ARRIVED dropoff is absorbable (`PlatformRegionStepper.absorbableRetire`).
+ *   ARRIVED dropoff is absorbable (`absorbableRetire`, `SessionEndArm.kt`).
  *
  * The T3 guard itself is untouched: a `SESSION_END` with NO absorbed value still answers false, so a
  * bail on an undelivered task mints nothing, exactly as before.

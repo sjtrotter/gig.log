@@ -312,8 +312,16 @@ class SerializationRoundTripTest {
         )
         assertWakeJson<PendingWake>("""{"deadline":9000,"wakeId":7}""")
         assertWakeJson<PendingDestructive>(
-            """{"kind":"SESSION_END","since":1000,"deadline":3500,"reason":null,"authoritative":true,"armedFromFlow":null,"endFields":null,"absorbedRetireSince":900,"absorbedRetireDeadline":3400,"wakeId":7,"servedFrom":null,"windowFrom":1000}""",
+            """{"kind":"SESSION_END","since":1000,"deadline":3500,"reason":null,"authoritative":true,"armedFromFlow":null,"endFields":null,"absorbedRetireSince":900,"absorbedRetireDeadline":3400,"armedByTap":false,"wakeId":7,"servedFrom":null,"windowFrom":1000}""",
         )
+    }
+
+    @Test
+    fun `a pending written before armedByTap decodes as not tap-armed`() {
+        val legacy = StateJson.decodeFromString<PendingDestructive>(
+            """{"kind":"SESSION_END","since":1000,"deadline":3500,"reason":null,"authoritative":false,"armedFromFlow":null,"endFields":null,"absorbedRetireSince":null,"absorbedRetireDeadline":null,"wakeId":7,"servedFrom":null,"windowFrom":1000}""",
+        )
+        assertEquals(false, legacy.armedByTap)
     }
 
     private inline fun <reified T> assertWakeJson(current: String) {

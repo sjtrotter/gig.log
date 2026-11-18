@@ -86,6 +86,7 @@ Five items the dev confirmed on 2026-10-07. Each full item appears once, with it
 - [A saved receipt is matched to its deliveries (#1599)](checklist/open/1599-match-a-saved-receipt.md)
 - [A one-offer stacked job settles its own receipt (#1601)](checklist/open/1601-stacked-receipt-settles-itself.md)
 - [Going offline is seen on the offline home drawn without its Dash button (#1668)](checklist/open/1668-offline-home-without-dash-button.md)
+- [The End dash tap ends a shift that earned nothing (#1668)](checklist/open/1668-end-dash-tap-ends-shift.md)
 - [The waiting-for-offers screen is recognized without its "Finding offers" card (#1669)](checklist/open/1669-waiting-without-finding-offers-card.md)
 
 - [🆕 NEW — after a GPS dash, the delivery drill-down's rows carry an arrival odometer and…](checklist/open/1310-after-a-gps-dash-the-delivery-drill-down-s-rows.md)

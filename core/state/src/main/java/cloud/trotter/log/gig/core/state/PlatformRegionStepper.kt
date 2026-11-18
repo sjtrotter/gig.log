@@ -58,16 +58,6 @@ class PlatformRegionStepper @Inject constructor() {
         // `GraceConfig.acceptGraceMs` (DoorDash 120s, Uber 600s) — read via
         // `TransitionPolicy.acceptGraceMs(platform)`, threaded to the offer lifecycle. The former
         // global `ACCEPT_GRACE_MS` const is deleted (Principle 8 — grace timing is per-platform).
-
-        /**
-         * #1078 — the `TASK_RETIRE` provenances ([PendingDestructive.armedFromFlow], #596) a dash end
-         * may NOT absorb as evidence of a finished delivery. See [absorbableRetire]:
-         * `OfferPresented` retires an UNDELIVERED drop (the dasher stepped off to deliberate on an
-         * add-on), and a `PostTask` retire's completion is already minted on the receipt's exit
-         * frame. A null provenance is refused separately — unprovenanced evidence is not evidence.
-         * Flow VALUES, never platform literals (principle 8).
-         */
-        private val UNABSORBABLE_RETIRE_FLOWS = setOf(Flow.OfferPresented, Flow.PostTask)
     }
 
     /**
@@ -344,7 +334,13 @@ class PlatformRegionStepper @Inject constructor() {
             }
         }
 
+        // #1668: a non-authoritative dash end yields to an offer or task screen (the tap-armed grace stands Online).
+        current = EndShiftTap.yieldToWork(current, obs)
+
         if (flowObs == null) return current
+
+        // #1668: the end-shift confirm tap arms the graced dash end; the click does not move mode.
+        if (EndShiftTap.isConfirm(obs, current)) current = EndShiftTap.arm(current, obs, policy)
 
         // #1315: explicit completion-steps intent is a second delivery witness. The step wrapper's
         // reconcileJobTasks mirrors this copy into Job.tasks; arrival/dwell and flow stay untouched.
@@ -376,6 +372,10 @@ class PlatformRegionStepper @Inject constructor() {
 
             // Click — records user intent, does NOT drive mode
             flowObs is Observation.Click -> current.copy(lastObservedAt = obs.timestamp)
+
+            // #1668: under a tap-armed end only an offer or task screen (which cancelled it above) moves
+            // the region Online; the timeline's online redraw neither resumes a Paused shift nor cancels.
+            EndShiftTap.holdsMode(current, impliedMode) -> current.copy(lastObservedAt = obs.timestamp)
 
             // #605: a screen-implied resume OUT of Paused is GRACED, not immediate.
             // DoorDash's pause sheet sits on the just-completed delivery summary, so
@@ -431,8 +431,11 @@ class PlatformRegionStepper @Inject constructor() {
         // lifecycle, not inside it.
         val afterRatings = updateRatings(afterMode, flowObs)
 
-        // Update session/job/task lifecycle based on flow changes
-        return updateLifecycle(sink, afterRatings, prevFlow, nextFlow, flowObs, policy)
+        // Update session/job/task lifecycle based on flow changes. #1668: a flow-less frame's inherited
+        // lifecycle never clears or replaces a tap-armed end.
+        return EndShiftTap.keepThroughInheritedFlow(
+            afterRatings, updateLifecycle(sink, afterRatings, prevFlow, nextFlow, flowObs, policy), flowObs,
+        )
     }
 
     // =========================================================================
@@ -483,31 +486,9 @@ class PlatformRegionStepper @Inject constructor() {
             }
             prev.mode != Mode.Offline && newMode == Mode.Offline -> {
                 // Non-authoritative offline — arm a provisional dash-end, keeping
-                // the session alive until it's confirmed or cancelled.
-                if (region.session != null &&
-                    region.pendingDestructive?.kind != DestructiveKind.SESSION_END
-                ) {
-                    // #1078: this arm used to OVERWRITE a standing `TASK_RETIRE` with `SESSION_END`
-                    // (the loss documented as a #1076 gap) — the retire's evidence simply vanished
-                    // and the eventual teardown force-stamped an unqualified completion. Absorb the
-                    // retire's `since` so `endSession` can honor it, through the SAME predicate the
-                    // summary arm reads ([absorbableRetire]).
-                    val absorbed = region.absorbableRetire()
-                    // Round 5: absorbing a retire never PULLS its commit forward. The end may be
-                    // delayed to the retire's own deadline, so a contradicting `task:unassigned`
-                    // frame the retire would still have seen can still disown it.
-                    val candidate = obs.timestamp + policy.gracePeriodMs(region.platform)
-                    region = region.withWakeIdIfDeadlineMoved(null, WindowStart.Live(obs.timestamp)) { wakeId ->
-                        PendingDestructive(
-                            kind = DestructiveKind.SESSION_END,
-                            since = obs.timestamp,
-                            deadline = maxOf(candidate, absorbed?.deadline ?: candidate),
-                            absorbedRetireSince = absorbed?.since,
-                            absorbedRetireDeadline = absorbed?.deadline,
-                            wakeId = wakeId,
-                        )
-                    }
-                }
+                // the session alive until it's confirmed or cancelled (one armer with the
+                // end-shift tap, #1668; it absorbs a standing retire, #1078).
+                region = region.armSessionEndGrace(obs.timestamp, policy)
             }
         }
 
@@ -671,57 +652,7 @@ class PlatformRegionStepper @Inject constructor() {
         )
     }
 
-    /**
-     * #1078 — **the retire a `SESSION_END` may absorb the evidence of**, or null. Round 5 returns
-     * the whole pending rather than its `since`, because BOTH halves are evidence: the instant it
-     * armed ([PendingDestructive.absorbedRetireSince]) and the window it was standing in
-     * ([PendingDestructive.absorbedRetireDeadline]).
-     *
-     * The ONE spelling, read by BOTH arm sites (the authoritative summary arm and the Online→Offline
-     * mode arm) so the two can never disagree about what a teardown is allowed to honor.
-     *
-     * A `TASK_RETIRE` is absorbable only when its PROVENANCE says the task it retires was actually
-     * finished. That is exactly `armedFromFlow` (#596), and two values are excluded:
-     *
-     * - **[Flow.OfferPresented]** — the dasher stepped off the task to deliberate on a mid-route
-     *   add-on offer. That drop is NOT delivered, which is why `retireActiveTask` already refuses to
-     *   close the job on such a retire; letting a dash end honor it would mint a completion (and an
-     *   offer-pay share) for undelivered work — the exact fabrication #1078 exists to prevent, in the
-     *   opposite direction.
-     * - **[Flow.PostTask]** — a receipt-armed retire's completion is ALREADY minted, by the
-     *   PostTask-exit block on the very frame that left the receipt. Honoring it again at the
-     *   teardown emits a SECOND raw `DELIVERY_COMPLETED` for the same task: live, the engine's
-     *   `effects_fired` per-task key hides it; in a replay (and in any consumer counting raw
-     *   effects) it is a double-count.
-     * - **`armedFromFlow == null`** — a pre-#596 snapshot's retire, or one whose provenance was never
-     *   recorded. Unprovenanced evidence is not evidence: fail-null (#745).
-     *
-     * **Delivery evidence is an ADDITIONAL condition** (#615/#1101/#1315). T1 close, absorption
-     * and endSession share one standard — arrival OR a completion-steps tap the dasher did not
-     * navigate away from (#1315), on an un-unassigned DROPOFF. A gift sheet can supply the tap
-     * without arrival; SESSION_END inside its retire window must honor it once the window matures,
-     * just like T1. [completedInline] lets the shared [isDeliveredEvidenced] predicate see the retire
-     * as committed without mutating the task. Provenance still requires a watched retire; evidence
-     * alone never authorizes a completion (the rejected rule 2 below).
-     *
-     * **Rule 2 was considered and REJECTED** (round 2): absorbing at the AUTHORITATIVE summary
-     * whenever an ARRIVED dropoff was still active would have covered the retire-less 09-05 shape,
-     * but it fabricates a completion for an arrived drop that was cancelled or unassigned through a
-     * path the sensor never captured — and for a misrecognized summary. Fail-null beats fail-wrong:
-     * the machine records only what it watched finish.
-     */
-    private fun PlatformRegion.absorbableRetire(): PendingDestructive? {
-        val drop = activeTask ?: return null
-        if (drop.phase != TaskPhase.DROPOFF) return null
-        return pendingDestructive
-            ?.takeIf { it.kind == DestructiveKind.TASK_RETIRE }
-            ?.takeIf { it.armedFromFlow != null && it.armedFromFlow !in UNABSORBABLE_RETIRE_FLOWS }
-            ?.takeIf { drop.completedInline(drop.honoredRetireInstant(it.since)).isDeliveredEvidenced() }
-    }
-
-    /** #1315: a witness-only completion cannot precede the tap that supplies its evidence. */
-    private fun Task.honoredRetireInstant(since: Long): Long =
-        if (arrivedAt == null) maxOf(since, completionStepsAt ?: since) else since
+    // #1078: `absorbableRetire` and `honoredRetireInstant` live in `SessionEndArm.kt`.
 
     /**
      * Update session/job/task based on flow transitions.
@@ -1078,7 +1009,9 @@ class PlatformRegionStepper @Inject constructor() {
         timestamp: Long,
         observedAt: Long,
     ): PlatformRegion = when (kind) {
-        DestructiveKind.SESSION_END -> endSession(sink, region, timestamp, observedAt)
+        // #1668: a tap-armed end commits to Offline even from Paused.
+        DestructiveKind.SESSION_END ->
+            EndShiftTap.afterCommit(region.pendingDestructive, endSession(sink, region, timestamp, observedAt))
         // [timestamp] is the honest completion instant (the grace's `since`, #732); [observedAt] is
         // the frame that commits it, which is what a re-price decided here must be stamped with.
         DestructiveKind.TASK_RETIRE -> retireActiveTask(sink, region, timestamp, observedAt)
