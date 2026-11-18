@@ -250,7 +250,8 @@ object ReceiptMatch {
      * (jobId, taskId) of [shares] names exactly one row of [deliveries] (the shift's rows sequenced before the event),
      * the job has no row outside them, and every row is open to the machine: an estimate or no pay, no dasher money
      * edit, not hand-added or corrected, not moved into the shift, and named by no active match row of any role; and
-     * the job is not funded by another receipt ([funded]). Returns the rows with their cents in [shares] order.
+     * the job is not funded by another receipt ([funded]), and no active match spends the receipt itself. Returns the
+     * rows with their cents in [shares] order.
      */
     fun settlement(
         jobId: String,
@@ -260,6 +261,8 @@ object ReceiptMatch {
         active: List<ActiveMatchRow>,
         receipts: List<SavedReceipt>,
     ): SettlementPlan {
+        // A receipt an active match already spends (on any job) is not the settlement's to spend again.
+        if (active.any { it.evidenceId == evidenceId }) return SettlementPlan.Refuse("receipt already matched")
         val jobRows = deliveries.filter { it.jobId == jobId }
         val taskIds = shares.map { it.first }.toSet()
         if (jobRows.any { it.taskId !in taskIds }) return SettlementPlan.Refuse("the job has a delivery the settlement does not name")

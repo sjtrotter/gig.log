@@ -209,6 +209,40 @@ class JobSettlementSessionTest {
         assertTrue(fold.settlements().isEmpty())
     }
 
+    @Test fun `a T2 pool link decides the old job on the pool BEFORE the link takes its entry out`() {
+        // An offer at the job's own chain, pooled before the job's accept: a rival the read could belong to.
+        val rival = PooledOffer(
+            offer = PendingOffer(
+                offerHash = "x0", offerFields = ParsedFields.OfferFields(parsedOffer = PF.parsedOffer("x0", stores = listOf("Alpha Burger (Loop 410)"))),
+                presentedAt = 50L, returnFlow = Flow.Idle,
+            ),
+            leftAt = 60L, via = PoolEntryVia.FRAME, sessionId = "S1",
+            candidateStoreKeys = setOf(StoreKeys.normalizedChain("Alpha Burger #55")),
+        )
+        // The receipt, then fresh work at that chain links the pooled offer (a T2 close of the finished job).
+        val fold = ReceiptFold(stack(pool = listOf(rival)))
+            .step(RS.postTask(collapsed(17.55), 4_000L))
+            .step(PF.pickup(5_000L, store = "Alpha Burger #55"))
+        assertTrue("the pooled offer linked a new job", fold.region.activeJob?.jobId != "J1" && fold.region.offerPool.isEmpty())
+        assertTrue(fold.settlements().isEmpty())
+    }
+
+    @Test fun `an expansion on the frame that closes the job - same shares - names the latest receipt revision`() {
+        // Tips by store that split exactly as the collapsed total's even split: $8.78 / $8.77.
+        val sameSplit = ParsedPay(
+            appPayComponents = listOf(ParsedPayItem("Base Pay", 8.00)),
+            customerTips = listOf(ParsedPayItem("Alpha Burger", 4.78), ParsedPayItem("Beta Tacos", 4.77)),
+        )
+        val fold = ReceiptFold(stack())
+            .step(RS.postTask(collapsed(17.55), 4_000L))
+            .step(RS.postTask(expanded(sameSplit), 12_500L)) // the retire grace commits on this frame, closing the job
+        assertNull(fold.region.activeJob)
+        val settled = fold.settlements().single()
+        assertEquals(lines("t1" to 878L, "t2" to 877L), settled.lines)
+        assertEquals(2, settled.evidenceRevision)
+        assertEquals(2, fold.evidence().last().revision)
+    }
+
     @Test fun `a teardown decides on the pool BEFORE the shift-end flush`() {
         val read = JobReceiptRead("receipt:t2:3300", 1, "t2", 1755, null, totalIsOffer = true, possibleWorkSeq = 0, observedAt = 3_300L)
         fun end(pool: List<PooledOffer>) = ReceiptFold(stack(priorReads = listOf(read), pool = pool, lastActive = false)).step(

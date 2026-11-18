@@ -310,12 +310,15 @@ private fun PlatformRegionStepper.link(
 ): PlatformRegion {
     val acceptedAt = minOf(entry.leftAt, edgeAt)
     // Stamped before any T2 close, so the close-time re-price ask refuses an accept resolved over the receipt.
-    val pooled = region.copy(
-        offerPool = region.offerPool - entry,
+    val resolved = region.copy(
         lastAcceptResolvedAt = obs.timestamp,
         acceptResolveSeq = region.acceptResolveSeq + 1, // #1601: the linked job takes this as its own stamp
     )
-    val linked = consumeAcceptIntoJob(sink, pooled, obs, acceptInputsFromPending(entry.offer, acceptedAt))
+    // #1601: consume with the entry still pooled, then take it out. A T2 close inside the consume decides whole-job
+    // settlement on the pool as it stood before this link, so a same-chain offer pooled before the old job's accept
+    // still counts as its rival.
+    val linked = consumeAcceptIntoJob(sink, resolved, obs, acceptInputsFromPending(entry.offer, acceptedAt))
+        .let { it.copy(offerPool = it.offerPool.filterNot { e -> e.instanceKey == entry.instanceKey }) }
     // A held frame's task evidence (arrival, customer, deadline, shopping) lands on the linked job's task before the
     // releasing frame steps on it, exactly as the held frame would have had the job existed (council round 6). A held
     // pickup takes the releasing pickup's store first, so the releasing frame updates that one task instead of

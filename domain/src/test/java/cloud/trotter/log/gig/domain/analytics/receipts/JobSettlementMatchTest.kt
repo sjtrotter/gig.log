@@ -62,6 +62,13 @@ class JobSettlementMatchTest {
         refused(listOf(y1, y2, row(9, jobId = "J9")), listOf(dasher(9, evidence = "receipt:t1:1")), listOf(receipt(2), receipt(1)))
     }
 
+    @Test fun `settlement - refused when the dasher already matched the same receipt, even to another job`() {
+        val elsewhere = row(9, jobId = "J9")
+        val matched = dasher(9, cents = 1755, evidence = "receipt:t2:1")
+        val plan = ReceiptMatch.settlement("J1", "receipt:t2:1", shares, listOf(y1, y2, elsewhere), listOf(matched), listOf(receipt(2)))
+        assertEquals(SettlementPlan.Refuse("receipt already matched"), plan)
+    }
+
     @Test fun `holdsWritten and lock read the origin - a settled row is DROP_SHARE with no driverAdjustedAt`() {
         val settled = row(1, pay = 8.78, basis = PayBasis.DROP_SHARE)
         assertTrue(ReceiptMatch.holdsWritten(app(1, 878), settled))

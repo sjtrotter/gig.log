@@ -110,7 +110,21 @@ internal class DecisionSink {
     fun retired(taskId: String) { retiredTaskId = taskId }
     fun receiptObserved(d: ReceiptEvidenceDecision) { receiptEvidence = d }
     fun offerOutcome(d: OfferOutcomeDecision) { offerOutcomes += d }
-    fun jobSettled(d: JobSettlementDecision) { jobSettlements += d }
+    /** #1601: one decision per job per step; a later one replaces an earlier one (the step's last word). */
+    fun jobSettled(d: JobSettlementDecision) {
+        jobSettlements.removeAll { it.jobId == d.jobId }
+        jobSettlements += d
+    }
+
+    /**
+     * #1601: an unchanged allocation decided nothing, but if this step already decided [jobId] from an earlier revision of
+     * [evidenceId], that decision names [evidenceRevision] instead: the step's `RECEIPT_OBSERVED` carries the latest
+     * revision, and the projector applies a settlement only at the receipt's current revision.
+     */
+    fun refreshJobSettlementEvidence(jobId: String, evidenceId: String, evidenceRevision: Int) {
+        val i = jobSettlements.indexOfFirst { it.jobId == jobId && it.evidenceId == evidenceId }
+        if (i >= 0) jobSettlements[i] = jobSettlements[i].copy(evidenceRevision = evidenceRevision)
+    }
     fun build(): RegionDecisions =
         RegionDecisions(receiptReprice, retiredTaskId, receiptEvidence, offerOutcomes.toList(), jobSettlements.toList())
 }

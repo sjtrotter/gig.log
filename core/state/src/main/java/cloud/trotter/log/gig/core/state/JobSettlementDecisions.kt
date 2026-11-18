@@ -79,7 +79,12 @@ internal fun decideJobSettlement(
                 receiptCents = proof.paying.totalCents,
                 shares = proof.shares.toMap(),
             )
-            if (decided == prior) return marker
+            if (decided == prior) {
+                // The same allocation from a newer revision read on this very step (an expansion on the closing frame):
+                // the step's decision must name that revision.
+                sink.refreshJobSettlementEvidence(jobId, proof.paying.evidenceId, proof.paying.revision)
+                return marker
+            }
             val revision = marker.revision + 1
             sink.jobSettled(
                 JobSettlementDecision(
