@@ -1,6 +1,15 @@
 package cloud.trotter.log.gig.core.state
 
+import cloud.trotter.log.gig.domain.format.Formats
+import cloud.trotter.log.gig.domain.model.offer.OfferQuoteBasis
+import cloud.trotter.log.gig.domain.model.offer.OfferScope
+import cloud.trotter.log.gig.domain.model.pay.ParsedPay
+import cloud.trotter.log.gig.domain.state.DropPayApportioner
+import cloud.trotter.log.gig.domain.state.Job
+import cloud.trotter.log.gig.domain.state.JobReceiptRead
+import cloud.trotter.log.gig.domain.state.JobSettlementGap
 import cloud.trotter.log.gig.domain.state.PlatformRegion
+import cloud.trotter.log.gig.domain.state.PooledOffer
 import cloud.trotter.log.gig.domain.state.ReceiptCoverage
 import cloud.trotter.log.gig.domain.state.ReceiptProofGap
 import cloud.trotter.log.gig.domain.state.ReceiptScope
@@ -70,3 +79,114 @@ private fun proven(subjectTaskId: String) =
     ReceiptCoverage(taskIds = setOf(subjectTaskId), scope = ReceiptScope.PROVEN_SINGLE)
 
 private fun unproven(gap: ReceiptProofGap) = ReceiptCoverage(scope = ReceiptScope.UNPROVEN, gap = gap)
+
+/** #1601: the answer of [jobSettlementAt]. */
+internal sealed interface JobSettlementProof {
+    /** The job is proven: [paying] paid it, split into [shares] (taskId to cents, ascending taskId) over [cardCount] drops. */
+    data class Proven(val paying: JobReceiptRead, val shares: List<Pair<String, Long>>, val cardCount: Int) : JobSettlementProof
+
+    data class Refused(val gap: JobSettlementGap) : JobSettlementProof
+}
+
+/**
+ * #1601 — may a one-offer job whose card showed N ≥ 2 stops take its receipt as the whole job's pay? The clauses, in
+ * order (design D3 with amendments A1, A2, A5); the first that fails is the [JobSettlementGap]:
+ *  1. reads were tracked from the job's mint (`READS_UNTRACKED`: a job minted by an older build);
+ *  2. exactly one accepted offer, TOTAL basis (`OFFER_COUNT`);
+ *  3. the card's count was parsed and is at least 2 (`CARD_COUNT_MISSING`, `CARD_COUNT_ONE`; one stop is #1598's);
+ *  4. no drop of the job was unassigned on any copy (`UNASSIGNED`); exactly N accountable drops (`DROP_COUNT`), each
+ *     with a minted completion (`DROP_NOT_MINTED`);
+ *  5. each has a positive delivery witness, arrival or the completion steps (`NO_DELIVERY_WITNESS`, the #1081 class);
+ *  6. each drop's store is one the offer quoted, by [StoreKeys.normalizedChain] (`STORE_MISSING`, `STORE_MISMATCH`);
+ *  7. every tracked read's rule declared its total is the whole offer's pay (`SCOPE_UNDECLARED`; principle 8: a
+ *     platform that declares nothing never settles);
+ *  8. a read names the last of the N drops to complete (`NO_TERMINAL_READ`); the latest such record is the PAYING read;
+ *  9. every tracked record agrees on the total (`READS_DISAGREE`: a part receipt or a tip change refuses, never picks);
+ *  10. no accept resolved after the job's own resolution stamp (`OTHER_ACCEPT`); no non-demoted pool entry presented
+ *     between the job's accept and its close (`POOLED_OFFER`); no non-demoted pool entry still waiting at a store of
+ *     the job's drops, nor an ADD_ON entry with no candidate store presented after the accept (`RIVAL_POOLED`, A1);
+ *  11. no fresh presentation between the terminal drop's activation and the paying read (`LATE_FRAME`), which also
+ *     covers the #1598 late-frame guard for a revision read after the close.
+ *
+ * The shares come from the paying revision alone (A3): its itemization through [DropPayApportioner.apportion] when the
+ * items sum to its own total in cents, else [DropPayApportioner.evenSplitCents] in ascending taskId order. No
+ * arithmetic of its own. Pure: the job's records, the pool and the counters — no wall clock, no `Platform` literal.
+ */
+internal fun jobSettlementAt(
+    job: Job,
+    /** Every copy of the job's tasks at the close. */
+    copies: List<Task>,
+    mintedTaskIds: Set<String>,
+    /** The pool as the decision sees it; at a teardown, BEFORE the shift-end flush (A5). */
+    offerPool: List<PooledOffer>,
+    acceptResolveSeq: Long,
+    closedAt: Long,
+): JobSettlementProof {
+    val reads = job.receiptReads ?: return refused(JobSettlementGap.READS_UNTRACKED)
+    val offer = job.acceptedOffers.singleOrNull()?.takeIf { it.quoteBasis == OfferQuoteBasis.TOTAL }
+        ?: return refused(JobSettlementGap.OFFER_COUNT)
+    val n = offer.cardDropoffCount ?: return refused(JobSettlementGap.CARD_COUNT_MISSING)
+    if (n < 2) return refused(JobSettlementGap.CARD_COUNT_ONE)
+
+    val dropCopies = copies.filter { it.jobId == job.jobId && it.phase == TaskPhase.DROPOFF }.groupBy { it.taskId }
+    if (dropCopies.values.any { c -> c.any { it.unassignedAt != null } }) return refused(JobSettlementGap.UNASSIGNED)
+    val drops = dropCopies.filterValues { c -> c.any { it.hasCustomerIdentity } }
+    if (drops.size != n) return refused(JobSettlementGap.DROP_COUNT)
+    if (drops.keys.any { it !in mintedTaskIds }) return refused(JobSettlementGap.DROP_NOT_MINTED)
+    if (drops.values.any { c -> c.none { it.arrivedAt != null || it.completionStepsAt != null } }) {
+        return refused(JobSettlementGap.NO_DELIVERY_WITNESS)
+    }
+    val quoted = offer.storeHints.filter(String::isNotBlank).map(StoreKeys::normalizedChain).toSet()
+    val stores = LinkedHashMap<String, String>()
+    for ((taskId, c) in drops) {
+        val store = c.firstNotNullOfOrNull { it.storeName?.takeIf(String::isNotBlank) }
+            ?: return refused(JobSettlementGap.STORE_MISSING)
+        if (StoreKeys.normalizedChain(store) !in quoted) return refused(JobSettlementGap.STORE_MISMATCH)
+        stores[taskId] = store
+    }
+    if (reads.any { !it.totalIsOffer }) return refused(JobSettlementGap.SCOPE_UNDECLARED)
+
+    // The drop that completed last; one still active (its completion not yet stamped) is the latest. A tie names none.
+    val finishedAt = drops.mapValues { (_, c) -> c.mapNotNull { it.completedAt }.maxOrNull() ?: Long.MAX_VALUE }
+    val latest = finishedAt.values.max()
+    val terminal = finishedAt.filterValues { it == latest }.keys.singleOrNull()
+        ?: return refused(JobSettlementGap.NO_TERMINAL_READ)
+    val paying = reads.filter { it.subjectTaskId == terminal }.maxByOrNull { it.observedAt }
+        ?: return refused(JobSettlementGap.NO_TERMINAL_READ)
+    if (reads.any { it.totalCents != paying.totalCents }) return refused(JobSettlementGap.READS_DISAGREE)
+
+    val ownAccept = job.ownAcceptSeq ?: return refused(JobSettlementGap.OTHER_ACCEPT)
+    if (acceptResolveSeq > ownAccept) return refused(JobSettlementGap.OTHER_ACCEPT)
+    val live = offerPool.filterNot { it.demoted }
+    if (live.any { it.offer.presentedAt > offer.acceptedAt && it.offer.presentedAt <= closedAt }) {
+        return refused(JobSettlementGap.POOLED_OFFER)
+    }
+    val chains = stores.values.map(StoreKeys::normalizedChain).toSet()
+    val rival = live.any { e ->
+        e.candidateStoreKeys.any { it in chains } ||
+            (e.candidateStoreKeys.isEmpty() && e.offer.presentedAt > offer.acceptedAt &&
+                e.offer.offerFields.parsedOffer.effectiveScope == OfferScope.ADD_ON)
+    }
+    if (rival) return refused(JobSettlementGap.RIVAL_POOLED)
+    val activated = job.dropoffActivatedSeq[terminal] ?: return refused(JobSettlementGap.LATE_FRAME)
+    if (paying.possibleWorkSeq != activated) return refused(JobSettlementGap.LATE_FRAME)
+
+    val ids = drops.keys.sorted()
+    val itemized = paying.parsedPay?.takeIf { it.sumsTo(paying.totalCents) }
+    val apportioned = itemized?.let { pay ->
+        val tasks = ids.map { id -> drops.getValue(id).first().copy(storeName = stores.getValue(id)) }
+        DropPayApportioner.apportion(pay, tasks).mapValues { Formats.cents(it.value) }
+    }
+    val shares = if (apportioned != null && apportioned.size == n && apportioned.values.sum() == paying.totalCents) {
+        ids.map { it to apportioned.getValue(it) }
+    } else {
+        ids.zip(DropPayApportioner.evenSplitCents(paying.totalCents, n))
+    }
+    return JobSettlementProof.Proven(paying, shares, n)
+}
+
+/** A3: an itemization is used only when its items sum, in cents, to the revision's own total. */
+private fun ParsedPay.sumsTo(totalCents: Long): Boolean =
+    (appPayComponents + customerTips).sumOf { Formats.cents(it.amount) } == totalCents
+
+private fun refused(gap: JobSettlementGap) = JobSettlementProof.Refused(gap)

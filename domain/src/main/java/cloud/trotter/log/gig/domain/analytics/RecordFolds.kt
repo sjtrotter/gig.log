@@ -323,6 +323,8 @@ data class FoldOutcome(
     val receiptMatch: ReceiptMatchFold? = null,
     /** The dasher's undo of a receipt match (#1599, [ReceiptMatchFolds.foldUndone]). */
     val receiptMatchUndo: ReceiptMatchUndoFold? = null,
+    /** A machine whole-job settlement revision (#1601, [ReceiptMatchFolds.foldJobSettled]); applied all or nothing. */
+    val jobSettlement: JobSettlementFold? = null,
 )
 
 /**
@@ -475,6 +477,8 @@ object RecordFolds {
         AppEventType.OFFER_OUTCOME_CORRECTION,
         AppEventType.RECEIPT_MATCHED,
         AppEventType.RECEIPT_MATCH_UNDONE,
+        // #1601: a machine settlement moves money onto existing rows; it measures nothing.
+        AppEventType.JOB_RECEIPT_SETTLED,
         AppEventType.SESSION_REPORT_CORRECTION,
         AppEventType.SESSION_MILES_CORRECTION,
     )
@@ -554,6 +558,7 @@ object RecordFolds {
             AppEventType.OFFER_OUTCOME_CORRECTION -> CorrectionFolds.foldOfferOutcomeCorrection(event, context)
             AppEventType.RECEIPT_MATCHED -> ReceiptMatchFolds.foldMatched(event, context)
             AppEventType.RECEIPT_MATCH_UNDONE -> ReceiptMatchFolds.foldUndone(event, context)
+            AppEventType.JOB_RECEIPT_SETTLED -> ReceiptMatchFolds.foldJobSettled(event, context)
             // #810 B2 Tier 1: emit the orphan-reconcile trigger (the orchestrator runs the store-evidence
             // join against committed rows in-transaction) AND still advance liveness exactly as the old
             // read-model-inert `else` arm did (the #810 B1 tripwire mints no record itself).

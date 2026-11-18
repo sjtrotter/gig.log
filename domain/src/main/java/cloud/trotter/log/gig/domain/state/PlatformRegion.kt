@@ -321,6 +321,14 @@ data class PlatformRegion(
      * replayed from the journal, dropped by recovery hygiene once past its cap, cleared at `endSession`.
      */
     val heldWorkFrame: HeldWorkFrame? = null,
+    /**
+     * #1601: bumped by one wherever an accept resolves (where [lastAcceptResolvedAt] is stamped); monotonic, never
+     * cleared. A job records its value at its mint ([Job.ownAcceptSeq]), so "another accept resolved since" is a
+     * processing-order comparison, never a timestamp one.
+     */
+    val acceptResolveSeq: Long = 0,
+    /** #1601: the just-closed job's settlement marker; see [ClosedJobSettlement]. Cleared at `endSession`. */
+    val closedJobSettlement: ClosedJobSettlement? = null,
 ) {
     /**
      * This platform's current PRESENTED offer — the accepted-pending-consumption survivors

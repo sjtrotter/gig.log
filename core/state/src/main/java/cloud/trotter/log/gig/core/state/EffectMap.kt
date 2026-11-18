@@ -238,6 +238,9 @@ class EffectMap @Inject constructor(
             addAll(diffReceiptReprice(p, next, decisions))
             // #1598: every receipt read is saved as evidence; it moves no money.
             addAll(diffReceiptEvidence(p, next, decisions))
+            // #1601: a whole-job settlement revision. LOAD-BEARING order: after this step's `DELIVERY_COMPLETED`s (the
+            // rows it pays) and its `RECEIPT_OBSERVED` (the receipt revision it names), so the projector finds both.
+            addAll(diffJobSettlement(decisions))
         }
     }
 

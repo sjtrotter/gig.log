@@ -92,10 +92,12 @@ internal fun PlatformRegionStepper.leavePresentation(
                         if (it === offer) offer.copy(acceptedAt = offer.acceptClickAt ?: obs.timestamp) else it
                     },
                     lastAcceptResolvedAt = obs.timestamp,
+                    acceptResolveSeq = region.acceptResolveSeq + 1, // #1601
                 )
             } else {
-                // A new presentation supersedes or revokes a stale accept (#526 FIX2b).
-                region.copy(pendingOffers = rest)
+                // A new presentation supersedes or revokes a stale accept (#526 FIX2b). #1601: it still resolved an
+                // accept, whose work may exist, so whole-job settlement counts it.
+                region.copy(pendingOffers = rest, acceptResolveSeq = region.acceptResolveSeq + 1)
             }
         }
         else -> {
@@ -308,7 +310,11 @@ private fun PlatformRegionStepper.link(
 ): PlatformRegion {
     val acceptedAt = minOf(entry.leftAt, edgeAt)
     // Stamped before any T2 close, so the close-time re-price ask refuses an accept resolved over the receipt.
-    val pooled = region.copy(offerPool = region.offerPool - entry, lastAcceptResolvedAt = obs.timestamp)
+    val pooled = region.copy(
+        offerPool = region.offerPool - entry,
+        lastAcceptResolvedAt = obs.timestamp,
+        acceptResolveSeq = region.acceptResolveSeq + 1, // #1601: the linked job takes this as its own stamp
+    )
     val linked = consumeAcceptIntoJob(sink, pooled, obs, acceptInputsFromPending(entry.offer, acceptedAt))
     // A held frame's task evidence (arrival, customer, deadline, shopping) lands on the linked job's task before the
     // releasing frame steps on it, exactly as the held frame would have had the job existed (council round 6). A held
