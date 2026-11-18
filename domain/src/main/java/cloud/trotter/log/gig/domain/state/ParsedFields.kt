@@ -188,6 +188,11 @@ sealed class ParsedFields {
         val sessionEarnings: Double? = null,
         val offersAccepted: Int? = null,
         val offersTotal: Int? = null,
+        /**
+         * #1601: the rule declares this receipt's total is the whole accepted offer's pay (`receiptTotalScope: "offer"`,
+         * `StateMachineContract.PARSE_DECLARATION_LITERALS`). A constant of the rule, so it is not in [dedupeHash].
+         */
+        val receiptTotalIsOffer: Boolean = false,
     ) : ParsedFields() {
         override fun toFieldMap(): Map<String, Any?> = mapOf(
             "totalPay" to totalPay,
@@ -199,6 +204,7 @@ sealed class ParsedFields {
             "sessionEarnings" to sessionEarnings,
             "offersAccepted" to offersAccepted,
             "offersTotal" to offersTotal,
+            "receiptTotalIsOffer" to receiptTotalIsOffer,
         )
 
         override fun dedupeHash(): Int {

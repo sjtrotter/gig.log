@@ -1030,6 +1030,7 @@
             "offersAccepted": null,
             "offersTotal": null,
             "parsedPay": null,
+            "receiptTotalIsOffer": true,
             "sessionEarnings": 17.75,
             "totalPay": 17.72
         }
@@ -1046,6 +1047,7 @@
             "offersAccepted": null,
             "offersTotal": null,
             "parsedPay": null,
+            "receiptTotalIsOffer": true,
             "sessionEarnings": null,
             "totalPay": 13.45
         }
@@ -1062,6 +1064,7 @@
             "offersAccepted": null,
             "offersTotal": null,
             "parsedPay": null,
+            "receiptTotalIsOffer": true,
             "sessionEarnings": null,
             "totalPay": 16.7
         }
@@ -1078,6 +1081,7 @@
             "offersAccepted": null,
             "offersTotal": null,
             "parsedPay": null,
+            "receiptTotalIsOffer": true,
             "sessionEarnings": null,
             "totalPay": 40.57
         }
@@ -1094,6 +1098,7 @@
             "offersAccepted": null,
             "offersTotal": null,
             "parsedPay": null,
+            "receiptTotalIsOffer": true,
             "sessionEarnings": 40.57,
             "totalPay": 40.57
         }
@@ -1110,6 +1115,7 @@
             "offersAccepted": null,
             "offersTotal": null,
             "parsedPay": null,
+            "receiptTotalIsOffer": true,
             "sessionEarnings": 6.6,
             "totalPay": 6.6
         }
@@ -1126,6 +1132,7 @@
             "offersAccepted": null,
             "offersTotal": null,
             "parsedPay": null,
+            "receiptTotalIsOffer": true,
             "sessionEarnings": 6.6,
             "totalPay": 6.6
         }
@@ -1142,6 +1149,7 @@
             "offersAccepted": null,
             "offersTotal": null,
             "parsedPay": null,
+            "receiptTotalIsOffer": true,
             "sessionEarnings": 14.75,
             "totalPay": 8.15
         }
@@ -1158,6 +1166,7 @@
             "offersAccepted": null,
             "offersTotal": null,
             "parsedPay": null,
+            "receiptTotalIsOffer": true,
             "sessionEarnings": 14.75,
             "totalPay": 8.15
         }
@@ -1174,6 +1183,7 @@
             "offersAccepted": null,
             "offersTotal": null,
             "parsedPay": null,
+            "receiptTotalIsOffer": true,
             "sessionEarnings": 27.0,
             "totalPay": 12.25
         }
@@ -1190,6 +1200,7 @@
             "offersAccepted": null,
             "offersTotal": null,
             "parsedPay": null,
+            "receiptTotalIsOffer": true,
             "sessionEarnings": 27.0,
             "totalPay": 0.0
         }
@@ -1206,6 +1217,7 @@
             "offersAccepted": null,
             "offersTotal": null,
             "parsedPay": null,
+            "receiptTotalIsOffer": true,
             "sessionEarnings": 27.0,
             "totalPay": 0.0
         }
@@ -1222,6 +1234,7 @@
             "offersAccepted": null,
             "offersTotal": null,
             "parsedPay": null,
+            "receiptTotalIsOffer": true,
             "sessionEarnings": 36.78,
             "totalPay": 9.78
         }
@@ -1238,6 +1251,7 @@
             "offersAccepted": null,
             "offersTotal": null,
             "parsedPay": null,
+            "receiptTotalIsOffer": true,
             "sessionEarnings": 44.38,
             "totalPay": 7.6
         }
@@ -1254,6 +1268,7 @@
             "offersAccepted": null,
             "offersTotal": null,
             "parsedPay": null,
+            "receiptTotalIsOffer": true,
             "sessionEarnings": 44.38,
             "totalPay": 7.6
         }
@@ -1270,6 +1285,7 @@
             "offersAccepted": null,
             "offersTotal": null,
             "parsedPay": null,
+            "receiptTotalIsOffer": true,
             "sessionEarnings": 50.33,
             "totalPay": 5.95
         }
@@ -1286,6 +1302,7 @@
             "offersAccepted": null,
             "offersTotal": null,
             "parsedPay": null,
+            "receiptTotalIsOffer": true,
             "sessionEarnings": 12.15,
             "totalPay": 12.15
         }
@@ -1302,6 +1319,7 @@
             "offersAccepted": null,
             "offersTotal": null,
             "parsedPay": null,
+            "receiptTotalIsOffer": true,
             "sessionEarnings": 12.15,
             "totalPay": 12.15
         }
@@ -1318,6 +1336,7 @@
             "offersAccepted": null,
             "offersTotal": null,
             "parsedPay": "ParsedPay(appPayComponents=[ParsedPayItem(type=Base pay, amount=17.75), ParsedPayItem(type=Peak pay, amount=1.0)], customerTips=[ParsedPayItem(type=799, amount=5.0)])",
+            "receiptTotalIsOffer": true,
             "sessionEarnings": 23.75,
             "totalPay": 23.75
         }
@@ -1334,6 +1353,7 @@
             "offersAccepted": null,
             "offersTotal": null,
             "parsedPay": "ParsedPay(appPayComponents=[ParsedPayItem(type=Base pay, amount=8.75)], customerTips=[ParsedPayItem(type=618, amount=20.12)])",
+            "receiptTotalIsOffer": true,
             "sessionEarnings": 52.62,
             "totalPay": 28.87
         }
@@ -1350,6 +1370,7 @@
             "offersAccepted": null,
             "offersTotal": null,
             "parsedPay": "ParsedPay(appPayComponents=[ParsedPayItem(type=Base pay, amount=6.7)], customerTips=[ParsedPayItem(type=Walgreens (11520), amount=4.25), ParsedPayItem(type=Arépale Latín Food, amount=5.5)])",
+            "receiptTotalIsOffer": true,
             "sessionEarnings": 16.45,
             "totalPay": 16.45
         }
@@ -1366,6 +1387,7 @@
             "offersAccepted": null,
             "offersTotal": null,
             "parsedPay": "ParsedPay(appPayComponents=[ParsedPayItem(type=Base pay, amount=13.0)], customerTips=[ParsedPayItem(type=799, amount=12.63)])",
+            "receiptTotalIsOffer": true,
             "sessionEarnings": 42.08,
             "totalPay": 25.63
         }
@@ -1382,6 +1404,7 @@
             "offersAccepted": null,
             "offersTotal": null,
             "parsedPay": "ParsedPay(appPayComponents=[ParsedPayItem(type=Base pay, amount=10.25)], customerTips=[ParsedPayItem(type=618, amount=7.0)])",
+            "receiptTotalIsOffer": true,
             "sessionEarnings": 71.83,
             "totalPay": 17.25
         }
@@ -1398,6 +1421,7 @@
             "offersAccepted": null,
             "offersTotal": null,
             "parsedPay": "ParsedPay(appPayComponents=[ParsedPayItem(type=Platform pay, amount=9.7)], customerTips=[ParsedPayItem(type=, amount=7.0)])",
+            "receiptTotalIsOffer": true,
             "sessionEarnings": 16.7,
             "totalPay": 16.7
         }
@@ -1414,6 +1438,7 @@
             "offersAccepted": null,
             "offersTotal": null,
             "parsedPay": "ParsedPay(appPayComponents=[ParsedPayItem(type=Platform pay, amount=14.2)], customerTips=[ParsedPayItem(type=, amount=26.37)])",
+            "receiptTotalIsOffer": true,
             "sessionEarnings": 40.57,
             "totalPay": 40.57
         }
@@ -1430,6 +1455,7 @@
             "offersAccepted": null,
             "offersTotal": null,
             "parsedPay": null,
+            "receiptTotalIsOffer": true,
             "sessionEarnings": 6.6,
             "totalPay": 6.6
         }
@@ -1446,6 +1472,7 @@
             "offersAccepted": null,
             "offersTotal": null,
             "parsedPay": null,
+            "receiptTotalIsOffer": true,
             "sessionEarnings": 14.75,
             "totalPay": 8.15
         }
@@ -1462,6 +1489,7 @@
             "offersAccepted": null,
             "offersTotal": null,
             "parsedPay": null,
+            "receiptTotalIsOffer": true,
             "sessionEarnings": 27.0,
             "totalPay": 12.25
         }
@@ -1478,6 +1506,7 @@
             "offersAccepted": null,
             "offersTotal": null,
             "parsedPay": null,
+            "receiptTotalIsOffer": true,
             "sessionEarnings": 27.0,
             "totalPay": 12.25
         }
@@ -1494,6 +1523,7 @@
             "offersAccepted": null,
             "offersTotal": null,
             "parsedPay": null,
+            "receiptTotalIsOffer": true,
             "sessionEarnings": 36.78,
             "totalPay": 9.78
         }
@@ -1510,6 +1540,7 @@
             "offersAccepted": null,
             "offersTotal": null,
             "parsedPay": null,
+            "receiptTotalIsOffer": true,
             "sessionEarnings": 36.78,
             "totalPay": 9.78
         }
@@ -1526,6 +1557,7 @@
             "offersAccepted": null,
             "offersTotal": null,
             "parsedPay": null,
+            "receiptTotalIsOffer": true,
             "sessionEarnings": 44.38,
             "totalPay": 7.6
         }
@@ -1542,6 +1574,7 @@
             "offersAccepted": null,
             "offersTotal": null,
             "parsedPay": null,
+            "receiptTotalIsOffer": true,
             "sessionEarnings": 44.38,
             "totalPay": 7.6
         }
@@ -1558,6 +1591,7 @@
             "offersAccepted": null,
             "offersTotal": null,
             "parsedPay": null,
+            "receiptTotalIsOffer": true,
             "sessionEarnings": 50.33,
             "totalPay": 5.95
         }
@@ -1574,6 +1608,7 @@
             "offersAccepted": null,
             "offersTotal": null,
             "parsedPay": null,
+            "receiptTotalIsOffer": true,
             "sessionEarnings": 12.15,
             "totalPay": 12.15
         }

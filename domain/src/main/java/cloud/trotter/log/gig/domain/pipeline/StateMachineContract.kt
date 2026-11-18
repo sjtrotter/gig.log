@@ -39,6 +39,14 @@ object StateMachineContract {
     const val OFFER_SCOPE_ADD_ON = "add_on"
     val SUPPORTED_OFFER_SCOPES: Set<String> = setOf(OFFER_SCOPE_STANDALONE, OFFER_SCOPE_ADD_ON)
     /**
+     * #1601: a post_task rule's declaration that the receipt total it parses is the whole accepted offer's pay (the
+     * platform's own statement of the offer, e.g. a receipt anchored on the platform's "This offer" label). Whole-job
+     * settlement treats a receipt total as the offer's pay only on a read whose rule declares it; a platform that
+     * declares nothing never settles.
+     */
+    const val RECEIPT_TOTAL_SCOPE_OFFER = "offer"
+    val SUPPORTED_RECEIPT_TOTAL_SCOPES: Set<String> = setOf(RECEIPT_TOTAL_SCOPE_OFFER)
+    /**
      * Parse fields that are DECLARATIONS, not extractions (#1069): a literal whose value must come from the
      * listed vocabulary, load-validated per file by `RuleCompiler` (fail-loud, isolable) and offered as enum
      * constants by the census draft tool. A new declaration-only field is one entry here, never a compiler hook.
@@ -47,6 +55,7 @@ object StateMachineContract {
         "presentationIdentity" to SUPPORTED_PRESENTATION_IDENTITIES,
         "quoteBasis" to SUPPORTED_QUOTE_BASES,
         "offerScope" to SUPPORTED_OFFER_SCOPES,
+        "receiptTotalScope" to SUPPORTED_RECEIPT_TOTAL_SCOPES,
     )
     val SUPPORTED_VERBS: Set<String> = EffectVerb.entries.map { it.wire }.toSet()
     val SUPPORTED_TRIGGERS: Set<String> = TransitionTrigger.entries.map { it.wire }.toSet()
