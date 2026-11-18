@@ -354,7 +354,7 @@ closed-job marker (`PlatformRegion.closedJobSettlement`) only for a record it al
 proof (`jobSettlementAt`, §5 "Whole-job settlement") is asked at three points: `completeActiveJob` (every close: the
 receipt exit, the T1 retire, the T2 close, an abandon), `endSession`'s teardown, and each changed post-close read. The
 teardown asks on the PRE-flush region: `flushAtShiftEnd` empties the offer pool, which clause 10 reads, so the decision
-runs first (A5); the honored-retire maturity gate is read off the same pre-flush region. Two counters feed the proof:
+runs first; the honored-retire maturity gate is read off the same pre-flush region. Two counters feed the proof:
 `acceptResolveSeq` (bumped wherever an accept resolves; a job keeps its own value as `Job.ownAcceptSeq` at its mint, and
 each tracked record snapshots it when FIRST seen, `JobReceiptRead.acceptSeqAtFirstSeen`, kept across its revisions, so
 "another accept before the paying read" is processing order, never `acceptedAt`, which a pooled link sets to

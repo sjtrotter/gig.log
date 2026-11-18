@@ -8,7 +8,7 @@ enum class JobSettlementKind {
     /** Place the receipt on the job's drops: the first revision, or a replacement of the active one. */
     SETTLE,
 
-    /** The job's receipt reads now disagree: take the active settlement back (A2). */
+    /** The job's receipt reads now disagree: take the active settlement back. */
     WITHDRAW,
 }
 

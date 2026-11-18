@@ -15,7 +15,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** #1601: the `JOB_RECEIPT_SETTLED` fold judges a shift that EXISTS at its log position; every A3 malformed shape skips. */
+/** #1601: the `JOB_RECEIPT_SETTLED` fold judges a shift that EXISTS at its log position; every malformed shape skips. */
 class JobSettlementFoldsTest {
     private val live = SessionFoldContext("S1", Platform.DoorDash, 100L, 200L, endedAt = null)
     private val malformed = "JOB_RECEIPT_SETTLED: malformed settlement"
@@ -75,7 +75,7 @@ class JobSettlementFoldsTest {
         assertEquals("JOB_RECEIPT_SETTLED: missing/malformed payload", fold(null).skip)
     }
 
-    @Test fun `every A3 malformed shape is a counted skip`() {
+    @Test fun `every malformed shape is a counted skip`() {
         val shapes = listOf(
             settled(commandId = ""),
             settled(commandId = "settle:J2"),

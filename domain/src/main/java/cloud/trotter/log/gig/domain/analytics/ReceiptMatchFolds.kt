@@ -81,7 +81,7 @@ internal object ReceiptMatchFolds {
 
     /**
      * #1601: a machine settlement folds while its shift is live, so the target shift must EXIST at this log position,
-     * not have ended (the #1599 folds require ENDED). Every malformed shape is a counted skip (A3): a blank id, a
+     * not have ended (the #1599 folds require ENDED). Every malformed shape is a counted skip: a blank id, a
      * command id that is not the job's, a revision below 1; and on SETTLE a receipt of 0 or less, a card count below 2,
      * lines that are not exactly that many distinct drops, a negative share, shares not summing to the receipt, or a
      * tip/base split stated on some lines and not others, or not summing to its line.

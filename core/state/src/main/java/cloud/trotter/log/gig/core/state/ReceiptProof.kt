@@ -90,7 +90,7 @@ internal sealed interface JobSettlementProof {
 
 /**
  * #1601 — may a one-offer job whose card showed N ≥ 2 stops take its receipt as the whole job's pay? The clauses, in
- * order (design D3 with amendments A1, A2, A5); the first that fails is the [JobSettlementGap]:
+ * order; the first that fails is the [JobSettlementGap]:
  *  1. reads were tracked from the job's mint (`READS_UNTRACKED`: a job minted by an older build);
  *  2. exactly one accepted offer, TOTAL basis (`OFFER_COUNT`);
  *  3. the card's count was parsed and is at least 2 (`CARD_COUNT_MISSING`, `CARD_COUNT_ONE`; one stop is #1598's);
@@ -107,11 +107,11 @@ internal sealed interface JobSettlementProof {
  *     before the paying read (`OTHER_ACCEPT`, the read's [JobReceiptRead.acceptSeqAtFirstSeen]); no non-demoted pool
  *     entry presented after the job's accept and before the paying read (`POOLED_OFFER`); no non-demoted pool entry
  *     presented before the paying read, whenever before, still waiting at a store of the job's drops, nor an ADD_ON
- *     entry with no candidate store presented after the accept and before the read (`RIVAL_POOLED`, A1);
+ *     entry with no candidate store presented after the accept and before the read (`RIVAL_POOLED`);
  *  11. no fresh presentation between the terminal drop's activation and the paying read (`LATE_FRAME`), which also
  *     covers the #1598 late-frame guard for a revision read after the close.
  *
- * The shares come from the paying revision alone (A3): its itemization through [DropPayApportioner.apportion] when the
+ * The shares come from the paying revision alone: its itemization through [DropPayApportioner.apportion] when the
  * items sum to its own total in cents, else [DropPayApportioner.evenSplitCents] in ascending taskId order. No
  * arithmetic of its own. Pure: the job's records, the pool and the counters — no wall clock, no `Platform` literal.
  */
@@ -120,7 +120,7 @@ internal fun jobSettlementAt(
     /** Every copy of the job's tasks at the close. */
     copies: List<Task>,
     mintedTaskIds: Set<String>,
-    /** The pool as the decision sees it; at a teardown, BEFORE the shift-end flush (A5). */
+    /** The pool as the decision sees it; at a teardown, BEFORE the shift-end flush. */
     offerPool: List<PooledOffer>,
 ): JobSettlementProof {
     val reads = job.receiptReads ?: return refused(JobSettlementGap.READS_UNTRACKED)
@@ -185,7 +185,7 @@ internal fun jobSettlementAt(
     return JobSettlementProof.Proven(paying, shares, n)
 }
 
-/** A3: an itemization is used only when its items sum, in cents, to the revision's own total. */
+/** an itemization is used only when its items sum, in cents, to the revision's own total. */
 private fun ParsedPay.sumsTo(totalCents: Long): Boolean =
     (appPayComponents + customerTips).sumOf { Formats.cents(it.amount) } == totalCents
 

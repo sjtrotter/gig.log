@@ -959,7 +959,7 @@ the decision all or nothing. With no `JOB_RECEIPT_SETTLED` in the log every row 
 - **Dasher edits.** A pay, tip or miles edit (`driverAdjustedAt`), a hand-added row or a row moved into the shift
   refuses the whole settlement before it applies; after it, the edit wins its row by log order, the other rows keep
   their shares, Undo is no longer offered, and the job stays funded. A cash, store or note edit does not block.
-- **Storage (A4): columns, not a table.** `receipt_match_rows` gains `origin` (`NOT NULL DEFAULT 'DASHER'`),
+- **Storage: columns, not a table.** `receipt_match_rows` gains `origin` (`NOT NULL DEFAULT 'DASHER'`),
   `settlementRevision` and `endReason` (`AutoMigration(27, 28)`, `AnalyticsMigration27to28Test`). `undoneAt` set means
   inactive for any reason (undo, withdrawal, conflict), so every active-row query is unchanged. The settlement's state
   is one row set per command id: no rows = none yet; active rows = the active revision; only inactive rows = ended.

@@ -26,7 +26,7 @@ import timber.log.Timber
  * One settlement per job, identity `settle:<jobId>`, revisioned by the stepper:
  * - proven and nothing active, or proven with another allocation than the active one → SETTLE at the next revision;
  * - an unchanged allocation decides nothing (the `lastDecidedPay` pattern);
- * - refused with the records now disagreeing while a settlement is active → WITHDRAW (A2), after which nothing more is
+ * - refused with the records now disagreeing while a settlement is active → WITHDRAW, after which nothing more is
  *   decided for the job;
  * - refused for any other reason → nothing; a settlement already applied stands.
  *
@@ -57,7 +57,7 @@ internal fun closedJobMarker(region: PlatformRegion, job: Job, honored: Task? = 
 
 /**
  * Decide [marker]'s settlement against [region]'s pool and accept counter at [decidedAt]; returns the marker with the
- * decision recorded. [atClose] marks the close-time ask, the one place a refusal is logged (D12).
+ * decision recorded. [atClose] marks the close-time ask, the one place a refusal is logged.
  */
 internal fun decideJobSettlement(
     sink: DecisionSink,
@@ -117,7 +117,7 @@ internal fun decideJobSettlement(
                 )
                 return marker.copy(revision = revision, decided = prior.copy(withdrawn = true))
             }
-            // D12: one DEBUG line per refused settlement at the close, so the desk can count which clause blocks
+            // One DEBUG line per refused settlement at the close, so the desk can count which clause blocks
             // real stacks. Ids and the clause only (P7). A one-drop or multi-offer job is not a candidate: silent.
             if (atClose && proof.gap !in NOT_CANDIDATE) {
                 Timber.tag("StateMachine").d("#1601 job %s not settled: %s", jobId, proof.gap.name)
@@ -193,7 +193,7 @@ internal fun closeSettlementWindow(region: PlatformRegion): PlatformRegion {
 internal fun EffectMap.diffJobSettlement(decisions: RegionDecisions): List<AppEffect> =
     decisions.jobSettlements.mapNotNull { d ->
         val sessionId = d.sessionId ?: return@mapNotNull null
-        // D12 / P7: ids, the drop count, cents and the revision only.
+        // P7: ids, the drop count, cents and the revision only.
         Timber.tag("StateMachine").i(
             "#1601 job %s %s r%d: %d drop(s), %d¢",
             d.jobId, if (d.kind == JobSettlementKind.SETTLE) "settled" else "settlement withdrawn",

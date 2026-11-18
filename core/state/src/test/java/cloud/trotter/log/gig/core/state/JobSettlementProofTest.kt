@@ -98,7 +98,7 @@ class JobSettlementProofTest {
         assertEquals(2, proof.cardCount)
     }
 
-    @Test fun `an itemization that sums to its own total splits by store, else the bare total splits evenly (A3)`() {
+    @Test fun `an itemization that sums to its own total splits by store, else the bare total splits evenly`() {
         val pay = ParsedPay(
             appPayComponents = listOf(ParsedPayItem("Base Pay", 8.00)),
             customerTips = listOf(ParsedPayItem("Alpha Burger", 3.00), ParsedPayItem("Beta Tacos", 6.55)),
@@ -183,7 +183,7 @@ class JobSettlementProofTest {
         assertTrue(prove(pool = listOf(pooled(4_500L, setOf(chain)))) is JobSettlementProof.Proven)
     }
 
-    @Test fun `A1 - an offer pooled BEFORE the accept at a store of the job's drops is a rival`() {
+    @Test fun `an offer pooled BEFORE the accept at a store of the job's drops is a rival`() {
         val chain = StoreKeys.normalizedChain("Alpha Burger #55")
         assertGap(JobSettlementGap.RIVAL_POOLED, prove(pool = listOf(pooled(presentedAt = 50L, stores = setOf(chain)))))
         assertTrue(prove(pool = listOf(pooled(50L, setOf(chain), demoted = true))) is JobSettlementProof.Proven)

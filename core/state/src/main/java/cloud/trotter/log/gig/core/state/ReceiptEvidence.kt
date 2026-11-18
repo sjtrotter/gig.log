@@ -91,7 +91,7 @@ internal fun observeReceiptEvidence(
         ),
     )
     // #1601: the same revision, attributed to its job for whole-job settlement — this frame's own itemization, never
-    // the episode's retained one (A3).
+    // the episode's retained one.
     val read = JobReceiptRead(
         evidenceId = next.evidenceId,
         revision = next.revision,

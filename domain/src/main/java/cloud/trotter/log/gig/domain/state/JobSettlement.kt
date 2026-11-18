@@ -14,7 +14,7 @@ data class JobReceiptRead(
     val revision: Int,
     val subjectTaskId: String,
     val totalCents: Long,
-    /** THIS revision's own itemization, null when it was collapsed; never one carried from an earlier revision (A3). */
+    /** THIS revision's own itemization, null when it was collapsed; never one carried from an earlier revision. */
     val parsedPay: ParsedPay? = null,
     /** The read's rule declared its total is the whole offer's pay ([ParsedFields.PostTaskFields.receiptTotalIsOffer]). */
     val totalIsOffer: Boolean,

@@ -107,7 +107,7 @@ class JobSettlementSessionTest {
         assertEquals(2, settled.cardDropoffCount)
         assertEquals(lines("t1" to 878L, "t2" to 877L), settled.lines)
         assertEquals(listOf("log:JOB_RECEIPT_SETTLED:J1:r1"), fold.settlementKeys())
-        // Ordering (D4): within the close step, every DELIVERY_COMPLETED is emitted before the settlement.
+        // Ordering: within the close step, every DELIVERY_COMPLETED is emitted before the settlement.
         val closeStep = fold.effects.filter { it.first == 4_500L }.map { it.second }.filterIsInstance<AppEffect.LogEvent>().map { it.event.type }
         val at = closeStep.indexOf(AppEventType.JOB_RECEIPT_SETTLED)
         assertTrue(closeStep.subList(0, at).count { it == AppEventType.DELIVERY_COMPLETED } >= 1)
@@ -133,7 +133,7 @@ class JobSettlementSessionTest {
         assertEquals(2, r2.revision)
         assertEquals(2, r2.evidenceRevision)
         assertEquals(lines("t1" to 700L, "t2" to 1055L), r2.lines)
-        // Ordering (D4): the receipt revision is emitted before the settlement revision that names it.
+        // Ordering: the receipt revision is emitted before the settlement revision that names it.
         val step = fold.effects.filter { it.first == 13_000L }.map { it.second }.filterIsInstance<AppEffect.LogEvent>().map { it.event.type }
         assertTrue(step.indexOf(AppEventType.RECEIPT_OBSERVED) < step.indexOf(AppEventType.JOB_RECEIPT_SETTLED))
     }
@@ -209,7 +209,7 @@ class JobSettlementSessionTest {
         assertTrue(fold.settlements().isEmpty())
     }
 
-    @Test fun `a teardown decides on the pool BEFORE the shift-end flush (A5)`() {
+    @Test fun `a teardown decides on the pool BEFORE the shift-end flush`() {
         val read = JobReceiptRead("receipt:t2:3300", 1, "t2", 1755, null, totalIsOffer = true, possibleWorkSeq = 0, observedAt = 3_300L)
         fun end(pool: List<PooledOffer>) = ReceiptFold(stack(priorReads = listOf(read), pool = pool, lastActive = false)).step(
             Observation.UiInput(

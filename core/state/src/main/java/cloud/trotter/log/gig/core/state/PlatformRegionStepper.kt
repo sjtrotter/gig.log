@@ -1154,7 +1154,7 @@ class PlatformRegionStepper @Inject constructor() {
                 matured && task.phase == TaskPhase.DROPOFF && task.completedInline(at).isDeliveredEvidenced()
             }
         }
-        // #1601 (A5): a teardown's settlement is decided on the pool BEFORE the flush below empties it.
+        // #1601: a teardown's settlement is decided on the pool BEFORE the flush below empties it.
         live.activeJob?.let { job ->
             val honored = honoredAt?.let { at -> live.activeTask?.completedInline(at)?.copy(honoredRetireAt = at) }
             decideJobSettlement(sink, closedJobMarker(live, job, honored), live, observedAt, atClose = true)
@@ -1257,7 +1257,7 @@ class PlatformRegionStepper @Inject constructor() {
             jobReceiptAnchors = null,
             lastAcceptResolvedAt = null,
             openReceiptEvidence = null,
-            // #1601 (A5): the closed-job settlement marker belongs to the shift that just ended.
+            // #1601: the closed-job settlement marker belongs to the shift that just ended.
             closedJobSettlement = null,
         ))
     }

@@ -34,7 +34,7 @@ internal object SettlementEnd {
  * - **Replacement** (a later revision while one is active): the same receipt checks; the revision is past the active
  *   one; the payload names exactly the settlement's rows; each still holds the active allocation
  *   ([ReceiptMatch.holdsWritten]) and no other active match names it. Rewrites the shares; the priors stay.
- * - **Withdraw** (A2): while every row holds the active allocation, restore the original priors and end the rows
+ * - **Withdraw**: while every row holds the active allocation, restore the original priors and end the rows
  *   WITHDRAWN; otherwise write nothing and end them CONFLICT.
  *
  * An ended settlement (undone, withdrawn or in conflict) takes no further revision. Only rows sequenced before the
@@ -115,7 +115,7 @@ internal class JobSettlementApply(
         return false
     }
 
-    /** A2: restore the original priors whole while every row holds the active allocation, else mark CONFLICT. */
+    /** Restores the original priors whole while every row holds the active allocation, else mark CONFLICT. */
     private suspend fun withdraw(fold: JobSettlementFold, active: List<ReceiptMatchRowEntity>): Boolean {
         val deliveries = active.map { analyticsDao.deliveryRecord(it.deliveryEventSequenceId) }
         val intact = active.zip(deliveries).all { (m, d) -> ReceiptMatch.holdsWritten(m.toActive(), d?.toDomain()) }

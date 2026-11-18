@@ -520,7 +520,7 @@ class AnalyticsProjector @Inject constructor(
             )
             return true
         }
-        // #1601 (D6): a row an active match names — the dasher's or a whole-job settlement's — is never re-priced.
+        // #1601: a row an active match names — the dasher's or a whole-job settlement's — is never re-priced.
         if (db.receiptMatchDao().activeRowCountForDelivery(row.eventSequenceId) > 0) {
             Timber.tag(TAG).w("DELIVERY_RECEIPT_REPRICE: skipped row %d named by an active match", row.eventSequenceId)
             return true

@@ -70,7 +70,7 @@ data class ShiftReceipts(
         val EMPTY = ShiftReceipts(emptyList(), emptyList(), emptyList())
 
         /**
-         * [conflicted]: the evidence ids of the shift's whole-job settlements that ended in CONFLICT (#1601, A2). Such a
+         * [conflicted]: the evidence ids of the shift's whole-job settlements that ended in CONFLICT (#1601). Such a
          * settlement neither counts as MATCHED nor funds its job; its paying receipt is OPEN.
          */
         fun of(
