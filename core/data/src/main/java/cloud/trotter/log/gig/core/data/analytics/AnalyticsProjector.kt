@@ -28,6 +28,7 @@ import cloud.trotter.log.gig.domain.analytics.PickupFold
 import cloud.trotter.log.gig.domain.analytics.ReceiptFold
 import cloud.trotter.log.gig.domain.analytics.ReceiptMatchFold
 import cloud.trotter.log.gig.domain.analytics.ReceiptMatchUndoFold
+import cloud.trotter.log.gig.domain.analytics.JobSettlementFold
 import cloud.trotter.log.gig.domain.analytics.RecordFolds
 import cloud.trotter.log.gig.domain.analytics.SessionAssignFold
 import cloud.trotter.log.gig.domain.analytics.SessionFoldContext
@@ -91,6 +92,7 @@ class AnalyticsProjector @Inject constructor(
     private val ledgerDao = db.ledgerDao()
     private val receiptDao = db.receiptDao()
     private val receiptMatchApply = ReceiptMatchApply(analyticsDao, receiptDao, db.receiptMatchDao()) // #1599
+    private val jobSettlementApply = JobSettlementApply(analyticsDao, receiptDao, db.receiptMatchDao()) // #1601
 
     /** #159 store-resolution runner (row adapter over the pure `StoreResolver` core), run inside the
      *  batch transaction against the job's committed rows. */
@@ -274,6 +276,7 @@ class AnalyticsProjector @Inject constructor(
             outcome.manualDeliveryRemove?.let { adjustments += Adjustment.ManualDeliveryRemove(ev.sequenceId, ev.event.occurredAt, it) }
             outcome.receiptMatch?.let { adjustments += Adjustment.ReceiptMatch(ev.sequenceId, ev.event.occurredAt, it) }
             outcome.receiptMatchUndo?.let { adjustments += Adjustment.ReceiptMatchUndo(ev.sequenceId, ev.event.occurredAt, it) }
+            outcome.jobSettlement?.let { adjustments += Adjustment.JobSettlement(ev.sequenceId, ev.event.occurredAt, it) }
             outcome.context?.let { ctx ->
                 contexts[ctx.sessionId] = ctx
                 touched += ctx.sessionId
@@ -350,6 +353,7 @@ class AnalyticsProjector @Inject constructor(
                     is Adjustment.Receipt -> receiptDao.upsert(adj.fold.toEntity()).let { false } // the latest revision wins
                     is Adjustment.ReceiptMatch -> receiptMatchApply.applyMatch(adj.fold) // #1599
                     is Adjustment.ReceiptMatchUndo -> receiptMatchApply.applyUndo(adj.fold)
+                    is Adjustment.JobSettlement -> jobSettlementApply.apply(adj.fold) // #1601
                 }
                 if (skipped) adjustmentSkips++
             }
@@ -454,6 +458,7 @@ class AnalyticsProjector @Inject constructor(
         data class Receipt(override val sequenceId: Long, override val occurredAt: Long, val fold: ReceiptFold) : Adjustment
         data class ReceiptMatch(override val sequenceId: Long, override val occurredAt: Long, val fold: ReceiptMatchFold) : Adjustment
         data class ReceiptMatchUndo(override val sequenceId: Long, override val occurredAt: Long, val fold: ReceiptMatchUndoFold) : Adjustment
+        data class JobSettlement(override val sequenceId: Long, override val occurredAt: Long, val fold: JobSettlementFold) : Adjustment
     }
 
     /** A #159 store-resolution trigger carrying its source event's [sequenceId] for the seq-ordered
@@ -513,6 +518,11 @@ class AnalyticsProjector @Inject constructor(
             Timber.tag(TAG).w(
                 "DELIVERY_RECEIPT_REPRICE: no delivery row for job %s task %s", adj.jobId, adj.taskId,
             )
+            return true
+        }
+        // #1601: a row an active match names — the dasher's or a whole-job settlement's — is never re-priced.
+        if (db.receiptMatchDao().activeRowCountForDelivery(row.eventSequenceId) > 0) {
+            Timber.tag(TAG).w("DELIVERY_RECEIPT_REPRICE: skipped row %d named by an active match", row.eventSequenceId)
             return true
         }
         return when (val outcome = DeliveryCorrections.applyReceiptReprice(row, adj)) {

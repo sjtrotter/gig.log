@@ -30,7 +30,7 @@ class ShiftChecksRepository @Inject constructor(
             .distinctUntilChanged()
             .flatMapLatest { running -> shiftTimelineRepository.timeline(sessionId, running) }
         return combine(detail, timeline, receiptMatchRepository.read(sessionId)) { d, t, r ->
-            d?.let { ShiftChecks.of(it, t, ShiftReceipts.of(r.receipts, it.deliveries, r.active)) }.orEmpty()
+            d?.let { ShiftChecks.of(it, t, ShiftReceipts.of(r.receipts, it.deliveries, r.active, r.conflicted)) }.orEmpty()
         }
     }
 

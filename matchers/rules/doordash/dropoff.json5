@@ -2190,6 +2190,12 @@
       "parse": {
         "as": "post_task",
         "fields": {
+          // #1601: a declaration, not an extraction. The total this rule parses is the
+          // figure under DoorDash's own "This offer" section: the whole accepted offer's
+          // pay, so whole-job settlement may treat it as that offer's pay.
+          "receiptTotalScope": {
+            "literal": "offer"
+          },
           // #1029: the offer's own total. Arm 1 is the `final_value` id every
           // committed pre-8.93.7 fixture carries (byte-identical there). Arm 2 is
           // the 8.93.7 render, which ships the whole sheet WITHOUT money view ids:
@@ -2526,6 +2532,10 @@
       "parse": {
         "as": "post_task",
         "fields": {
+          // #1601: the expanded rule's declaration, mirrored (see it).
+          "receiptTotalScope": {
+            "literal": "offer"
+          },
           // #1029 — the expanded rule's arm pair, mirrored (see it for the reasoning):
           // `final_value` first (every corpus frame that has the id resolves there),
           // then the 8.93.7 id-less render, where the figure is a currency-shaped

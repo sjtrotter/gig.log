@@ -5,6 +5,7 @@ import cloud.trotter.log.gig.domain.model.event.payload.DeliveryAdjustmentPayloa
 import cloud.trotter.log.gig.domain.model.event.payload.DeliveryPayload
 import cloud.trotter.log.gig.domain.model.event.payload.DeliveryReceiptRepricePayload
 import cloud.trotter.log.gig.domain.model.event.payload.DeliverySessionAssignPayload
+import cloud.trotter.log.gig.domain.model.event.payload.JobReceiptSettledPayload
 import cloud.trotter.log.gig.domain.model.event.payload.ExpenseLoggedPayload
 import cloud.trotter.log.gig.domain.model.event.payload.FuelFillupPayload
 import cloud.trotter.log.gig.domain.model.event.payload.LedgerEntryVoidedPayload
@@ -66,6 +67,7 @@ object AppEventCodec {
         is ReceiptObservedPayload -> json.encodeToString(payload)
         is ReceiptMatchedPayload -> json.encodeToString(payload)
         is ReceiptMatchUndonePayload -> json.encodeToString(payload)
+        is JobReceiptSettledPayload -> json.encodeToString(payload)
         is SessionReportCorrectionPayload -> json.encodeToString(payload)
         is SessionMilesCorrectionPayload -> json.encodeToString(payload)
         is DeliverySessionAssignPayload -> json.encodeToString(payload)
@@ -154,6 +156,8 @@ object AppEventCodec {
             AppEventType.RECEIPT_MATCHED -> json.decodeFromString<ReceiptMatchedPayload>(payloadJson)
 
             AppEventType.RECEIPT_MATCH_UNDONE -> json.decodeFromString<ReceiptMatchUndonePayload>(payloadJson)
+
+            AppEventType.JOB_RECEIPT_SETTLED -> json.decodeFromString<JobReceiptSettledPayload>(payloadJson)
 
             AppEventType.TASK_UNASSIGNED ->
                 json.decodeFromString<TaskUnassignedPayload>(payloadJson)

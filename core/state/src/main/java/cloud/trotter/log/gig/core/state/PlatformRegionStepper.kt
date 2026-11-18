@@ -115,7 +115,8 @@ class PlatformRegionStepper @Inject constructor() {
                     // #1033 review R1: the re-price window closes the moment the NEXT job is minted —
                     // run this where `activeJob` is final for the step (nothing after stepCore changes
                     // whether a job is active).
-                    closeReceiptRepriceWindow(
+                    // #1601: the quiet-window reference, stamped where `activeTask` is final for the step.
+                    stampDropoffActivation(obs = obs, region = closeReceiptRepriceWindow(
                         stepCore(
                             sink,
                             // #1073 round 13: the PostTask-exit latch is a pure flow-edge fact about the
@@ -126,7 +127,7 @@ class PlatformRegionStepper @Inject constructor() {
                             ),
                             prevFlow, nextFlow, obs, policy,
                         ),
-                    ),
+                    )),
                 ).let { requestArrivalEstimate(it, obs) },
             ),
             obs,
@@ -1143,6 +1144,21 @@ class PlatformRegionStepper @Inject constructor() {
         timestamp: Long,
         observedAt: Long = timestamp,
     ): PlatformRegion {
+        // #1078 round 6 maturity gate, read off the pre-flush region (the flush touches only the pool and the hold);
+        // see the HONORED/FORCE-STAMPED note below.
+        val pend = live.pendingDestructive?.takeIf { it.kind == DestructiveKind.SESSION_END }
+        val matured = observedAt >= (pend?.absorbedRetireDeadline ?: Long.MIN_VALUE)
+        // The same delivery evidence gate as T1 and absorption, including restored absorbed state.
+        val honoredAt = live.activeTask?.let { task ->
+            pend?.absorbedRetireSince?.let { task.honoredRetireInstant(it) }?.takeIf { at ->
+                matured && task.phase == TaskPhase.DROPOFF && task.completedInline(at).isDeliveredEvidenced()
+            }
+        }
+        // #1601: a teardown's settlement is decided on the pool BEFORE the flush below empties it.
+        live.activeJob?.let { job ->
+            val honored = honoredAt?.let { at -> live.activeTask?.completedInline(at)?.copy(honoredRetireAt = at) }
+            decideJobSettlement(sink, closedJobMarker(live, job, honored), live, observedAt, atClose = true)
+        }
         // #1119 S2: every offer still without an outcome gets one; the pool and any hold go with the shift.
         val region = flushAtShiftEnd(sink, live, observedAt)
         // #1033 round 10: a terminal session end tears down the job WITHOUT going through
@@ -1202,15 +1218,8 @@ class PlatformRegionStepper @Inject constructor() {
         // matured. So honor only from the absorbed deadline onward, and force-stamp before it.
         //
         // Only the honored branch records the retired-task decision consumed by `mintQualified`.
-        // The durable [Task.honoredRetireAt] history remains unchanged.
-        val pend = region.pendingDestructive?.takeIf { it.kind == DestructiveKind.SESSION_END }
-        val matured = observedAt >= (pend?.absorbedRetireDeadline ?: Long.MIN_VALUE)
-        // The same delivery evidence gate as T1 and absorption, including restored absorbed state.
-        val honoredAt = region.activeTask?.let { task ->
-            pend?.absorbedRetireSince?.let { task.honoredRetireInstant(it) }?.takeIf { at ->
-                matured && task.phase == TaskPhase.DROPOFF && task.completedInline(at).isDeliveredEvidenced()
-            }
-        }
+        // The durable [Task.honoredRetireAt] history remains unchanged. (`pend`, `matured` and `honoredAt` are read
+        // at the top of this function, before the flush.)
         val completedTask = region.activeTask?.let {
             if (honoredAt != null) {
                 sink.retired(it.taskId)
@@ -1248,12 +1257,16 @@ class PlatformRegionStepper @Inject constructor() {
             jobReceiptAnchors = null,
             lastAcceptResolvedAt = null,
             openReceiptEvidence = null,
+            // #1601: the closed-job settlement marker belongs to the shift that just ended.
+            closedJobSettlement = null,
         ))
     }
 
     internal fun completeActiveJob(sink: DecisionSink, region: PlatformRegion, at: Long): PlatformRegion {
         val job = region.activeJob ?: return region
         val closed = region.clearCachedReceipt().copy(
+            // #1601: whole-job settlement's close-time decision, and its marker for the rest of the receipt episode.
+            closedJobSettlement = settleAtClose(sink, region, job, at),
             activeJob = null,
             // #1033 layer 2: record what the receipt looked like BEFORE this line drops it. Closing
             // the job is the step on which the `DELIVERY_COMPLETED`s for its delivered drops are

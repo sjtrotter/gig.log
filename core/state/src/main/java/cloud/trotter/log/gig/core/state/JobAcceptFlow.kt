@@ -237,6 +237,7 @@ internal fun PlatformRegionStepper.mintBareJob(region: PlatformRegion, obs: Obse
             offerStoreHint = listOfNotNull(parsed?.storeName),
             parentOfferHash = null,
             startedAt = obs.timestamp,
+            receiptReads = emptyList(), // #1601
         ),
         mintCounter = region.mintCounter + 1,
     )
@@ -269,6 +270,9 @@ internal fun PlatformRegionStepper.mintFreshJobFromAccept(
             acceptedOffers = listOf(inputs.economics),
             startedAt = obs.timestamp,
             tasks = dropoffs + pickups,
+            // #1601: reads are tracked from the mint, and the accept this job was minted from is its own stamp.
+            receiptReads = emptyList(),
+            ownAcceptSeq = base.acceptResolveSeq,
         ),
         // job(1) + D dropoffs + P pickups, all minted in this one copy() (#344).
         mintCounter = base.mintCounter + 1 + inputs.dropoffCount + pickups.size,

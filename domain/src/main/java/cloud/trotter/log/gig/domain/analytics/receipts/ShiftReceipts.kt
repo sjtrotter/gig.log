@@ -4,10 +4,13 @@ import cloud.trotter.log.gig.domain.analytics.DeliveryRecord
 import cloud.trotter.log.gig.domain.model.event.payload.ReceiptMatchRole
 
 enum class ReceiptStatus {
-    /** Unproven, not matched, and its own delivery is missing or still open: the dasher is asked. */
+    /**
+     * Unproven, not matched, and its own delivery is missing or still open: the dasher is asked. Also (#1601) the
+     * paying receipt of a whole-job settlement that ended in CONFLICT ([ShiftReceipt.changedAfterSettle]).
+     */
     OPEN,
 
-    /** An active match names it. */
+    /** An active match names it: the dasher's, or the app's whole-job settlement ([ShiftReceipt.origin] APP, #1601). */
     MATCHED,
 
     /**
@@ -25,6 +28,13 @@ data class ShiftReceipt(
     val matchCommandId: String?,
     /** True while every row that match wrote still holds it ([ReceiptMatch.holdsWritten]). */
     val undoable: Boolean,
+    /** #1601: who wrote the active match; null unless [status] is MATCHED. */
+    val origin: MatchOrigin? = null,
+    /**
+     * #1601: the app settled its job from this receipt, then a read of the job's receipt changed after a row had
+     * been edited, so the settlement stopped counting (CONFLICT). The receipt asks again, with its own copy.
+     */
+    val changedAfterSettle: Boolean = false,
 )
 
 /**
@@ -59,7 +69,16 @@ data class ShiftReceipts(
     companion object {
         val EMPTY = ShiftReceipts(emptyList(), emptyList(), emptyList())
 
-        fun of(receipts: List<SavedReceipt>, deliveries: List<DeliveryRecord>, active: List<ActiveMatchRow>): ShiftReceipts {
+        /**
+         * [conflicted]: the evidence ids of the shift's whole-job settlements that ended in CONFLICT (#1601). Such a
+         * settlement neither counts as MATCHED nor funds its job; its paying receipt is OPEN.
+         */
+        fun of(
+            receipts: List<SavedReceipt>,
+            deliveries: List<DeliveryRecord>,
+            active: List<ActiveMatchRow>,
+            conflicted: Set<String> = emptySet(),
+        ): ShiftReceipts {
             val byId = deliveries.associateBy { it.eventSequenceId }
             val items = receipts.sortedWith(compareBy({ it.firstSeenAt }, { it.evidenceId })).map { r ->
                 val match = active.firstOrNull { it.evidenceId == r.evidenceId }
@@ -68,8 +87,9 @@ data class ShiftReceipts(
                     match != null -> {
                         val rows = active.filter { it.commandId == match.commandId }
                         val undoable = rows.all { ReceiptMatch.holdsWritten(it, byId[it.deliveryEventSequenceId]) }
-                        ShiftReceipt(r, ReceiptStatus.MATCHED, match.commandId, undoable)
+                        ShiftReceipt(r, ReceiptStatus.MATCHED, match.commandId, undoable, origin = match.origin)
                     }
+                    r.evidenceId in conflicted -> ShiftReceipt(r, ReceiptStatus.OPEN, null, false, changedAfterSettle = true)
                     ReceiptMatch.funded(r.jobId, r.evidenceId, deliveries, active, receipts) ->
                         ShiftReceipt(r, ReceiptStatus.SETTLED, null, false)
                     else -> {

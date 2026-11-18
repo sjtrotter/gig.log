@@ -348,6 +348,26 @@ variant), and a receipt FRAME read after its job closed re-prices only while it 
 episode's `possibleWorkSeqAtOpen`. Cost: a proven single drop whose receipt expands after the close keeps
 the mint's receipt total, without the tip/base split, whenever any offer appeared in between.
 
+**Whole-job settlement decides at the close, never mid-job (#1601).** Each pay-bearing evidence revision is also
+recorded on its job (`trackJobReceiptRead`): on `Job.receiptReads` while the job is live, and, after the close, on the
+closed-job marker (`PlatformRegion.closedJobSettlement`) only for a record it already tracks (the same episode). The
+proof (`jobSettlementAt`, §5 "Whole-job settlement") is asked at three points: `completeActiveJob` (every close: the
+receipt exit, the T1 retire, the T2 close, an abandon), `endSession`'s teardown, and each changed post-close read. The
+teardown asks on the PRE-flush region: `flushAtShiftEnd` empties the offer pool, which clause 10 reads, so the decision
+runs first; the honored-retire maturity gate is read off the same pre-flush region. Two counters feed the proof:
+`acceptResolveSeq` (bumped wherever an accept resolves; a job keeps its own value as `Job.ownAcceptSeq` at its mint, and
+each tracked record snapshots it when FIRST seen, `JobReceiptRead.acceptSeqAtFirstSeen`, kept across its revisions, so
+"another accept before the paying read" is processing order, never `acceptedAt`, which a pooled link sets to
+`min(leftAt, edge)`; clause 10's pool windows end at the same first sighting) and
+the dropoff activation stamp (`Job.dropoffActivatedSeq`, `possibleWorkSeq` when each dropoff first becomes the active
+task, stamped by the step wrapper). The marker is cleared when another job becomes active (`closeSettlementWindow`,
+beside the #1033 R1 rule) and at `endSession`. **Ordering invariant:** `EffectMap.diffJobSettlement` runs after
+`diffDeliveryCompletion` and `diffReceiptEvidence`, so a `JOB_RECEIPT_SETTLED` always sequences after the same step's
+`DELIVERY_COMPLETED`s and `RECEIPT_OBSERVED` (`JobSettlementSessionTest` pins both); its key is the decision revision
+(`log:JOB_RECEIPT_SETTLED:<jobId>:r<n>`), and decisions travel in `RegionDecisions.jobSettlements`, never in region
+state. A T2 close settles: the accept that closes the job resolved after the paying read was on screen, so it cannot
+own it.
+
 **A dash end ABSORBS a standing task retire (#1078) — it never discards it.** The destructive slot
 holds ONE pending, and both `SESSION_END` arm sites used to REPLACE whatever stood in it. Fielded
 2026-09-08 (build 8028691a, db seq 2007/2008): the dropoff screen gave way to `dash_along_the_way`,

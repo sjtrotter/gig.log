@@ -97,6 +97,18 @@ data class Job(
     val arrivalEstimateRequestedAt: Long? = null,
     /** The coherent count the request was latched on — the EffectMap reads it from state, never from the observation. */
     val arrivalEstimateObservedItems: Int? = null,
+    /**
+     * #1601: the pay-bearing receipt reads attributed to this job while it was live, one per evidence record (its
+     * latest revision). Empty at every mint; null = minted by a build before #1601, which whole-job settlement refuses.
+     */
+    val receiptReads: List<JobReceiptRead>? = null,
+    /**
+     * #1601: [PlatformRegion.acceptResolveSeq] when this job was minted from its accept — the job's own resolution
+     * stamp. Any accept resolved after it refuses settlement (clause 10). Null for a bare job or an older snapshot.
+     */
+    val ownAcceptSeq: Long? = null,
+    /** #1601: [PlatformRegion.possibleWorkSeq] when each dropoff of this job first became the active task. */
+    val dropoffActivatedSeq: Map<String, Long> = emptyMap(),
 ) {
     /** Total accepted gross pay across all offers in this job. */
     val totalPayAmount: Double get() = acceptedOffers.sumOf { it.payAmount ?: 0.0 }

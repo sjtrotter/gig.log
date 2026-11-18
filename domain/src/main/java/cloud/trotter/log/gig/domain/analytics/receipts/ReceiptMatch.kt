@@ -18,6 +18,9 @@ data class SavedReceipt(
     val proven: Boolean,
 )
 
+/** Who wrote a match row: the dasher's Confirm (#1599) or the app's whole-job settlement (#1601). */
+enum class MatchOrigin { DASHER, APP }
+
 /** One delivery row an active (not undone) match wrote. */
 data class ActiveMatchRow(
     val commandId: String,
@@ -26,7 +29,15 @@ data class ActiveMatchRow(
     val role: ReceiptMatchRole,
     val newPayCents: Long?,
     val matchedAt: Long,
+    /** #1601: APP rows are a settlement's: basis `DROP_SHARE`, no `driverAdjustedAt`. */
+    val origin: MatchOrigin = MatchOrigin.DASHER,
 )
+
+/** #1601: why the projector refuses a whole-job settlement, or the rows and cents it writes. */
+sealed interface SettlementPlan {
+    data class Write(val rows: List<Pair<DeliveryRecord, Long>>) : SettlementPlan
+    data class Refuse(val reason: String) : SettlementPlan
+}
 
 /** Why a delivery cannot take a receipt. */
 sealed interface MatchLock {
@@ -35,6 +46,9 @@ sealed interface MatchLock {
 
     /** An active match covers it. */
     data class MatchedTo(val evidenceId: String) : MatchLock
+
+    /** #1601: the app's whole-job settlement placed the receipt [evidenceId] on it. */
+    data class SettledFrom(val evidenceId: String) : MatchLock
 
     /** MANUAL, USER_CORRECTED, a dasher's money edit (`driverAdjustedAt`) or moved into the shift by the dasher. */
     data object ChangedByYou : MatchLock
@@ -95,12 +109,15 @@ object ReceiptMatch {
         deliveries: List<DeliveryRecord>,
         active: List<ActiveMatchRow>,
         receipts: List<SavedReceipt>,
-    ): MatchLock? = lock(d, active) ?: fundedBy(d.jobId, evidenceId, deliveries, active, receipts)?.let { MatchLock.MatchedTo(it) }
+    ): MatchLock? = lock(d, active) ?: fundingRow(d.jobId, evidenceId, deliveries, active, receipts)?.let(::lockOf)
 
-    /** Null when [selectable]; else, first match wins: MatchedTo (an active COVERED row), PaidByReceipt, ChangedByYou. */
+    /**
+     * Null when [selectable]; else, first match wins: MatchedTo / SettledFrom (an active COVERED row, by its origin),
+     * PaidByReceipt, ChangedByYou.
+     */
     fun lock(d: DeliveryRecord, active: List<ActiveMatchRow>): MatchLock? {
         if (selectable(d, active)) return null
-        coveringRow(d, active)?.let { return MatchLock.MatchedTo(it.evidenceId) }
+        coveringRow(d, active)?.let { return lockOf(it) }
         if (d.payBasis in PayBasis.RECEIPT_EVIDENCE) return MatchLock.PaidByReceipt
         return MatchLock.ChangedByYou
     }
@@ -193,30 +210,83 @@ object ReceiptMatch {
         deliveries: List<DeliveryRecord>,
         active: List<ActiveMatchRow>,
         receipts: List<SavedReceipt>,
-    ): String? {
+    ): String? = fundingRow(jobId, evidenceId, deliveries, active, receipts)?.evidenceId
+
+    /** The active row (of either origin) whose match funds [jobId] ([funded]), or null. */
+    private fun fundingRow(
+        jobId: String,
+        evidenceId: String,
+        deliveries: List<DeliveryRecord>,
+        active: List<ActiveMatchRow>,
+        receipts: List<SavedReceipt>,
+    ): ActiveMatchRow? {
         if (offerCount(jobId, deliveries) > 1) return null
         val jobRows = deliveries.filter { it.jobId == jobId }.map { it.eventSequenceId }.toSet()
         val receiptJobs = receipts.associate { it.evidenceId to it.jobId }
         return active.firstOrNull {
             it.evidenceId != evidenceId && (it.deliveryEventSequenceId in jobRows || receiptJobs[it.evidenceId] == jobId)
-        }?.evidenceId
+        }
     }
 
     /**
-     * True while [d] still holds what the match wrote: COVERED -> cents == newPayCents, basis RECEIPT_MATCHED,
-     * driverAdjustedAt == matchedAt; CLEARED -> no pay, basis NONE, driverAdjustedAt null. False for a missing row.
+     * True while [d] still holds what the match wrote: COVERED -> cents == newPayCents, and, for the dasher's match,
+     * basis RECEIPT_MATCHED with driverAdjustedAt == matchedAt, for the app's settlement (#1601) basis DROP_SHARE with
+     * no driverAdjustedAt; CLEARED -> no pay, basis NONE, driverAdjustedAt null. False for a missing row.
      */
     fun holdsWritten(row: ActiveMatchRow, d: DeliveryRecord?): Boolean {
         if (d == null) return false
         return when (row.role) {
-            ReceiptMatchRole.COVERED -> payCents(d) == row.newPayCents && d.payBasis == PayBasis.RECEIPT_MATCHED &&
-                d.driverAdjustedAt == row.matchedAt
+            ReceiptMatchRole.COVERED -> payCents(d) == row.newPayCents && when (row.origin) {
+                MatchOrigin.DASHER -> d.payBasis == PayBasis.RECEIPT_MATCHED && d.driverAdjustedAt == row.matchedAt
+                MatchOrigin.APP -> d.payBasis == PayBasis.DROP_SHARE && d.driverAdjustedAt == null
+            }
             ReceiptMatchRole.CLEARED -> d.realizedPay == null && d.payBasis == PayBasis.NONE && d.driverAdjustedAt == null
         }
     }
 
+    /**
+     * #1601, the strict whole-group entry point for a whole-job settlement's FIRST revision: every check before any
+     * write, never through [plan] (which filters selections and could redistribute). Refused whole unless each
+     * (jobId, taskId) of [shares] names exactly one row of [deliveries] (the shift's rows sequenced before the event),
+     * the job has no row outside them, and every row is open to the machine: an estimate or no pay, no dasher money
+     * edit, not hand-added or corrected, not moved into the shift, and named by no active match row of any role; and
+     * the job is not funded by another receipt ([funded]), and no active match spends the receipt itself. Returns the
+     * rows with their cents in [shares] order.
+     */
+    fun settlement(
+        jobId: String,
+        evidenceId: String,
+        shares: List<Pair<String, Long>>,
+        deliveries: List<DeliveryRecord>,
+        active: List<ActiveMatchRow>,
+        receipts: List<SavedReceipt>,
+    ): SettlementPlan {
+        // A receipt an active match already spends (on any job) is not the settlement's to spend again.
+        if (active.any { it.evidenceId == evidenceId }) return SettlementPlan.Refuse("receipt already matched")
+        val jobRows = deliveries.filter { it.jobId == jobId }
+        val taskIds = shares.map { it.first }.toSet()
+        if (jobRows.any { it.taskId !in taskIds }) return SettlementPlan.Refuse("the job has a delivery the settlement does not name")
+        val named = active.map { it.deliveryEventSequenceId }.toSet()
+        val rows = ArrayList<Pair<DeliveryRecord, Long>>(shares.size)
+        for ((taskId, cents) in shares) {
+            val row = jobRows.filter { it.taskId == taskId }.singleOrNull()
+                ?: return SettlementPlan.Refuse("drop $taskId has no single delivery row")
+            val open = (row.payBasis == PayBasis.OFFER_PAY || row.payBasis == PayBasis.NONE) &&
+                row.driverAdjustedAt == null && !row.sessionAssigned && row.eventSequenceId !in named
+            if (!open) return SettlementPlan.Refuse("delivery ${row.eventSequenceId} is not open")
+            rows += row to cents
+        }
+        if (funded(jobId, evidenceId, deliveries, active, receipts)) return SettlementPlan.Refuse("job already paid by another receipt")
+        return SettlementPlan.Write(rows)
+    }
+
     /** The sheet's row order: completion time, then sequence id. */
     val DISPLAY_ORDER: Comparator<DeliveryRecord> = compareBy({ it.completedAt }, { it.eventSequenceId })
+
+    private fun lockOf(row: ActiveMatchRow): MatchLock = when (row.origin) {
+        MatchOrigin.DASHER -> MatchLock.MatchedTo(row.evidenceId)
+        MatchOrigin.APP -> MatchLock.SettledFrom(row.evidenceId)
+    }
 
     private fun coveringRow(d: DeliveryRecord, active: List<ActiveMatchRow>): ActiveMatchRow? =
         active.firstOrNull { it.role == ReceiptMatchRole.COVERED && it.deliveryEventSequenceId == d.eventSequenceId }

@@ -8,6 +8,7 @@ import cloud.trotter.log.gig.domain.model.event.AppEventType
 import cloud.trotter.log.gig.domain.model.event.payload.ReceiptObservedPayload
 import cloud.trotter.log.gig.domain.pipeline.Observation
 import cloud.trotter.log.gig.domain.state.Flow
+import cloud.trotter.log.gig.domain.state.JobReceiptRead
 import cloud.trotter.log.gig.domain.state.OpenReceiptEvidence
 import cloud.trotter.log.gig.domain.state.ParsedFields
 import cloud.trotter.log.gig.domain.state.PlatformRegion
@@ -89,7 +90,22 @@ internal fun observeReceiptEvidence(
             sourceCaptureId = obs.captureId,
         ),
     )
-    return region.copy(openReceiptEvidence = next)
+    // #1601: the same revision, attributed to its job for whole-job settlement — this frame's own itemization, never
+    // the episode's retained one.
+    val read = JobReceiptRead(
+        evidenceId = next.evidenceId,
+        revision = next.revision,
+        subjectTaskId = subjectTaskId,
+        totalCents = cents,
+        parsedPay = parsed.parsedPay,
+        totalIsOffer = parsed.receiptTotalIsOffer,
+        possibleWorkSeq = region.possibleWorkSeq,
+        observedAt = obs.timestamp,
+        firstSeenAt = next.firstSeenAt,
+        // A new record's snapshot; `trackJobReceiptRead` keeps a tracked record's first one across its revisions.
+        acceptSeqAtFirstSeen = region.acceptResolveSeq,
+    )
+    return trackJobReceiptRead(sink, region.copy(openReceiptEvidence = next), next.jobId, read)
 }
 
 /**

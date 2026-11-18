@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- #1601 -->
+    <string name="shift_check_receipt_changed_format">Reçu %1$s · %2$s · modifié après le règlement</string>
+    <string name="receipt_match_settled_from_format">Réglé avec le reçu %1$s</string>
+</resources>

@@ -76,6 +76,8 @@ enum class AppEventType {
     RECEIPT_MATCHED, // #1599: the dasher says which deliveries a saved, unproven receipt paid for; replaces their
                      // estimates with an even split of the receipt. Append-only, dasher-owned.
     RECEIPT_MATCH_UNDONE, // #1599: the dasher takes a receipt match back; its rows return to what the match found.
+    JOB_RECEIPT_SETTLED, // #1601: the machine proved a receipt paid a whole one-offer stacked job and placed it on
+                         // the job's drops (or withdrew that placement). Append-only, revisioned, machine-owned.
 
     // --- System / Generic ---
     SCREEN_VIEWED, // For generic screen transitions like "Earnings Screen"

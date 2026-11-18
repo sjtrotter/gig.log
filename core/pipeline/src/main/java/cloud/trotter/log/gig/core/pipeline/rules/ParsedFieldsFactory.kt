@@ -226,6 +226,8 @@ object ParsedFieldsFactory {
             isExpanded = f.bool("isExpanded") ?: false,
             expandButtonId = f.str("expandButtonId"),
             sessionEarnings = f.double("sessionEarnings"),
+            // #1601: a load-validated declaration (`StateMachineContract.PARSE_DECLARATION_LITERALS`); absent = false.
+            receiptTotalIsOffer = f.str("receiptTotalScope") == StateMachineContract.RECEIPT_TOTAL_SCOPE_OFFER,
         )
     }
 

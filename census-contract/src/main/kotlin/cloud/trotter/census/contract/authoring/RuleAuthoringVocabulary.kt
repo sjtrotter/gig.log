@@ -39,6 +39,8 @@ object RuleAuthoringVocabulary {
     val QUOTE_BASES: List<String> = listOf("total", "incremental")
     /** #1119 slice 1: mirrors `StateMachineContract.SUPPORTED_OFFER_SCOPES`. */
     val OFFER_SCOPES: List<String> = listOf("standalone", "add_on")
+    /** #1601: mirrors `StateMachineContract.SUPPORTED_RECEIPT_TOTAL_SCOPES`. */
+    val RECEIPT_TOTAL_SCOPES: List<String> = listOf("offer")
 
     val FLOWS: List<String> = listOf(
         "idle", "offer:presented", "task:pickup:navigation", "task:pickup:arrived",
@@ -112,6 +114,8 @@ object RuleAuthoringVocabulary {
             FieldSpec("isExpanded", FieldType.BOOLEAN),
             FieldSpec("expandButtonId", FieldType.STRING, read = "viewIdResourceName"),
             FieldSpec("sessionEarnings", FieldType.DOUBLE, defaultTransform = listOf("parseCurrency")),
+            // #1601: a declaration literal, the receipt total is the whole offer's pay.
+            FieldSpec("receiptTotalScope", FieldType.STRING),
         ),
         "session_ended" to listOf(
             FieldSpec("totalEarnings", FieldType.DOUBLE, defaultTransform = listOf("parseCurrency")),

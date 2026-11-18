@@ -50,7 +50,7 @@ internal fun closeReceiptRepriceWindow(region: PlatformRegion): PlatformRegion {
     // receipt, so they reset with it (and only here, so they survive their own job's close).
     val anchors = r.jobReceiptAnchors
     if (anchors != null && anchors.jobId != active.jobId) r = r.copy(jobReceiptAnchors = null)
-    return r
+    return closeSettlementWindow(r)
 }
 
 /**

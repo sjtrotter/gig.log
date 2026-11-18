@@ -2,6 +2,7 @@ package cloud.trotter.log.gig.core.state.model
 
 import cloud.trotter.log.gig.domain.model.event.AppEventType
 import cloud.trotter.log.gig.domain.model.event.payload.DeclineEvidence
+import cloud.trotter.log.gig.domain.model.event.payload.JobSettlementKind
 import cloud.trotter.log.gig.domain.model.pay.ParsedPay
 import cloud.trotter.log.gig.domain.state.PendingOffer
 import cloud.trotter.log.gig.domain.state.Platform
@@ -24,6 +25,8 @@ data class RegionDecisions(
     val receiptEvidence: ReceiptEvidenceDecision? = null,
     /** #1119 S2: every offer outcome this step decided, in order. */
     val offerOutcomes: List<OfferOutcomeDecision> = emptyList(),
+    /** #1601: every whole-job settlement revision this step decided, in order. */
+    val jobSettlements: List<JobSettlementDecision> = emptyList(),
 ) {
     companion object { val NONE = RegionDecisions() }
 }
@@ -80,19 +83,50 @@ data class ReceiptEvidenceDecision(
     val sourceCaptureId: String?,
 )
 
+/** #1601: one whole-job settlement revision, decided by the stepper; `EffectMap` only emits it (`JOB_RECEIPT_SETTLED`). */
+data class JobSettlementDecision(
+    val jobId: String,
+    val sessionId: String?,
+    val revision: Int,
+    val kind: JobSettlementKind,
+    val evidenceId: String,
+    val evidenceRevision: Int,
+    val receiptCents: Long,
+    val cardDropoffCount: Int,
+    /** SETTLE: taskId to cents, ascending taskId. WITHDRAW: empty. */
+    val shares: List<Pair<String, Long>>,
+    val decidedAt: Long,
+)
+
 /** Invocation-local accumulator, explicitly passed through the decision-producing paths. */
 internal class DecisionSink {
     private var receiptReprice: ReceiptRepriceDecision? = null
     private var retiredTaskId: String? = null
     private var receiptEvidence: ReceiptEvidenceDecision? = null
     private val offerOutcomes = mutableListOf<OfferOutcomeDecision>()
+    private val jobSettlements = mutableListOf<JobSettlementDecision>()
 
     fun reprice(d: ReceiptRepriceDecision) { receiptReprice = d }
     fun retired(taskId: String) { retiredTaskId = taskId }
     fun receiptObserved(d: ReceiptEvidenceDecision) { receiptEvidence = d }
     fun offerOutcome(d: OfferOutcomeDecision) { offerOutcomes += d }
+    /** #1601: one decision per job per step; a later one replaces an earlier one (the step's last word). */
+    fun jobSettled(d: JobSettlementDecision) {
+        jobSettlements.removeAll { it.jobId == d.jobId }
+        jobSettlements += d
+    }
+
+    /**
+     * #1601: an unchanged allocation decided nothing, but if this step already decided [jobId] from an earlier revision of
+     * [evidenceId], that decision names [evidenceRevision] instead: the step's `RECEIPT_OBSERVED` carries the latest
+     * revision, and the projector applies a settlement only at the receipt's current revision.
+     */
+    fun refreshJobSettlementEvidence(jobId: String, evidenceId: String, evidenceRevision: Int) {
+        val i = jobSettlements.indexOfFirst { it.jobId == jobId && it.evidenceId == evidenceId }
+        if (i >= 0) jobSettlements[i] = jobSettlements[i].copy(evidenceRevision = evidenceRevision)
+    }
     fun build(): RegionDecisions =
-        RegionDecisions(receiptReprice, retiredTaskId, receiptEvidence, offerOutcomes.toList())
+        RegionDecisions(receiptReprice, retiredTaskId, receiptEvidence, offerOutcomes.toList(), jobSettlements.toList())
 }
 
 data class PlatformStep(val region: PlatformRegion, val decisions: RegionDecisions)

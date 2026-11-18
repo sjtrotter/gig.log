@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.combine
 
 /**
  * One shift's saved receipts and its active receipt matches (#1599), read-model only; re-emits on every commit.
- * Callers judge it with the shift's own deliveries: `ShiftReceipts.of(read.receipts, detail.deliveries, read.active)`.
+ * Callers judge it with the shift's own deliveries: `ShiftReceipts.of(read.receipts, detail.deliveries, read.active, read.conflicted)`.
  */
 @Singleton
 class ReceiptMatchRepository @Inject constructor(
@@ -19,10 +19,21 @@ class ReceiptMatchRepository @Inject constructor(
     private val matchDao: ReceiptMatchDao,
 ) {
     fun read(sessionId: String): Flow<ReceiptMatchRead> =
-        combine(receiptDao.receiptsInSessionFlow(sessionId), matchDao.activeRowsInSessionFlow(sessionId)) { r, m ->
-            ReceiptMatchRead(r.map { it.toSaved() }, m.map { it.toActive() })
+        combine(
+            receiptDao.receiptsInSessionFlow(sessionId),
+            matchDao.activeRowsInSessionFlow(sessionId),
+            matchDao.conflictedEvidenceInSessionFlow(sessionId),
+        ) { r, m, c ->
+            ReceiptMatchRead(r.map { it.toSaved() }, m.map { it.toActive() }, c.toSet())
         }
 }
 
-/** A shift's saved receipts and the rows its active matches wrote. */
-data class ReceiptMatchRead(val receipts: List<SavedReceipt>, val active: List<ActiveMatchRow>)
+/**
+ * A shift's saved receipts, the rows its active matches wrote, and (#1601) the paying receipts of its whole-job
+ * settlements that ended in CONFLICT.
+ */
+data class ReceiptMatchRead(
+    val receipts: List<SavedReceipt>,
+    val active: List<ActiveMatchRow>,
+    val conflicted: Set<String> = emptySet(),
+)
