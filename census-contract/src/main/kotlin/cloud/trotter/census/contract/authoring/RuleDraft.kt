@@ -492,6 +492,7 @@ object RuleDraft {
         "presentationIdentity" -> Vocabulary.PRESENTATION_IDENTITIES // #1069
         "quoteBasis" -> Vocabulary.QUOTE_BASES
         "offerScope" -> Vocabulary.OFFER_SCOPES
+        "receiptTotalScope" -> Vocabulary.RECEIPT_TOTAL_SCOPES // #1601
         else -> null
     }
 

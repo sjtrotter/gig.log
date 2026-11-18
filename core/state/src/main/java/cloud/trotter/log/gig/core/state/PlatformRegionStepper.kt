@@ -116,7 +116,7 @@ class PlatformRegionStepper @Inject constructor() {
                     // run this where `activeJob` is final for the step (nothing after stepCore changes
                     // whether a job is active).
                     // #1601: the quiet-window reference, stamped where `activeTask` is final for the step.
-                    stampDropoffActivation(closeReceiptRepriceWindow(
+                    stampDropoffActivation(obs = obs, region = closeReceiptRepriceWindow(
                         stepCore(
                             sink,
                             // #1073 round 13: the PostTask-exit latch is a pure flow-edge fact about the

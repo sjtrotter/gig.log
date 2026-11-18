@@ -414,7 +414,8 @@ class ReceiptMatchProjectorTest {
         assertEquals(0, h.projector.catchUp().adjustmentSkips)
         assertEquals(before, listOf(h.row(s.y1), h.row(s.y2)))
         assertTrue(h.active("S1").isEmpty())
-        assertTrue(h.matchRowDump().all { it.endsWith("|7100|${h.matchUndoSeq()}") })
+        // #1601 (Room v28) appended origin, settlementRevision and endReason: a dasher's undo leaves them DASHER/null/null.
+        assertTrue(h.matchRowDump().all { it.endsWith("|7100|${h.matchUndoSeq()}|DASHER|null|null") })
         assertEquals(ReceiptStatus.OPEN, h.shiftReceipts("S1").items.single().status)
         h.undo("S1", 7_200, "M1")
         assertEquals("a second undo is a counted skip", 1, h.projector.catchUp().adjustmentSkips)

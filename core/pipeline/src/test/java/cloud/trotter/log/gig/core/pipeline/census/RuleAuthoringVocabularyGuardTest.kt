@@ -72,6 +72,7 @@ class RuleAuthoringVocabularyGuardTest {
         assertEquals(StateMachineContract.SUPPORTED_PRESENTATION_IDENTITIES.toList(), Vocabulary.PRESENTATION_IDENTITIES)
         assertEquals(StateMachineContract.SUPPORTED_QUOTE_BASES.toList(), Vocabulary.QUOTE_BASES)
         assertEquals(StateMachineContract.SUPPORTED_OFFER_SCOPES.toList(), Vocabulary.OFFER_SCOPES)
+        assertEquals(StateMachineContract.SUPPORTED_RECEIPT_TOTAL_SCOPES.toList(), Vocabulary.RECEIPT_TOTAL_SCOPES)
         assertEquals(setOf("presentationIdentity", "quoteBasis", "offerScope", "receiptTotalScope"), StateMachineContract.PARSE_DECLARATION_LITERALS.keys)
         assertEquals(Mode.entries.map { it.wire }, Vocabulary.MODES)
         assertEquals(OfferSurface.entries.map { it.wire }, Vocabulary.OFFER_SURFACES)

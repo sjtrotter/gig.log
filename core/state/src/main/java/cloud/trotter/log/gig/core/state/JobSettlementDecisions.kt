@@ -7,6 +7,7 @@ import cloud.trotter.log.gig.domain.model.event.AppEventType
 import cloud.trotter.log.gig.domain.model.event.payload.JobReceiptSettledPayload
 import cloud.trotter.log.gig.domain.model.event.payload.JobSettlementKind
 import cloud.trotter.log.gig.domain.model.event.payload.JobSettlementLine
+import cloud.trotter.log.gig.domain.pipeline.Observation
 import cloud.trotter.log.gig.domain.state.ClosedJobSettlement
 import cloud.trotter.log.gig.domain.state.Job
 import cloud.trotter.log.gig.domain.state.JobReceiptRead
@@ -173,10 +174,14 @@ private fun List<JobReceiptRead>.upsert(read: JobReceiptRead): List<JobReceiptRe
 }
 
 /**
- * #1601: stamp [PlatformRegion.possibleWorkSeq] the first time each dropoff of the live job becomes the active task —
- * clause 11's quiet-window reference. Run from the step wrapper after `stepCore`, so no early return skips it.
+ * #1601: stamp [PlatformRegion.possibleWorkSeq] the first time each dropoff of the live job is active on a dropoff
+ * SCREEN — the dropoff phase starting, clause 11's quiet-window reference. Only a dropoff-flow screen stamps: a
+ * notification, a click or a timer never touches the lifecycle (`NotificationNeutralityTest`). Run from the step
+ * wrapper after `stepCore`, so no early return skips it.
  */
-internal fun stampDropoffActivation(region: PlatformRegion): PlatformRegion {
+internal fun stampDropoffActivation(region: PlatformRegion, obs: Observation): PlatformRegion {
+    val flow = (obs as? Observation.Screen)?.flow ?: return region
+    if (flow.toTaskPhase() != TaskPhase.DROPOFF) return region
     val job = region.activeJob ?: return region
     val task = region.activeTask?.takeIf { it.jobId == job.jobId && it.phase == TaskPhase.DROPOFF } ?: return region
     if (task.taskId in job.dropoffActivatedSeq) return region
