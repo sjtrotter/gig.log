@@ -153,8 +153,8 @@ internal object EndShiftTap {
      * lifecycle). Runs after lazy expiry, so a frame past the deadline finds the shift already ended.
      */
     fun yieldToWork(region: PlatformRegion, obs: Observation): PlatformRegion {
-        val pend = region.pendingDestructive
-        if (pend?.kind != DestructiveKind.SESSION_END || pend.authoritative) return region
+        val pend = region.pendingDestructive ?: return region
+        if (pend.kind != DestructiveKind.SESSION_END || pend.authoritative) return region
         val flow = (obs as? Observation.Screen)?.flow ?: return region
         if (flow != Flow.OfferPresented && !flow.isTaskFlow()) return region
         Timber.tag("StateMachine").d(
