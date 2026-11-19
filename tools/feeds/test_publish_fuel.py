@@ -272,6 +272,53 @@ class PublisherTest(unittest.TestCase):
         # A date that is not a Monday is not an EIA week either.
         self.assertIsNone(publish_fuel.period_ms("2026-11-17"))
 
+    # ---- exact edges and an all-omitted week ---------------------------------------------------------------
+
+    def test_the_bounds_hold_exactly_at_their_edges(self):
+        chain = self.chain()
+        start = feedtest.base_prices()
+        start[("NUS", "regular")] = 3.5
+        start[("NUS", "midgrade")] = 3.5
+        start[("NUS", "premium")] = 3.5
+        start[("NUS", "diesel")] = 3.5
+        chain.run({monday(W0 - WEEK): start}, NOW - WEEK)
+        week = dict(start)
+        week[("NUS", "regular")] = 4.9      # +40 % exactly: kept
+        week[("NUS", "midgrade")] = 4.901   # just over: omitted
+        week[("NUS", "premium")] = 2.1      # -40 % exactly: kept
+        week[("NUS", "diesel")] = 2.099     # just under: omitted
+        self.assertGreater(abs(4.9 - 3.5), 0.4 * 3.5, "binary floats would omit the exact +40 % edge")
+        prices = chain.run({WEEK_0: week}, NOW).payload["prices"]
+        self.assertEqual({"regular": 4.9, "premium": 2.1}, {k: v for k, v in prices["NUS"].items()
+                                                             if k in ("regular", "premium")})
+        self.assertNotIn("midgrade", prices["NUS"])
+        self.assertNotIn("diesel", prices["NUS"])
+
+    def test_the_absolute_range_is_inclusive(self):
+        week = feedtest.base_prices()
+        week[("R10", "regular")] = 0.5
+        week[("R20", "regular")] = 15.0
+        week[("R30", "regular")] = 0.499
+        week[("R40", "regular")] = 15.001
+        prices = self.chain().run({WEEK_0: week}, NOW).payload["prices"]
+        self.assertEqual(0.5, prices["R10"]["regular"])
+        self.assertEqual(15.0, prices["R20"]["regular"])
+        self.assertNotIn("regular", prices["R30"])
+        self.assertNotIn("regular", prices["R40"])
+
+    def test_a_new_week_where_every_pair_fails_still_signs_an_empty_map(self):
+        chain = self.chain()
+        chain.run({monday(W0 - WEEK): feedtest.base_prices()}, NOW - WEEK)
+        outcome = chain.run({WEEK_0: feedtest.base_prices(3.0)}, NOW)
+        self.assertEqual({}, outcome.payload["prices"])
+        self.assertEqual(W0, chain.live_payload()["period"])
+        self.assertEqual({}, chain.live_payload()["prices"])
+        # The anchors stay last week's prices, so the next real week compares to them.
+        anchors = json.loads(Path(chain.anchors).read_bytes())["anchors"]
+        self.assertEqual(W0 - WEEK, anchors["NUS"]["regular"]["period"])
+        # The same all-failing week again is no change.
+        self.assertIsNone(chain.run({WEEK_0: feedtest.base_prices(3.0)}, NOW + 60_000).payload)
+
     # ---- sustained move -------------------------------------------------------------------------------------
 
     def test_a_sustained_move_over_40_percent_is_accepted_after_8_weeks(self):

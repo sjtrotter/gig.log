@@ -21,6 +21,7 @@ import argparse
 import datetime as dt
 import json
 import math
+from decimal import Decimal
 import os
 import sys
 import tempfile
@@ -63,8 +64,9 @@ SERIES = {
 # EIA publishes diesel for the U.S., the PADD-level areas and California only.
 DIESEL_AREAS = ("NUS", "R10", "R1X", "R1Y", "R1Z", "R20", "R30", "R40", "R50", "R5XCA", "SCA")
 
-MIN_PRICE, MAX_PRICE = 0.50, 15.00
-MAX_MOVE = 0.40
+# Bounds compare in decimal, from each price's shortest text form, so the edges are exact (3.500 -> 4.900 is 40 %).
+MIN_PRICE, MAX_PRICE = Decimal("0.50"), Decimal("15.00")
+MAX_MOVE = Decimal("0.40")
 WEEK_MS = 7 * 24 * 60 * 60 * 1000
 ANCHOR_MAX_AGE_MS = 8 * WEEK_MS
 FETCH_WEEKS = 5
@@ -180,6 +182,11 @@ def _newest_valid(rows, now_ms, area, fuel, log) -> tuple[int, float] | None:
     return best
 
 
+def dec(price: float) -> Decimal:
+    """A price as the decimal its JSON text names (Python writes the shortest round-trip form)."""
+    return Decimal(repr(float(price)))
+
+
 def anchors_after(live: dict | None, anchors: dict) -> dict:
     """The anchors for a new week: the live feed's week becomes each published pair's anchor; others keep theirs."""
     out = {area: dict(fuels) for area, fuels in anchors.items()}
@@ -217,7 +224,7 @@ def generate(eia: dict, now_ms: int, live: dict | None, anchors: dict) -> Outcom
         if ms != period:
             log.append(f"omitted {area}/{fuel}: newest week {period_text(ms)} is not {period_text(period)}")
             continue
-        if not MIN_PRICE <= value <= MAX_PRICE:
+        if not MIN_PRICE <= dec(value) <= MAX_PRICE:
             log.append(f"omitted {area}/{fuel}: {value} is outside {MIN_PRICE:.2f}-{MAX_PRICE:.2f}")
             continue
         anchor = working.get(area, {}).get(fuel)
@@ -225,14 +232,13 @@ def generate(eia: dict, now_ms: int, live: dict | None, anchors: dict) -> Outcom
             del working[area][fuel]
             log.append(f"anchor dropped {area}/{fuel}: week {period_text(anchor['period'])} is over 8 weeks old")
             anchor = None
-        if anchor is not None and abs(value - anchor["price"]) > MAX_MOVE * anchor["price"]:
+        if anchor is not None and abs(dec(value) - dec(anchor["price"])) > MAX_MOVE * dec(anchor["price"]):
             log.append(f"omitted {area}/{fuel}: {value} moved over 40% from {anchor['price']} "
                        f"(week {period_text(anchor['period'])})")
             continue
         prices.setdefault(area, {})[fuel] = value
     working = {a: f for a, f in working.items() if f}
-    if not prices:
-        return Outcome(None, anchors, log, "no pair passed the bounds; nothing published")
+    # Every pair may fail the bounds: the generation still signs (an empty map) and advances the high-water.
     payload = {"source": "EIA", "period": period, "unit": UNIT, "series": dict(SERIES), "prices": prices}
     if live is not None and live_period == period and live["prices"] == prices:
         return Outcome(None, anchors, log, f"no change since the live feed (week {period_text(period)})")
