@@ -174,7 +174,11 @@ jobs:
     # The snapshot this deploy publishes, read back by pages_site.py: "deploy feeds-site-<attempt>".
     name: deploy ${{ needs.build.outputs.snapshot }}
     needs: build
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
+    # A skipped job upstream (fuel, on a push) skips every job below it unless the condition names a status
+    # function, so this one checks build's own result.
+    if: >-
+      !cancelled() && needs.build.result == 'success' &&
+      github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
