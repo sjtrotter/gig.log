@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="fuel_price_source_week">EIA, semaine du %1$s</string>
+    <string name="fuel_price_older_week">Prix plus ancien : EIA, semaine du %1$s</string>
+    <string name="fuel_price_older">Prix plus ancien</string>
+</resources>

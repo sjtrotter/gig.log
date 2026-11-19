@@ -16,7 +16,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import cloud.trotter.log.gig.core.designsystem.text.fuelPriceOlderText
 import cloud.trotter.log.gig.core.designsystem.theme.AppTheme
+import cloud.trotter.log.gig.core.designsystem.time.rememberNow
+import cloud.trotter.log.gig.domain.fuel.FuelPriceAge
 import cloud.trotter.log.gig.feature.bubble.R
 
 @Composable
@@ -24,6 +27,8 @@ fun GasRow(model: GasRowModel, onSetPrice: (Float) -> Unit, onRefresh: () -> Uni
     var editing by rememberSaveable { mutableStateOf(false) }
     val c = AppTheme.colors
     val label = stringResource(R.string.hud_gas_click_label)
+    val now by rememberNow(tickMs = 60_000)
+    val older = model.auto && model.stamp?.let { FuelPriceAge.isOlder(it, now) } == true
     Column {
         Canvas(Modifier.fillMaxWidth().height(1.dp)) { drawLine(c.line, Offset.Zero, Offset(size.width, 0f)) }
         Row(Modifier.fillMaxWidth().height(56.dp).clickable(onClickLabel = label) { editing = !editing },
@@ -33,10 +38,13 @@ fun GasRow(model: GasRowModel, onSetPrice: (Float) -> Unit, onRefresh: () -> Uni
             Text(moneyOrEmpty(model.price?.toDouble()), color = c.text, style = AppTheme.num.mdNum)
             Text(stringResource(R.string.hud_gas_per_gal), color = c.neutral, style = MaterialTheme.typography.labelSmall)
             Spacer(Modifier.weight(1f))
-            Text(stringResource(if (model.auto) R.string.hud_gas_auto else R.string.hud_gas_manual), color = c.neutral,
-                style = MaterialTheme.typography.labelSmall)
+            Text(if (older) fuelPriceOlderText() else stringResource(if (model.auto) R.string.hud_gas_auto else R.string.hud_gas_manual),
+                color = c.neutral, style = MaterialTheme.typography.labelSmall)
             Icon(Icons.Outlined.Edit, null, tint = c.neutral, modifier = Modifier.size(16.dp))
         }
-        if (editing) GasQuickEdit(model.price, model.auto, model.refreshing, model.refreshError, onSetPrice, onRefresh, onResumeAuto)
+        if (editing) {
+            GasQuickEdit(model.price, model.auto, model.refreshing, model.refreshError, model.stamp, now, onSetPrice, onRefresh,
+                onResumeAuto)
+        }
     }
 }

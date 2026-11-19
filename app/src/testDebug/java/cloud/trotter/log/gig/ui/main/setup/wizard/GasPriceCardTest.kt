@@ -9,6 +9,7 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import cloud.trotter.log.gig.core.designsystem.theme.GigLogTheme
 import cloud.trotter.log.gig.core.designsystem.time.LocalNowProvider
+import cloud.trotter.log.gig.domain.fuel.FuelPriceStamp
 import cloud.trotter.log.gig.feature.setup.wizard.WizardViewModel
 import cloud.trotter.log.gig.feature.setup.wizard.model.GasPriceSource
 import cloud.trotter.log.gig.feature.setup.wizard.model.SaveStatus
@@ -25,24 +26,22 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.time.Clock
 import java.time.Instant
-import java.time.LocalDate
-import java.time.LocalTime
 import java.time.ZoneId
 
-/** #1478: the setup card's gas price line, rendered through the wizard host against a clock the test owns. */
+/** The setup card's gas price line, rendered through the wizard host against a clock the test owns. */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], qualifiers = "w411dp-h1600dp")
 class GasPriceCardTest {
     @get:Rule val compose = createComposeRule()
-    private val zone = ZoneId.systemDefault()
-    private val oct20 = LocalDate.of(2026, 10, 20)
-    private val oct1 = LocalDate.of(2026, 10, 1)
-    private fun at(date: LocalDate, hour: Int, minute: Int = 0, second: Int = 0) =
-        date.atTime(LocalTime.of(hour, minute, second)).atZone(zone).toInstant().toEpochMilli()
+    private val day = 24L * 60 * 60 * 1000
 
-    private val clock = MutableClock(at(oct20, 18))
+    /** 2026-11-16T00:00Z, a Monday, issued two days later; and the week three weeks before. */
+    private val nov16 = FuelPriceStamp(1_794_787_200_000L, 1_794_787_200_000L + 2 * day)
+    private val oct26 = FuelPriceStamp(nov16.period - 21 * day, nov16.issuedAt - 21 * day)
+
+    private val clock = MutableClock(nov16.issuedAt + day)
     private val state = MutableStateFlow(WizardState(isGasPriceAuto = true, gasPrice = 3.29f,
-        gasPriceSource = GasPriceSource.Lookup(at(oct20, 6))))
+        gasPriceSource = GasPriceSource.Lookup(nov16)))
     private val vm: WizardViewModel = mock()
 
     private fun show() {
@@ -86,17 +85,18 @@ class GasPriceCardTest {
     @Test
     fun `each source reads its own line and only a failure offers retry`() {
         show()
-        assertLine("Regional average, today", retry = false)
+        assertLine("EIA, week of Nov 16", retry = false)
 
-        given(state.value.copy(gasPriceSource = GasPriceSource.Lookup(at(oct1, 9))))
-        assertLine("Regional average from Oct 1", retry = false)
+        given(state.value.copy(gasPriceSource = GasPriceSource.Lookup(oct26)))
+        assertLine("Older price: EIA, week of Oct 26", retry = false)
 
         given(state.value.copy(gasPriceLookupFailed = true))
-        assertLine("Couldn't get today's price. Using $3.29 from Oct 1.", retry = true)
-        compose.onNodeWithText("Regional average", substring = true).assertDoesNotExist()
+        assertLine("Older price: EIA, week of Oct 26", retry = true)
+        compose.onNodeWithText("Couldn't check for a new price.").assertExists()
 
         given(state.value.copy(gasPriceSource = GasPriceSource.Saved))
-        assertLine("Couldn't get today's price. Enter your price.", retry = true)
+        assertLine("Couldn't get a price. Enter your price.", retry = true)
+        compose.onNodeWithText("EIA, week of", substring = true).assertDoesNotExist()
 
         given(state.value.copy(gasPriceLookupFailed = false))
         assertLine("Saved price", retry = false)
@@ -104,9 +104,9 @@ class GasPriceCardTest {
         given(state.value.copy(isGasPriceAuto = false, gasPriceSource = GasPriceSource.Typed))
         assertLine("Price you entered", retry = false)
 
-        given(state.value.copy(isGasPriceAuto = true, gasPriceSource = GasPriceSource.Lookup(at(oct20, 6)),
+        given(state.value.copy(isGasPriceAuto = true, gasPriceSource = GasPriceSource.Lookup(nov16),
             isFetchingGasPrice = true))
-        compose.onNodeWithText("Regional average", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("EIA, week of", substring = true).assertDoesNotExist()
         compose.onNodeWithText("Retry").assertDoesNotExist()
     }
 
@@ -122,7 +122,8 @@ class GasPriceCardTest {
 
         given(state.value.copy(isFetchingGasPrice = false, gasPriceLookupFailed = true))
         compose.onNode(priceInput).assertExists()
-        assertLine("Couldn't get today's price. Using $3.29 from Oct 20.", retry = true)
+        assertLine("EIA, week of Nov 16", retry = true)
+        compose.onNodeWithText("Couldn't check for a new price.").assertExists()
     }
 
     @Test
@@ -150,16 +151,16 @@ class GasPriceCardTest {
     }
 
     @Test
-    fun `a card left open past midnight relabels itself`() {
-        clock.millis = at(oct20, 23, 59, 30)
+    fun `a card left open turns older with the clock, with no state change`() {
+        clock.millis = nov16.period + 14 * day
         show()
-        compose.onNodeWithText("Regional average, today").assertExists()
+        compose.onNodeWithText("EIA, week of Nov 16").assertExists()
 
-        clock.millis = at(oct20.plusDays(1), 0, 0, 30)
-        settle()
+        clock.millis = nov16.period + 14 * day + 30_000
+        compose.mainClock.advanceTimeBy(61_000)
 
-        compose.onNodeWithText("Regional average from Oct 20").assertExists()
-        compose.onNodeWithText("Regional average, today").assertDoesNotExist()
+        compose.onNodeWithText("Older price: EIA, week of Nov 16").assertExists()
+        compose.onNodeWithText("EIA, week of Nov 16").assertDoesNotExist()
     }
 
     @Test

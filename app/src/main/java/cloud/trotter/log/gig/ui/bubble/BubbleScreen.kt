@@ -39,6 +39,7 @@ fun BubbleScreen(viewModel: BubbleViewModel = hiltViewModel()) {
     val todayEarned = goalDay?.earned
     val gasPrice by viewModel.gasPrice.collectAsStateWithLifecycle()
     val gasAuto by viewModel.isGasPriceAuto.collectAsStateWithLifecycle()
+    val gasStamp by viewModel.gasPriceStamp.collectAsStateWithLifecycle()
     val gasRefreshing by viewModel.isGasPriceRefreshing.collectAsStateWithLifecycle()
     val cards by viewModel.cards.collectAsStateWithLifecycle()
     val addOnSpeech by viewModel.addOnSpeech.collectAsStateWithLifecycle()
@@ -120,7 +121,7 @@ fun BubbleScreen(viewModel: BubbleViewModel = hiltViewModel()) {
         StateCardMapper.map(flow, region?.mode, cards.stack.active, cards.stack, region, lastSession, flowOwned = liveCardShown)
     }
     val pendingOffer = region?.presentedOffer()
-    val gas = GasRowModel(gasPrice, gasAuto, gasRefreshing, gasError)
+    val gas = GasRowModel(gasPrice, gasAuto, gasRefreshing, gasError, gasStamp)
     // Editing lasts while the sheet is open OR a goal write is still landing: a preset tapped and
     // then Back before persistence would otherwise publish a key the closed-sheet rule celebrates.
     val goalBusy by viewModel.goalActions.busy.collectAsStateWithLifecycle()

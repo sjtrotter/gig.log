@@ -37,6 +37,7 @@ fun EconomySettingsScreen(
     val activeVehicle by viewModel.activeVehicle.collectAsStateWithLifecycle()
     val eco by viewModel.userEconomy.collectAsStateWithLifecycle()
     val gasAuto by viewModel.gasAuto.collectAsStateWithLifecycle()
+    val fuelPrice by viewModel.fuelPrice.collectAsStateWithLifecycle()
     val timeConstants by viewModel.timeConstants.collectAsStateWithLifecycle()
     val lastSaveUndo by viewModel.lastSaveUndo.collectAsStateWithLifecycle()
     val snackbarHost = remember { SnackbarHostState() }
@@ -104,8 +105,10 @@ fun EconomySettingsScreen(
                     Text(stringResource(R.string.economy_shared_auto_gas_price), Modifier.weight(1f))
                     Switch(checked = gasAuto, onCheckedChange = null, enabled = enabled)
                 }
+                FuelAreaRow(fuelPrice.area, enabled, viewModel::setFuelArea)
                 DecimalInput(stringResource(R.string.economy_shared_gas_price), eco.gasPricePerGallon, viewModel::setGasPrice,
                     enabled = enabled, fieldKey = "GAS_PRICE")
+                if (gasAuto) FuelPriceLines(fuelPrice)
                 DecimalInput(stringResource(R.string.vehicle_facts_electricity_price), eco.electricityPricePerKwh,
                     viewModel::setElectricityPrice, enabled = enabled, fieldKey = "ELECTRICITY_PRICE")
                 SharedPhoneInputs(eco, viewModel::setPhoneTotal, viewModel::setPhoneLines,

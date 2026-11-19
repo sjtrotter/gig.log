@@ -1,5 +1,6 @@
 package cloud.trotter.log.gig.feature.bubble.hud
 
+import cloud.trotter.log.gig.domain.fuel.FuelPriceStamp
 import cloud.trotter.log.gig.domain.state.PhaseColor
 import cloud.trotter.log.gig.domain.state.Platform
 import cloud.trotter.log.gig.feature.bubble.hud.vehicle.VehicleChipModel
@@ -64,11 +65,13 @@ data class RestingModel(
         OnlineSpan.Unknown -> null
     })
 }
+/** [stamp] is the stored price's fuel feed stamp; the row derives its source and age labels from it and the clock. */
 data class GasRowModel(
     val price: Float?,
     val auto: Boolean,
     val refreshing: Boolean = false,
     val refreshError: Boolean = false,
+    val stamp: FuelPriceStamp? = null,
 )
 data class RibbonModel(
     val startAt: Long,

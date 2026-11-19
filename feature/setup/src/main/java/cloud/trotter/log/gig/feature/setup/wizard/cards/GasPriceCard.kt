@@ -31,6 +31,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import cloud.trotter.log.gig.core.designsystem.text.fuelPriceSourceText
 import cloud.trotter.log.gig.feature.setup.R
 import cloud.trotter.log.gig.domain.format.Formats
 import cloud.trotter.log.gig.domain.format.formatMonthDay
@@ -38,7 +39,6 @@ import cloud.trotter.log.gig.domain.model.vehicle.FuelType
 import cloud.trotter.log.gig.feature.setup.wizard.components.WizardCardHeader
 import cloud.trotter.log.gig.feature.setup.wizard.model.GasPriceSource
 import cloud.trotter.log.gig.feature.setup.wizard.model.WizardStep
-import java.time.ZoneId
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -50,14 +50,14 @@ fun GasPriceCard(
     isFetching: Boolean,
     source: GasPriceSource,
     lookupFailed: Boolean,
-    /** The host's composition clock reading (`rememberNow()`); decides "today" at render time. */
+    /** The host's composition clock reading (`rememberNow()`); decides "older" at render time. */
     nowMillis: Long,
     onFuelTypeSelected: (FuelType) -> Unit,
     onAutoToggle: (Boolean) -> Unit,
     onPriceChange: (Float) -> Unit,
     onRetry: () -> Unit,
 ) {
-    val line = GasPriceLine.of(source, lookupFailed, price, nowMillis, ZoneId.systemDefault())
+    val line = GasPriceLine.of(source, lookupFailed, nowMillis)
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -165,20 +165,25 @@ fun GasPriceCard(
 
 @Composable
 private fun GasPriceSourceLine(line: GasPriceLine, onRetry: () -> Unit) {
-    val text = when (line) {
-        GasPriceLine.Today -> stringResource(R.string.wizard_gas_price_source_today)
-        is GasPriceLine.FetchedOn -> stringResource(R.string.wizard_gas_price_source_on_date, formatMonthDay(line.date))
-        is GasPriceLine.FailedUsing -> stringResource(R.string.wizard_gas_price_lookup_failed_using,
-            Formats.money(line.price.toDouble()), formatMonthDay(line.date))
-        GasPriceLine.FailedNoLookup -> stringResource(R.string.wizard_gas_price_lookup_failed_enter)
+    val source = when (line) {
+        is GasPriceLine.Current -> fuelPriceSourceText(formatMonthDay(line.week), older = false)
+        is GasPriceLine.Older -> fuelPriceSourceText(formatMonthDay(line.week), older = true)
+        is GasPriceLine.FailedUsing -> fuelPriceSourceText(formatMonthDay(line.week), line.older)
+        GasPriceLine.FailedNoLookup -> null
         GasPriceLine.Typed -> stringResource(R.string.wizard_gas_price_source_typed)
         GasPriceLine.Saved -> stringResource(R.string.wizard_gas_price_source_saved)
     }
-    Text(
-        text = text,
-        style = MaterialTheme.typography.bodyMedium,
-        color = if (line.offersRetry) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-    )
+    val failure = when (line) {
+        is GasPriceLine.FailedUsing -> stringResource(R.string.wizard_gas_price_lookup_failed)
+        GasPriceLine.FailedNoLookup -> stringResource(R.string.wizard_gas_price_lookup_failed_enter)
+        else -> null
+    }
+    if (source != null) {
+        Text(text = source, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+    if (failure != null) {
+        Text(text = failure, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+    }
     if (line.offersRetry) {
         TextButton(onClick = onRetry) { Text(stringResource(R.string.wizard_gas_price_retry)) }
     }

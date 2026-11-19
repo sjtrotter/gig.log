@@ -1,6 +1,10 @@
 package cloud.trotter.log.gig.ui.main.settings
 
+import cloud.trotter.feed.contract.FeedRefusal
+import cloud.trotter.log.gig.core.data.feed.FeedError
+import cloud.trotter.log.gig.core.data.fuel.FuelPriceRepository
 import cloud.trotter.log.gig.core.data.vehicle.GarageRepository
+import cloud.trotter.log.gig.domain.fuel.FuelArea
 import cloud.trotter.log.gig.domain.model.vehicle.Vehicle
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,6 +26,7 @@ import cloud.trotter.log.gig.ui.components.economy.TimeConstantsUiState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -38,6 +43,7 @@ class EconomySettingsViewModel @Inject constructor(
     private val repo: AppPreferencesRepository,
     strategyRepository: StrategyRepository,
     garageRepository: GarageRepository,
+    private val fuelPrices: FuelPriceRepository,
 ) : ViewModel() {
 
     val activeVehicle: StateFlow<Vehicle?> = garageRepository.garage.map { it.active }.stateIn(
@@ -63,6 +69,21 @@ class EconomySettingsViewModel @Inject constructor(
     private val _busy = MutableStateFlow(false)
     val busy = _busy.asStateFlow()
     val gasAuto = repo.isGasPriceAuto.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    val fuelPrice: StateFlow<FuelPriceUiState> =
+        combine(repo.fuelPriceArea, repo.gasPriceStamp, fuelPrices.resolved, fuelPrices.feedState) { area, stamp, resolved, feed ->
+            FuelPriceUiState(
+                area = area,
+                stamp = stamp,
+                usedArea = resolved?.area?.takeIf { it != area },
+                clockBehind = feed.lastError == FeedError.Refused(FeedRefusal.ClockBehind),
+            )
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), FuelPriceUiState())
+
+    /** Saves the chosen area; with auto on, the fuel client applies its price from the cached feed. */
+    fun setFuelArea(area: FuelArea) {
+        viewModelScope.launch { fuelPrices.setArea(area) }
+    }
 
     val timeConstants = strategyRepository.evaluationConfig.filterNotNull().map { config ->
         val economy = config.userEconomy
@@ -101,7 +122,7 @@ class EconomySettingsViewModel @Inject constructor(
         { repo.updateElectricityPrice(value, it) }, { old, current -> repo.restoreElectricityPrice(old, StoredPreference(value, true), current) })
     fun setGasPrice(value: Double) = sharedWrite("GAS_PRICE", R.string.economy_shared_gas_price,
         { repo.updateGasPriceManual(value.toFloat(), it) },
-        { old, current -> repo.restoreGasPriceManual(old, StoredGasPrice(StoredPreference(value.toFloat(), old.price.userSet), StoredPreference(false, false), old.fetchedAt), current) })
+        { old, current -> repo.restoreGasPriceManual(old, StoredGasPrice(StoredPreference(value.toFloat(), old.price.userSet), StoredPreference(false, false), old.period, old.issuedAt), current) })
     fun setGasAuto(value: Boolean) = sharedWrite("GAS_AUTO", R.string.economy_shared_auto_gas_price,
         { repo.setGasPriceAuto(value, it) }, { old, current -> repo.restoreGasPriceAuto(old, StoredPreference(value, false), current) })
     fun setPhoneTotal(value: Double) = sharedWrite("PHONE_PLAN_TOTAL", R.string.economy_editor_phone_plan_total_label,

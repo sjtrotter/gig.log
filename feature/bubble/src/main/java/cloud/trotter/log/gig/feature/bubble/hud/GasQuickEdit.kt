@@ -30,9 +30,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import cloud.trotter.log.gig.core.designsystem.text.fuelPriceSourceText
 import cloud.trotter.log.gig.feature.bubble.R
 import cloud.trotter.log.gig.domain.evaluation.UserEconomy
 import cloud.trotter.log.gig.domain.format.Formats
+import cloud.trotter.log.gig.domain.format.formatMonthDay
+import cloud.trotter.log.gig.domain.fuel.FuelPriceAge
+import cloud.trotter.log.gig.domain.fuel.FuelPriceStamp
 
 private const val GAS_STEP = 0.05f
 
@@ -42,6 +46,10 @@ internal fun GasQuickEdit(
     isGasPriceAuto: Boolean,
     isRefreshing: Boolean,
     showRefreshError: Boolean,
+    /** The stored price's feed stamp, null for a price that did not come from the feed. */
+    stamp: FuelPriceStamp?,
+    /** The host's ticking clock reading (`rememberNow()`); decides "older" while the dasher looks. */
+    nowMillis: Long,
     onSetGasPrice: (Float) -> Unit,
     onRefreshGasPrice: () -> Unit,
     onResumeAutoGasPrice: () -> Unit,
@@ -56,7 +64,9 @@ internal fun GasQuickEdit(
             modifier = Modifier.size(18.dp),
         )
         if (isGasPriceAuto) {
-            GasPriceAutoDisplay(price = current, onTakeManualControl = { onSetGasPrice(current) })
+            val caption = stamp?.let { fuelPriceSourceText(formatMonthDay(FuelPriceAge.weekOf(it)), FuelPriceAge.isOlder(it, nowMillis)) }
+                ?: stringResource(R.string.bubble_mode_idle_gas_auto)
+            GasPriceAutoDisplay(price = current, caption = caption, onTakeManualControl = { onSetGasPrice(current) })
             GasRefreshButton(isRefreshing = isRefreshing, onClick = onRefreshGasPrice)
         } else {
             // 48dp touch target (#728) — was 28dp, too small to reliably tap while driving.
@@ -108,7 +118,7 @@ internal fun GasQuickEdit(
 
 /** AUTO-mode price display — tapping it is the explicit "take manual control" gesture (#722). */
 @Composable
-private fun GasPriceAutoDisplay(price: Float, onTakeManualControl: () -> Unit) {
+private fun GasPriceAutoDisplay(price: Float, caption: String, onTakeManualControl: () -> Unit) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
@@ -137,14 +147,14 @@ private fun GasPriceAutoDisplay(price: Float, onTakeManualControl: () -> Unit) {
             )
         }
         Text(
-            text = stringResource(R.string.bubble_mode_idle_gas_auto),
+            text = caption,
             style = MaterialTheme.typography.labelSmall,
             color = AppTheme.colors.neutral,
         )
     }
 }
 
-/** AUTO-mode refresh icon: single meaning — fetch today's EIA price now, stay auto (#722). */
+/** AUTO-mode refresh icon: single meaning — check the fuel feed for a new price now, stay auto (#722). */
 @Composable
 private fun GasRefreshButton(isRefreshing: Boolean, onClick: () -> Unit) {
     IconButton(

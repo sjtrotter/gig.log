@@ -1,6 +1,16 @@
 package cloud.trotter.log.gig.ui.main.settings
 
+import androidx.compose.runtime.CompositionLocalProvider
+import cloud.trotter.feed.contract.FeedRefusal
+import cloud.trotter.log.gig.core.data.feed.FeedError
+import cloud.trotter.log.gig.core.data.feed.FeedState
+import cloud.trotter.log.gig.core.data.fuel.FuelPriceRepository
 import cloud.trotter.log.gig.core.datastore.settings.StoredPreference
+import cloud.trotter.log.gig.core.designsystem.time.LocalNowProvider
+import cloud.trotter.log.gig.domain.fuel.FuelArea
+import cloud.trotter.log.gig.domain.fuel.FuelPriceStamp
+import cloud.trotter.log.gig.domain.fuel.FuelPrices
+import cloud.trotter.log.gig.domain.fuel.ResolvedFuelPrice
 import kotlinx.coroutines.runBlocking
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -22,6 +32,9 @@ import org.junit.runner.RunWith
 import org.mockito.kotlin.*
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneId
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
@@ -30,19 +43,30 @@ class EconomySettingsScreenTest {
     private var opened: String? = null
     private var garageOpened = false
     private lateinit var vm: EconomySettingsViewModel
-    private fun show(active: Vehicle?, storedPreferences: AppPreferencesRepository? = null) {
+    private val clock = MutableClock(0L)
+    private fun show(
+        active: Vehicle?,
+        storedPreferences: AppPreferencesRepository? = null,
+        fuelPrices: FuelPriceRepository = fuelPricesStub(),
+        frozen: Boolean = false,
+    ) {
         val garage: GarageRepository = mock { on { garage } doReturn flowOf(Garage(listOfNotNull(active), active?.id, true)) }
-        val preferences: AppPreferencesRepository = storedPreferences ?: mock {
+        val preferences: AppPreferencesRepository = storedPreferences ?: mock<AppPreferencesRepository> {
             on { userEconomy } doReturn flowOf(UserEconomy())
             on { isGasPriceAuto } doReturn flowOf(true)
-        }
+        }.stubFuelPrice()
         val strategy: StrategyRepository = mock { on { evaluationConfig } doReturn MutableStateFlow(null) }
-        compose.runOnIdle { vm = EconomySettingsViewModel(preferences, strategy, garage) }
+        compose.runOnIdle { vm = EconomySettingsViewModel(preferences, strategy, garage, fuelPrices) }
+        if (frozen) compose.mainClock.autoAdvance = false
         compose.setContent { GigLogTheme {
-            EconomySettingsScreen({}, { garageOpened = true }, { opened = it }, vm)
+            CompositionLocalProvider(LocalNowProvider provides clock) {
+                EconomySettingsScreen({}, { garageOpened = true }, { opened = it }, vm)
+            }
         } }
-        compose.waitForIdle()
+        if (frozen) settle() else compose.waitForIdle()
     }
+
+    private fun settle() = compose.mainClock.advanceTimeBy(2_000)
     @Test fun `shared settings have no vehicle cost editors and active row opens its details`() {
         show(Vehicle("car-id", "Current car", 1))
         compose.onNodeWithText("Gas price").assertExists()
@@ -63,7 +87,7 @@ class EconomySettingsScreenTest {
         val preferences: AppPreferencesRepository = mock {
             on { userEconomy } doReturn flowOf(UserEconomy())
             on { isGasPriceAuto } doReturn auto
-        }
+        }.stubFuelPrice()
         runBlocking {
             whenever(preferences.setGasPriceAuto(any(), anyOrNull())).doAnswer {
                 val previous = auto.value
@@ -96,7 +120,7 @@ class EconomySettingsScreenTest {
         val preferences: AppPreferencesRepository = mock {
             on { userEconomy } doReturn economy
             on { isGasPriceAuto } doReturn flowOf(false)
-        }
+        }.stubFuelPrice()
         runBlocking {
             whenever(preferences.updatePhoneLines(any())).doAnswer {
                 val previous = economy.value.phonePlanLines
@@ -124,4 +148,79 @@ class EconomySettingsScreenTest {
         compose.onNodeWithText("Lines saved").assertDoesNotExist()
     }
 
+
+    // --- the fuel price area and the source line ---
+
+    private val day = 24L * 60 * 60 * 1000
+
+    /** 2026-11-16T00:00Z, a Monday, issued two days later. */
+    private val stamp = FuelPriceStamp(1_794_787_200_000L, 1_794_787_200_000L + 2 * day)
+
+    private fun fuelPreferences(area: FuelArea = FuelArea.US): AppPreferencesRepository = mock<AppPreferencesRepository> {
+        on { userEconomy } doReturn flowOf(UserEconomy())
+        on { isGasPriceAuto } doReturn flowOf(true)
+    }.stubFuelPrice(area = flowOf(area), stamp = flowOf(stamp))
+
+    @Test fun `the area list names all 29 areas and a pick reaches the fuel client`() {
+        val fuelPrices = fuelPricesStub()
+        show(null, fuelPreferences(), fuelPrices)
+        compose.onNodeWithText("Fuel price area").performClick()
+        compose.waitForIdle()
+        for (name in listOf("Gulf Coast", "West Coast except California", "Texas", "Houston", "New York City", "Seattle")) {
+            compose.onNode(hasText(name) and hasClickAction()).assertExists()
+        }
+        compose.onAllNodes(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton)).assertCountEquals(29)
+        compose.onNodeWithText("Houston").performScrollTo().performClick()
+        compose.waitForIdle()
+        runBlocking { verify(fuelPrices).setArea(FuelArea.HOUSTON) }
+    }
+
+    @Test fun `the source line names the week and turns older with the clock, with no state change`() {
+        clock.millis = stamp.issuedAt + day
+        show(null, fuelPreferences(), frozen = true)
+        compose.onNodeWithText("EIA, week of Nov 16").assertExists()
+
+        // The feed generation more than 21 days old.
+        clock.millis = stamp.issuedAt + 21 * day + 1
+        compose.mainClock.advanceTimeBy(61_000)
+        compose.onNodeWithText("Older price: EIA, week of Nov 16").assertExists()
+        compose.onNodeWithText("EIA, week of Nov 16").assertDoesNotExist()
+    }
+
+    @Test fun `a week more than 14 days old reads older though its generation is current`() {
+        val lateIssue = FuelPriceStamp(stamp.period, stamp.period + 13 * day)
+        clock.millis = stamp.period + 14 * day
+        val preferences = mock<AppPreferencesRepository> {
+            on { userEconomy } doReturn flowOf(UserEconomy())
+            on { isGasPriceAuto } doReturn flowOf(true)
+        }.stubFuelPrice(stamp = flowOf(lateIssue))
+        show(null, preferences, frozen = true)
+        compose.onNodeWithText("EIA, week of Nov 16").assertExists()
+
+        clock.millis = stamp.period + 14 * day + 1
+        compose.mainClock.advanceTimeBy(61_000)
+        compose.onNodeWithText("Older price: EIA, week of Nov 16").assertExists()
+    }
+
+    @Test fun `a clock-behind refusal says so`() {
+        clock.millis = stamp.issuedAt + day
+        val feed = MutableStateFlow(FeedState<FuelPrices>(lastError = FeedError.Refused(FeedRefusal.ClockBehind)))
+        show(null, fuelPreferences(), fuelPricesStub(feedState = feed), frozen = true)
+        compose.onNodeWithText("Phone clock is behind. New gas prices load once the date and time are right.").assertExists()
+    }
+
+    @Test fun `a price from an area above the chosen one names that area`() {
+        clock.millis = stamp.issuedAt + day
+        val resolved = flowOf(ResolvedFuelPrice(3.4, FuelArea.GULF_COAST, stamp.period))
+        show(null, fuelPreferences(FuelArea.TEXAS), fuelPricesStub(resolved = resolved), frozen = true)
+        compose.onNodeWithText("Using the Gulf Coast price").assertExists()
+        compose.onNodeWithText("Texas").assertExists()
+    }
+
+    private class MutableClock(var millis: Long) : Clock() {
+        override fun getZone(): ZoneId = ZoneId.systemDefault()
+        override fun withZone(zone: ZoneId): Clock = this
+        override fun instant(): Instant = Instant.ofEpochMilli(millis)
+        override fun millis(): Long = millis
+    }
 }

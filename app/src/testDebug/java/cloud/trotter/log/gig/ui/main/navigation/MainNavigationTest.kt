@@ -86,6 +86,8 @@ import cloud.trotter.log.gig.ui.main.analytics.AnalyticsScreen
 import cloud.trotter.log.gig.ui.main.analytics.AnalyticsViewModel
 import cloud.trotter.log.gig.ui.main.settings.EconomySettingsScreen
 import cloud.trotter.log.gig.ui.main.settings.EconomySettingsViewModel
+import cloud.trotter.log.gig.ui.main.settings.fuelPricesStub
+import cloud.trotter.log.gig.ui.main.settings.stubFuelPrice
 import cloud.trotter.log.gig.ui.main.settings.garage.GarageWriteFailure
 import cloud.trotter.log.gig.ui.main.settings.garage.VehicleDetailsScreen
 import cloud.trotter.log.gig.ui.main.settings.garage.VehicleDetailsViewModel
@@ -548,7 +550,9 @@ class MainNavigationTest {
         val strategy: StrategyRepository = mock { on { evaluationConfig } doReturn MutableStateFlow(null) }
         val created = mutableListOf<EconomySettingsViewModel>()
         realScreens = mapOf(Screen.EconomySettings.route to { _ ->
-            val vm = viewModel { EconomySettingsViewModel(preferences, strategy, garage).also { created += it } }
+            val vm = viewModel {
+                EconomySettingsViewModel(preferences.stubFuelPrice(), strategy, garage, fuelPricesStub()).also { created += it }
+            }
             EconomySettingsScreen(onBack = actions::back, onOpenGarage = {}, onOpenVehicle = {}, viewModel = vm)
         })
         show()
