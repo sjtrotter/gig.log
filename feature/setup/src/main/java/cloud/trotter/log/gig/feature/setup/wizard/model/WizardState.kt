@@ -1,5 +1,6 @@
 package cloud.trotter.log.gig.feature.setup.wizard.model
 
+import cloud.trotter.log.gig.core.data.fuel.FetchedGasPrice
 import cloud.trotter.log.gig.feature.setup.wizard.vehicle.VehicleDraftState
 import cloud.trotter.log.gig.domain.config.OfferStrategy
 import cloud.trotter.log.gig.domain.evaluation.EconomyField

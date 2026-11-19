@@ -9,8 +9,8 @@ import javax.xml.parsers.DocumentBuilderFactory
 import org.w3c.dom.Element
 
 /**
- * #1620 (ADR-0011 §21): encrypted in transit. Every endpoint the app calls is `https` (the census server, the EIA price
- * API, the EPA vehicle API and any other URL in shipped source), and the app's network security config refuses
+ * #1620 (ADR-0011 §21): encrypted in transit. Every endpoint the app calls is `https` (the census server, gig.log's
+ * signed feeds, the EPA vehicle API and any other URL in shipped source), and the app's network security config refuses
  * cleartext for every host, referenced from the manifest every build merges.
  */
 class HttpsEndpointGuardTest {
@@ -28,11 +28,27 @@ class HttpsEndpointGuardTest {
         val urls = urlLiterals()
         val endpoints = urls.map { it.first }
         // Non-vacuous: the three servers the app calls are found by this scan.
-        for (host in listOf("https://census.dashbuddy.trotter.cloud", "https://api.eia.gov/", "https://www.fueleconomy.gov/")) {
+        for (host in listOf("https://census.dashbuddy.trotter.cloud", "https://gig.log.trotter.cloud/feeds/", "https://www.fueleconomy.gov/")) {
             assertTrue("$host is found in shipped source", endpoints.any { it.startsWith(host) })
         }
         val cleartext = urls.filterNot { it.first.startsWith("https://") }
         assertEquals("non-https URL in shipped source: $cleartext", emptyList<Pair<String, String>>(), cleartext)
+    }
+
+    /** The gas price comes from the signed fuel feed: no EIA key is compiled in and nothing calls EIA's API. */
+    @Test fun `no shipped source or module build file names the EIA key or API`() {
+        val hits = root.walkTopDown()
+            .onEnter { it.name != "build" && it.name != ".gradle" && !it.name.startsWith(".") || it == root }
+            .filter { it.isFile }
+            .filter { file ->
+                val path = file.invariantSeparatorsPath
+                (file.extension == "kt" || file.extension == "java") && SHIPPED.containsMatchIn(path) ||
+                    file.name == "build.gradle.kts"
+            }
+            .filter { file -> file.readText().let { "EIA_API_KEY" in it || "api.eia.gov" in it } }
+            .map { it.relativeTo(root).invariantSeparatorsPath }
+            .toList()
+        assertEquals(emptyList<String>(), hits)
     }
 
     @Test fun `the network security config refuses cleartext for every host, from the main manifest`() {

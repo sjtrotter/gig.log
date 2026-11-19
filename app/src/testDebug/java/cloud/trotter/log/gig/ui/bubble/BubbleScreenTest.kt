@@ -73,6 +73,7 @@ class BubbleScreenTest {
         whenever(vm.goalMark).thenReturn(MutableStateFlow(MarkRead.Loaded(null)))
         whenever(vm.gasPrice).thenReturn(MutableStateFlow(null))
         whenever(vm.isGasPriceAuto).thenReturn(MutableStateFlow(true))
+        whenever(vm.gasPriceStamp).thenReturn(MutableStateFlow(null))
         whenever(vm.isGasPriceRefreshing).thenReturn(MutableStateFlow(false))
         whenever(vm.cards).thenReturn(MutableStateFlow(BubbleCards.Empty))
         whenever(vm.evaluationConfig).thenReturn(MutableStateFlow(null))

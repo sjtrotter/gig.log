@@ -21,7 +21,7 @@ core/data/src/main/java/cloud/trotter/log/gig/core/data/capture/DiskCaptureBus.k
 core/data/src/main/java/cloud/trotter/log/gig/core/data/capture/NoOpCaptureBus.kt 1
 core/database/src/main/java/cloud/trotter/log/gig/core/database/DataTypeConverters.kt 1
 core/datastore/src/main/java/cloud/trotter/log/gig/core/datastore/strategy/StrategyDataSource.kt 1
-core/location/src/main/java/cloud/trotter/log/gig/core/location/FusedLocationDataSource.kt 6
+core/location/src/main/java/cloud/trotter/log/gig/core/location/FusedLocationDataSource.kt 3
 core/network/src/main/java/cloud/trotter/log/gig/core/network/vehicle/efficiency/epa/EpaVehicleDataSource.kt 5
 core/pipeline/src/main/java/cloud/trotter/log/gig/core/pipeline/FrameGate.kt 1
 core/pipeline/src/main/java/cloud/trotter/log/gig/core/pipeline/PipelineStats.kt 1

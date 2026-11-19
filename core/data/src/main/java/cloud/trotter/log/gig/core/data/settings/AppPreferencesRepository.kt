@@ -15,6 +15,8 @@ import cloud.trotter.log.gig.domain.evaluation.EconomyField
 import cloud.trotter.log.gig.domain.evaluation.UserEconomy
 import cloud.trotter.log.gig.domain.evaluation.VehicleEconomyInputs
 import cloud.trotter.log.gig.domain.evaluation.SharedEconomy
+import cloud.trotter.log.gig.domain.fuel.FuelArea
+import cloud.trotter.log.gig.domain.fuel.FuelPriceStamp
 import cloud.trotter.log.gig.domain.model.vehicle.FuelType
 import cloud.trotter.log.gig.domain.model.vehicle.VehicleClass
 import cloud.trotter.log.gig.domain.model.vehicle.*
@@ -49,8 +51,10 @@ class AppPreferencesRepository @Inject constructor(
     val estimatedMpg = dataSource.estimatedMpg.combine(garageRepository.garage) { old, garage -> garage.active?.profile?.gasMpg?.toFloat() ?: if (garage.active == null) old else null }
     val isGasPriceAuto = dataSource.isGasPriceAuto
     val gasPrice = dataSource.gasPrice
-    /** When a lookup returned the stored [gasPrice] (epoch ms); null when none has. */
-    val gasPriceFetchedAt: Flow<Long?> = dataSource.gasPriceFetchedAt
+    /** The fuel feed stamp of the stored [gasPrice]; null when the price did not come from the feed. */
+    val gasPriceStamp: Flow<FuelPriceStamp?> = dataSource.gasPriceStamp
+    /** The area whose fuel feed price the app uses; the U.S. until the dasher picks one. */
+    val fuelPriceArea: Flow<FuelArea> = dataSource.fuelPriceArea
     val odometerPrompts = dataSource.read(SimplePrefs.odometerPrompts)
     val dailyGoalDollars = dataSource.read(SimplePrefs.dailyGoalDollars)
     val analyticsShowMore = dataSource.read(SimplePrefs.analyticsShowMore)
@@ -255,12 +259,14 @@ class AppPreferencesRepository @Inject constructor(
     // ============================================================================================
     // WRITE ACTIONS
     // ============================================================================================
-    /** A looked-up price; written only while auto is still on (false when skipped). */
-    suspend fun updateGasPrice(price: Float, fetchedAtMillis: Long): Boolean = dataSource.updateGasPrice(price, fetchedAtMillis)
+    /** A feed price with its stamp; written only while auto is still on (false when skipped). */
+    suspend fun updateGasPrice(price: Float, stamp: FuelPriceStamp): Boolean = dataSource.updateGasPrice(price, stamp)
+
+    suspend fun setFuelPriceArea(area: FuelArea) = dataSource.setFuelPriceArea(area)
 
     /**
-     * Manual pump-price override that also disables auto (EIA) fetching (#693) — the bubble's
-     * between-dash quick edit routes here so the value survives the daily worker. Frozen-economics
+     * Manual pump-price override that also turns auto off (#693) — the bubble's
+     * between-dash quick edit routes here so no feed price replaces it. Frozen-economics
      * invariant (#314): this only affects FUTURE evaluations; already-recorded deliveries keep their
      * frozen cost basis.
      */
@@ -269,12 +275,22 @@ class AppPreferencesRepository @Inject constructor(
         fuelSwitch.write(mayClose = true) { dataSource.updateGasPriceManual(price, capture) }
 
     /**
-     * "Resume auto" (#722) — re-enables auto (EIA) fetching AND applies a freshly-fetched price in
-     * one atomic write; the bubble's MANUAL-mode "Resume auto" chip routes here. The inverse of
-     * [updateGasPriceManual]. Frozen-economics invariant (#314): affects only FUTURE evaluations.
+     * "Use auto price" (#722): turns auto on AND applies a feed price with its stamp in one write; the bubble's
+     * MANUAL-mode chip routes here. The inverse of [updateGasPriceManual]. Frozen-economics invariant (#314): affects
+     * only FUTURE evaluations.
      */
-    suspend fun updateGasPriceAuto(price: Float, fetchedAtMillis: Long) =
-        fuelSwitch.write(mayClose = false) { dataSource.updateGasPriceAuto(price, fetchedAtMillis) }
+    suspend fun updateGasPriceAuto(price: Float, stamp: FuelPriceStamp) =
+        fuelSwitch.write(mayClose = false) { dataSource.updateGasPriceAuto(price, stamp) }
+
+    /** How many writes of the auto gas price flag have started; [updateGasPriceAutoIfUnchanged] compares against it. */
+    fun gasAutoRevision(): Long = fuelSwitch.revision()
+
+    /**
+     * [updateGasPriceAuto] only when no write of the auto gas price flag started after [since] (a typed price, auto
+     * turned off, an undo): false, writing nothing, when one did. "Use auto price" reads [since] before its download.
+     */
+    suspend fun updateGasPriceAutoIfUnchanged(price: Float, stamp: FuelPriceStamp, since: Long): Boolean =
+        fuelSwitch.writeIfUnchanged(since) { dataSource.updateGasPriceAuto(price, stamp) } != null
     // Deferred saves commit their captured garage profile once, then mirror legacy preferences.
     suspend fun mirrorFuelType(type: FuelType) = dataSource.updateFuelType(type.name)
     suspend fun mirrorVehicleClass(type: VehicleClass) = dataSource.updateVehicleClass(type.name)
@@ -304,9 +320,9 @@ class AppPreferencesRepository @Inject constructor(
 
     suspend fun mirrorEconomySettings(
         year: String, make: String, model: String, trim: String,
-        mpg: Float, isGasAuto: Boolean, price: Float, gasPriceFetchedAt: Long?,
+        mpg: Float, isGasAuto: Boolean, price: Float, stamp: FuelPriceStamp?,
     ) = fuelSwitch.write(mayClose = !isGasAuto) {
-        dataSource.updateEconomySettings(year, make, model, trim, mpg, isGasAuto, price, gasPriceFetchedAt)
+        dataSource.updateEconomySettings(year, make, model, trim, mpg, isGasAuto, price, stamp)
     }
 
     suspend fun updatePhoneTotal(value: Double) = updatePhoneTotal(value, null)

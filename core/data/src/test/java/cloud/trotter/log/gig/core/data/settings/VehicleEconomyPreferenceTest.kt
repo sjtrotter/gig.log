@@ -10,6 +10,7 @@ import cloud.trotter.log.gig.core.datastore.settings.StoredGasPrice
 import cloud.trotter.log.gig.core.datastore.vehicle.VehicleDataSource
 import cloud.trotter.log.gig.domain.model.vehicle.VehicleClass
 import cloud.trotter.log.gig.domain.evaluation.EconomyField
+import cloud.trotter.log.gig.domain.fuel.FuelPriceStamp
 import cloud.trotter.log.gig.domain.evaluation.EconomyDraft
 import cloud.trotter.log.gig.domain.evaluation.SharedEconomy
 import cloud.trotter.log.gig.domain.model.vehicle.FuelType
@@ -211,10 +212,10 @@ class VehicleEconomyPreferenceTest {
         source.restoreTimeConstantOverride(EconomyField.AVG_MIN_PER_MILE, time, StoredPreference(4.0, true))
         assertNull(source.avgMinPerMile.first())
         assertTrue(source.userSetEconomyFields.first().isEmpty())
-        source.updateGasPriceAuto(3.25f, 1_000L)
+        source.updateGasPriceAuto(3.25f, FuelPriceStamp(1_000L, 2_000L))
         val gas = source.updateGasPriceManual(4.0f)
         assertFalse(source.isGasPriceAuto.first())
-        val expected = StoredGasPrice(StoredPreference(4.0f, false), StoredPreference(false, false), StoredPreference(1_000L, false))
+        val expected = StoredGasPrice(StoredPreference(4.0f, false), StoredPreference(false, false), StoredPreference(1_000L, false), StoredPreference(2_000L, false))
         assertTrue(source.restoreGasPriceManual(gas, expected))
         assertEquals(3.25f, source.gasPrice.first())
         assertTrue(source.isGasPriceAuto.first())

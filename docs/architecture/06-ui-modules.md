@@ -16,8 +16,8 @@ Min SDK 30 is guarded where it matters: `bubblePreference` (API 31) falls back t
 (`:app → :feature:* → :domain / :core:*`); a feature module **never** depends on `:app` or on
 another feature. `:app` legitimately depends on each feature for its moved `@HiltViewModel`s and
 any screens/copy the app shell still hosts. Each module declares only the deps it uses (the
-honest-deps doctrine — `:feature:setup` carries no `:core:designsystem`, `:feature:dashboard` no
-Hilt/`:core:data`). Residency rule: the HOST and the injections decide ownership, not the source
+honest-deps doctrine — `:feature:dashboard` carries no Hilt/`:core:data`; `:feature:setup` gained
+`:core:designsystem` with #1566, for the gas price source line it shares with Settings and the bubble). Residency rule: the HOST and the injections decide ownership, not the source
 path — a ViewModel that injects `:app`/`:core:state` machinery (`DashboardViewModel`,
 `BubbleViewModel`) stays in `:app` rather than forcing an inversion (the honest-smaller-module
 doctrine), and a multi-consumer string/color is duplicated by choice into a module with the `:app`
@@ -34,11 +34,14 @@ unfinished fields flush before leaving or retiring, and a failed write stops the
 a snackbar offers Undo for the latest saved field, restoring its previous value or estimate; type and
 identity change only by adding a new vehicle; the shared number inputs save when an edited field is finished; retired vehicles sit in a Retired section and can be restored (#1383);
 the cost drafts stay in `WizardState` and land in the saved profile;
-the gas price card's line renders from `WizardState.gasPriceSource` (`GasPriceSource`: a lookup with its fetch time,
-from the stored `gas_price_fetched_at` or a fresh lookup; typed, which auto off implies; or saved, auto on with no
-stamp) and the host's `rememberNow()`, passed in as `nowMillis` since the module carries no `:core:designsystem`; it
-never says "Regional average" of a figure no lookup returned, and a failed lookup keeps the figure, says so and offers
-Retry and the price input; typing a price turns auto off, as the Costs screen's manual price does (#1478);
+the gas price card's line renders from `WizardState.gasPriceSource` (`GasPriceSource`: a fuel feed lookup with its
+`FuelPriceStamp`, from the stored `gas_price_period` and `gas_price_issued_at` or a fresh lookup; typed, which auto off
+implies; or saved, auto on with no stamp) and the host's `rememberNow(60_000)`, passed in as `nowMillis`; the source
+line ("EIA, week of <Monday>", "Older price: ..." once `FuelPriceAge.isOlder`) is `:core:designsystem`'s
+`fuelPriceSourceText`, the one owner the Costs screen and the bubble's gas row share; it never names a week for a
+figure no lookup returned, and a failed lookup keeps the figure, says so and offers Retry and the price input; one
+`FuelPriceRepository.lookUp()` serves every fuel type; typing a price turns auto off, as the Costs screen's manual
+price does (#1478, #1566);
 the completion sheet renders the save's outcome from `WizardViewModel.saveStatus` (`SaveStatus`), so nothing says
 saved before the write finishes; the save writes a snapshot of the answers, so the steps take no touch or accessibility input while it runs (TalkBack reads "Saving"); a failure names what failed and offers Retry, closing it returns to the last step with
 the answers intact, and Skip has its own sheet that writes nothing until Done (#1473); the
@@ -146,7 +149,7 @@ highlights its thin row once, a tint that fades over 2 s on the frame clock (`An
   release checklist are in [05-analytics-read-model.md](05-analytics-read-model.md) § Database safety posture.
 - **`:core:data`** — Repository implementations, mappers, data sources. Bridges domain interfaces to
   concrete data layers; census Keystore credentials, bounded file spool, census upload sink (#1182; every build since #1620), trusted-envelope sink + spool (debug), the identity reset + upload lock (#1185), and the signed-feed cache and consent (`FeedRepository`, #1565).
-- **`:core:network`** — Retrofit clients, OkHttp interceptors, EIA gas price API integration, signed census transport (#1182), the signed-feed transport (`FeedClient`, #1565).
+- **`:core:network`** — Retrofit clients, OkHttp interceptors, signed census transport (#1182), the signed-feed transport (`FeedClient`, #1565; the fuel and rules feeds).
 - **`:core:location`** — Play Services GPS tracking.
 - **`:core:datastore`** — Preferences DataStore (twelve single-concern stores behind Hilt
   qualifiers: ten in `DataStoreModule` — app prefs, strategy, dev settings, odometer, app state,

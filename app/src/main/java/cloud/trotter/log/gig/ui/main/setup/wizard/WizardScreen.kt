@@ -173,7 +173,7 @@ fun WizardScreen(
                     }
 
                     WizardStep.GAS_PRICE -> {
-                        val now by rememberNow()
+                        val now by rememberNow(tickMs = 60_000)
                         GasPriceCard(
                             step = currentStep, fuelType = state.fuelType,
                             isAuto = state.isGasPriceAuto, price = state.gasPrice,

@@ -8,8 +8,7 @@ import cloud.trotter.log.gig.domain.model.vehicle.VehicleOption
  * Any future provider (EPA, NHTSA, CarQuery) must implement this interface.
  * All return types are pure :domain models — no network DTOs leak upstream.
  *
- * Result-typed (#366), matching [FuelPriceDataSource] — one provider error
- * idiom; callers decide how to degrade.
+ * Result-typed (#366); callers decide how to degrade.
  */
 interface VehicleEfficiencyDataSource {
     suspend fun getYears(): Result<List<String>>

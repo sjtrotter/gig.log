@@ -8,4 +8,10 @@
     <!-- CouldNotLoad: %1$s names what failed to load, for example "Analytics". -->
     <string name="app_could_not_load">Couldn\'t load %1$s</string>
     <string name="app_retry">Retry</string>
+    <!-- The source of an automatic gas price: %1$s is the EIA week's Monday, for example "Nov 16". -->
+    <string name="fuel_price_source_week">EIA, week of %1$s</string>
+    <!-- The same line once the price is older: the feed lapsed or the week is more than 14 days old. -->
+    <string name="fuel_price_older_week">Older price: EIA, week of %1$s</string>
+    <!-- The bubble's collapsed gas row, in place of "Auto", while the automatic price is older. -->
+    <string name="fuel_price_older">Older price</string>
 </resources>

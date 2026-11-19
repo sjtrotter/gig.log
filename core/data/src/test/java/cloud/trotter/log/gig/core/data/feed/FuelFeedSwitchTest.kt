@@ -15,6 +15,7 @@ import cloud.trotter.log.gig.core.datastore.vehicle.VehicleDataSource
 import cloud.trotter.log.gig.core.network.feed.FeedClient
 import cloud.trotter.log.gig.core.network.feed.FeedReply
 import cloud.trotter.log.gig.core.network.feed.FeedSource
+import cloud.trotter.log.gig.domain.fuel.FuelPriceStamp
 import cloud.trotter.log.gig.domain.fuel.FuelPrices
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -76,7 +77,8 @@ class FuelFeedSwitchTest {
     private val autoOnSnapshot = StoredGasPrice(
         price = StoredPreference(3.0f, userSet = false),
         auto = StoredPreference(true, userSet = false),
-        fetchedAt = StoredPreference(null, userSet = false),
+        period = StoredPreference(null, userSet = false),
+        issuedAt = StoredPreference(null, userSet = false),
     )
 
     /**
@@ -116,12 +118,12 @@ class FuelFeedSwitchTest {
 
     @Test fun `undoing back to a manual price closes the feed before the save lands`() = closesAtOnce {
         val manual = StoredGasPrice(StoredPreference(2.5f, userSet = true), StoredPreference(false, userSet = false),
-            StoredPreference(null, userSet = false))
+            StoredPreference(null, userSet = false), StoredPreference(null, userSet = false))
         restoreGasPriceManual(manual, autoOnSnapshot)
     }
 
     @Test fun `a setup save with auto off closes the feed before the save lands`() = closesAtOnce {
-        mirrorEconomySettings("2020", "Make", "Model", "Trim", 30f, isGasAuto = false, price = 3.0f, gasPriceFetchedAt = null)
+        mirrorEconomySettings("2020", "Make", "Model", "Trim", 30f, isGasAuto = false, price = 3.0f, stamp = null)
     }
 
     @Test fun `a Costs reset closes the feed before the save lands`() = closesAtOnce { resetSharedEconomyDefaults() }
@@ -155,7 +157,7 @@ class FuelFeedSwitchTest {
 
     @Test fun `use auto price opens the feed once its save lands`() = runBlocking {
         val phone = Phone(auto = false)
-        phone.repository.updateGasPriceAuto(3.1f, 1L)
+        phone.repository.updateGasPriceAuto(3.1f, FuelPriceStamp(0L, 1L))
         assertTrue(phone.switch.enabled.value)
     }
 
@@ -185,6 +187,21 @@ class FuelFeedSwitchTest {
         off.join()
         assertFalse(phone.switch.enabled.value)
         assertEquals(false, phone.store.current[autoKey])
+    }
+
+    @Test fun `a use auto price write that loses to a Costs on leaves the feed on`() = runBlocking {
+        val phone = Phone(auto = false)
+        val since = phone.repository.gasAutoRevision()
+        phone.store.holdWrites()
+        val costs = launch(start = CoroutineStart.UNDISPATCHED) { phone.repository.setGasPriceAuto(true) }
+        val resume = async(start = CoroutineStart.UNDISPATCHED) {
+            phone.repository.updateGasPriceAutoIfUnchanged(3.1f, FuelPriceStamp(0L, 1L), since)
+        }
+        phone.store.releaseWrites()
+        costs.join()
+        assertFalse("the Costs choice came after the revision was read", resume.await())
+        assertEquals(true, phone.store.current[autoKey])
+        assertTrue(phone.switch.enabled.value)
     }
 
     @Test fun `the stored flag is read once at start, and no collector follows the store`() = runBlocking {

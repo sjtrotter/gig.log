@@ -24,6 +24,7 @@ import cloud.trotter.log.gig.domain.evaluation.EvaluationConfig
 import cloud.trotter.log.gig.core.data.chat.ChatRepository
 import cloud.trotter.log.gig.core.data.event.AppEventRepo
 import cloud.trotter.log.gig.core.data.fuel.FuelPriceRepository
+import cloud.trotter.log.gig.core.data.fuel.FuelRefreshOutcome
 import cloud.trotter.log.gig.core.data.location.OdometerRepository
 import cloud.trotter.log.gig.core.data.settings.AppPreferencesRepository
 import cloud.trotter.log.gig.core.data.settings.DevSettingsRepository
@@ -505,8 +506,12 @@ class BubbleViewModel @Inject constructor(
     fun goalCelebrated(key: String) = appStateRepository.setGoalMetMark(key)
 
     // Gas price for the idle-card quick edit (#693) — read straight off the economy SSOT the settings
-    // screen owns; the write path (setGasPrice) flips auto OFF so the daily EIA worker won't clobber it.
+    // screen owns; the write path (setGasPrice) flips auto OFF so no feed price replaces it.
     val gasPrice = appPreferencesRepository.gasPrice
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    /** The stored price's feed stamp; the quick edit derives its source and age labels from it and the clock. */
+    val gasPriceStamp = appPreferencesRepository.gasPriceStamp
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     val isGasPriceAuto = appPreferencesRepository.isGasPriceAuto
@@ -536,31 +541,24 @@ class BubbleViewModel @Inject constructor(
     val gasPriceRefreshFailed = _gasPriceRefreshFailed.asSharedFlow()
 
     /**
-     * AUTO-mode refresh icon (#722): fetch today's EIA price now, STAY auto. Routes through the ONE
-     * existing fetch path [FuelPriceRepository.fetchAndSaveCurrentGasPrice] — the same call
-     * [cloud.trotter.log.gig.worker.DailyGasPriceWorker] makes — so there is no second fetch path.
+     * AUTO-mode refresh icon (#722): checks the fuel feed now and stays auto. The same refresh the daily worker runs;
+     * the fuel client's follow writes any new price.
      */
-    fun refreshGasPrice() = doGasPriceFetch { fuelType ->
-        fuelPriceRepository.fetchAndSaveCurrentGasPrice(fuelType)
-    }
+    fun refreshGasPrice() = doGasPriceFetch { fuelPriceRepository.refresh() }
 
     /**
-     * MANUAL-mode "Resume auto" chip (#722): re-enable auto AND apply the freshly-fetched price in
-     * one atomic write — the inverse of the stepper's manual flip. Same underlying fetch as
-     * [refreshGasPrice]; only the save differs (see [FuelPriceRepository.fetchAndResumeAutoGasPrice]).
+     * MANUAL-mode "Use auto price" chip (#722): one fetch on this tap, then auto turns on with the feed price in one
+     * write, only once a price arrives ([FuelPriceRepository.resumeAuto]).
      */
-    fun resumeAutoGasPrice() = doGasPriceFetch { fuelType ->
-        fuelPriceRepository.fetchAndResumeAutoGasPrice(fuelType)
-    }
+    fun resumeAutoGasPrice() = doGasPriceFetch { fuelType -> fuelPriceRepository.resumeAuto(fuelType) }
 
-    private fun doGasPriceFetch(fetch: suspend (FuelType) -> Result<Float>) {
+    private fun doGasPriceFetch(fetch: suspend (FuelType) -> FuelRefreshOutcome) {
         if (_isGasPriceRefreshing.value) return
         viewModelScope.launch {
             _isGasPriceRefreshing.value = true
             try {
                 val fuelType = appPreferencesRepository.fuelType.first()
-                val result = fetch(fuelType)
-                if (result.isFailure) _gasPriceRefreshFailed.tryEmit(Unit)
+                if (fetch(fuelType) is FuelRefreshOutcome.Failed) _gasPriceRefreshFailed.tryEmit(Unit)
             } finally {
                 _isGasPriceRefreshing.value = false
             }

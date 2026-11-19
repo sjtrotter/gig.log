@@ -45,6 +45,7 @@ import org.junit.Assert.assertTrue
 import cloud.trotter.log.gig.core.data.chat.ChatRepository
 import cloud.trotter.log.gig.core.data.event.AppEventRepo
 import cloud.trotter.log.gig.core.data.fuel.FuelPriceRepository
+import cloud.trotter.log.gig.core.data.fuel.FuelRefreshOutcome
 import cloud.trotter.log.gig.core.data.location.OdometerRepository
 import cloud.trotter.log.gig.core.data.settings.AppPreferencesRepository
 import cloud.trotter.log.gig.core.data.settings.DevSettingsRepository
@@ -153,6 +154,7 @@ class BubbleViewModelTest {
         whenever(appPreferencesRepository.glanceMode).thenReturn(flowOf(false))
         whenever(appPreferencesRepository.gasPrice).thenReturn(flowOf(3.50f))
         whenever(appPreferencesRepository.isGasPriceAuto).thenReturn(flowOf(true))
+        whenever(appPreferencesRepository.gasPriceStamp).thenReturn(flowOf(null))
         whenever(appPreferencesRepository.fuelType).thenReturn(flowOf(FuelType.REGULAR))
     }
 
@@ -968,15 +970,16 @@ class BubbleViewModelTest {
     // --- #722 mode-adaptive gas quick-edit: refresh (AUTO) vs Resume auto (MANUAL) ---
 
     @Test
-    fun `refreshGasPrice routes through the one fetch path and stays auto`() = runTest {
+    fun `refreshGasPrice runs the fuel feed refresh and stays auto`() = runTest {
         whenever(analyticsRepository.recentSessions(any())).thenReturn(flowOf(emptyList()))
-        whenever(fuelPriceRepository.fetchAndSaveCurrentGasPrice(any())).thenReturn(Result.success(3.60f))
+        whenever(fuelPriceRepository.refresh()).thenReturn(FuelRefreshOutcome.Updated)
         val vm = viewModel()
 
         vm.refreshGasPrice()
         advanceUntilIdle()
 
-        verify(fuelPriceRepository).fetchAndSaveCurrentGasPrice(eq(FuelType.REGULAR))
+        verify(fuelPriceRepository).refresh()
+        verify(fuelPriceRepository, never()).resumeAuto(any())
         // The AUTO-mode refresh never calls the manual OR resume-auto write paths — staying auto
         // is a side effect of NOT touching the auto flag, not an explicit write.
         verify(appPreferencesRepository, never()).updateGasPriceManual(any())
@@ -986,7 +989,7 @@ class BubbleViewModelTest {
     @Test
     fun `refreshGasPrice resets the loading flag once the fetch completes`() = runTest {
         whenever(analyticsRepository.recentSessions(any())).thenReturn(flowOf(emptyList()))
-        whenever(fuelPriceRepository.fetchAndSaveCurrentGasPrice(any())).thenReturn(Result.success(3.60f))
+        whenever(fuelPriceRepository.refresh()).thenReturn(FuelRefreshOutcome.Unchanged)
         val vm = viewModel()
 
         assertFalse(vm.isGasPriceRefreshing.value)
@@ -996,30 +999,43 @@ class BubbleViewModelTest {
     }
 
     @Test
-    fun `refreshGasPrice failure signals a transient error, no exception propagates`() = runTest {
+    fun `a failed refresh flashes the error once, and an off or unchanged one does not`() = runTest {
         whenever(analyticsRepository.recentSessions(any())).thenReturn(flowOf(emptyList()))
-        whenever(fuelPriceRepository.fetchAndSaveCurrentGasPrice(any()))
-            .thenReturn(Result.failure(IllegalStateException("Location not available")))
+        whenever(fuelPriceRepository.refresh()).thenReturn(FuelRefreshOutcome.Failed(retry = true))
         val vm = viewModel()
 
-        val job = launch { vm.gasPriceRefreshFailed.collect {} }
+        var flashes = 0
+        val job = launch { vm.gasPriceRefreshFailed.collect { flashes++ } }
         vm.refreshGasPrice()
         advanceUntilIdle()
-
+        assertEquals(1, flashes)
         assertFalse(vm.isGasPriceRefreshing.value)
+
+        whenever(fuelPriceRepository.refresh()).thenReturn(FuelRefreshOutcome.Off)
+        vm.refreshGasPrice()
+        advanceUntilIdle()
+        whenever(fuelPriceRepository.refresh()).thenReturn(FuelRefreshOutcome.Unchanged)
+        vm.refreshGasPrice()
+        advanceUntilIdle()
+        assertEquals(1, flashes)
         job.cancel()
     }
 
     @Test
-    fun `resumeAutoGasPrice routes through fetchAndResumeAutoGasPrice, the atomic auto-flip inverse`() = runTest {
+    fun `resumeAutoGasPrice runs resumeAuto for the active fuel, and its failure flashes the error`() = runTest {
         whenever(analyticsRepository.recentSessions(any())).thenReturn(flowOf(emptyList()))
-        whenever(fuelPriceRepository.fetchAndResumeAutoGasPrice(any())).thenReturn(Result.success(3.55f))
+        whenever(fuelPriceRepository.resumeAuto(any())).thenReturn(FuelRefreshOutcome.Failed(retry = false))
         val vm = viewModel()
 
+        var flashes = 0
+        val job = launch { vm.gasPriceRefreshFailed.collect { flashes++ } }
         vm.resumeAutoGasPrice()
         advanceUntilIdle()
+        job.cancel()
 
-        verify(fuelPriceRepository).fetchAndResumeAutoGasPrice(eq(FuelType.REGULAR))
+        assertEquals(1, flashes)
+        verify(fuelPriceRepository).resumeAuto(eq(FuelType.REGULAR))
+        verify(fuelPriceRepository, never()).refresh()
         // Resume-auto never routes through the manual (stepper) write path.
         verify(appPreferencesRepository, never()).updateGasPriceManual(any())
     }

@@ -1,6 +1,7 @@
 package cloud.trotter.log.gig.ui.main.setup.wizard
 
 import cloud.trotter.log.gig.core.data.feed.RulesFeedSwitch
+import cloud.trotter.log.gig.core.data.fuel.FuelLookup
 import cloud.trotter.log.gig.core.data.fuel.FuelPriceRepository
 import cloud.trotter.log.gig.core.data.settings.AppPreferencesRepository
 import cloud.trotter.log.gig.core.data.state.AppStateRepository
@@ -68,12 +69,11 @@ private fun stubWizardRepositories(
         whenever(appPreferencesRepository.fuelType).thenReturn(flowOf(FuelType.REGULAR))
         whenever(appPreferencesRepository.isGasPriceAuto).thenReturn(flowOf(false))
         whenever(appPreferencesRepository.gasPrice).thenReturn(flowOf(null))
-        whenever(appPreferencesRepository.gasPriceFetchedAt).thenReturn(flowOf(null))
+        whenever(appPreferencesRepository.gasPriceStamp).thenReturn(flowOf(null))
         whenever(appPreferencesRepository.userEconomy).thenReturn(flowOf(UserEconomy()))
         whenever(strategyRepository.protectStatsMode).thenReturn(flowOf(false))
         whenever(strategyRepository.scoringRules).thenReturn(flowOf(emptyList()))
         whenever { vehicleRepository.getYears() }.thenReturn(emptyList())
-        whenever { gasPriceRepository.fetchGasPriceOnly(any()) }
-            .thenReturn(Result.failure(RuntimeException("offline in test")))
+        whenever { gasPriceRepository.lookUp() }.thenReturn(FuelLookup(emptyMap()))
     }
 }

@@ -26,11 +26,12 @@ class EconomySettingsViewModelTest {
         Dispatchers.setMain(StandardTestDispatcher())
         whenever(preferences.userEconomy).thenReturn(flowOf(UserEconomy()))
         whenever(preferences.isGasPriceAuto).thenReturn(flowOf(true))
+        preferences.stubFuelPrice()
         whenever(garage.garage).thenReturn(flowOf(Garage(emptyList(), null, true)))
         whenever(strategy.evaluationConfig).thenReturn(MutableStateFlow(null))
     }
     @After fun teardown() { Dispatchers.resetMain() }
-    private fun model() = EconomySettingsViewModel(preferences, strategy, garage)
+    private fun model() = EconomySettingsViewModel(preferences, strategy, garage, fuelPricesStub())
 
     @Test fun `vehicle row follows outside switches without any writes`() = runTest {
         val a = Vehicle("a", "A", 1)
@@ -215,8 +216,8 @@ class EconomySettingsViewModelTest {
     }
 
     @Test fun `manual gas undo restores both price and auto and reports changed state`() = runTest {
-        val prior = cloud.trotter.log.gig.core.datastore.settings.StoredGasPrice(StoredPreference(3.50f, false), StoredPreference(true, false), StoredPreference(1_000L, false))
-        val expected = cloud.trotter.log.gig.core.datastore.settings.StoredGasPrice(StoredPreference(3.75f, false), StoredPreference(false, false), StoredPreference(1_000L, false))
+        val prior = cloud.trotter.log.gig.core.datastore.settings.StoredGasPrice(StoredPreference(3.50f, false), StoredPreference(true, false), StoredPreference(1_000L, false), StoredPreference(2_000L, false))
+        val expected = cloud.trotter.log.gig.core.datastore.settings.StoredGasPrice(StoredPreference(3.75f, false), StoredPreference(false, false), StoredPreference(1_000L, false), StoredPreference(2_000L, false))
         whenever(preferences.updateGasPriceManual(eq(3.75f), any())).thenReturn(prior)
         whenever(preferences.restoreGasPriceManual(eq(prior), eq(expected), any())).thenReturn(true)
         val vm = model()

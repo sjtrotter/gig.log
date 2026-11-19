@@ -1,11 +1,3 @@
-import java.util.Properties
-
-val localProperties = Properties()
-val localPropertiesFile = rootProject.file("local.properties")
-if (localPropertiesFile.exists()) {
-    localProperties.load(localPropertiesFile.inputStream())
-}
-
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.hilt)
@@ -24,14 +16,10 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles("consumer-rules.pro")
-        buildConfigField(
-            "String",
-            "EIA_API_KEY",
-            localProperties.getProperty("EIA_API_KEY") ?: "\"\""
-        )
     }
 
     buildFeatures {
+        // NetworkClientFactory reads BuildConfig.DEBUG.
         buildConfig = true
     }
 

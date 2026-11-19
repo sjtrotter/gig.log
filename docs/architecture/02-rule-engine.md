@@ -700,9 +700,9 @@ seam, the worker thread, visits and the health report are in `01-sensor-pipeline
 
 One layer fetches, keeps and swaps every signed feed (fuel, constants, rules): `FeedClient` in `:core:network`
 (`network.feed`) and `FeedRepository` in `:core:data` (`data.feed`). Every check of the bytes is `feed-contract`'s;
-this layer re-implements none. Its first consumer is the rules client (#640, below); fuel is #1566, constants #695.
-gig.log's pin file holds the fuel key and no rules key yet (#641 pins it), and nothing calls the fuel feed's
-`refresh()` yet, so this build sends no feed request.
+this layer re-implements none. Its consumers are the rules client (#640) and the fuel client (#1566), both below;
+constants are #695. gig.log's pin file holds the fuel key and no rules key yet (#641 pins it), so of gig.log's own
+feeds only fuel can be fetched today.
 
 - **Transport.** `FeedClient` GETs `<feedsUrl><feed>/envelope.json`, then each payload at `<feed>/<sha256>.json`,
   built from the signed hash under the envelope's own feed directory (a non-hex name is refused before any request).
@@ -837,3 +837,44 @@ only rules and nothing fetched; ADR-0013, design-r3 § App client and plan-r7 §
 - **Logging** (tag `Feeds`): INFO when a rules generation goes live (sequence, file count), when the switch is saved
   and for a notice check's outcome; WARN when a generation cannot go live, a rules file is refused (tag `Rules`) or the
   switch cannot be read or saved. No line carries a URL, an address or file content.
+
+## The fuel client (#1566)
+
+`FuelPriceRepository` (`:core:data` `fuel/`) is the fuel feed's consumer: a `FeedRepository<FuelPrices>` for
+`Feed.FUEL` with `FuelFeedStager`, cached under `noBackupFilesDir/feeds` (`FuelFeedModule`, `:app`), no bundled
+generation. Before #1566 the app called the EIA's API with a key compiled from `local.properties`, for the state
+Android's `Geocoder` resolved from a rounded location; that client, the key, the `Geocoder` lookup and
+`UserLocation` are gone, and `HttpsEndpointGuardTest` fails on any `EIA_API_KEY` or `api.eia.gov` in shipped source or
+a module build file.
+
+- **Area.** The dasher picks one of the feed's 29 areas in Settings > Costs (`fuel_price_area`, default the U.S.;
+  `FuelArea`, the one owner of the codes; `FuelAreaParityTest` pins them to the publisher's `AREAS`). The area never
+  leaves the phone: every phone downloads the same file, and `FuelPriceResolution` walks the chosen area, then its
+  parents (city, state, sub-PADD, PADD, U.S.), to the first area with a price for the fuel. Texas diesel is the Gulf
+  Coast's: EIA publishes diesel for California alone among states and cities (`DIESEL_AREAS`). INFO logs say
+  whether a price fell back, never the area.
+- **Bounds.** `FuelPriceAcceptance` (`:domain`) applies the publisher's rules on the phone: 0.50 to 15.00 a gallon,
+  and a move of at most 40 % from the pair's anchor (an earlier week's price, dropped after 8 weeks); corrections of a
+  week all compare to the same anchor. The anchors ride in the generation's carry (`meta.json`).
+- **The follow.** While auto is on, one collector in the application scope keeps the stored `gas_price` and its
+  stamp (`gas_price_period`, `gas_price_issued_at`, one edit) equal to the resolved price (`FuelPriceFollow.next`, a
+  pure function). A new generation, an area change, a fuel type change (a vehicle switch) and auto turning on all
+  apply from the cache through it, with no request. `updateGasPrice` writes only while auto is still on, so a price
+  that arrives after a typed one never replaces it.
+- **When it fetches.** `DailyGasPriceWorker` once a day and the bubble's refresh call `refresh()`, which the channel
+  sends only with the switch on (`FuelRefreshOutcome.Failed(retry)` asks WorkManager for a retry on a transport, 5xx
+  or 404 failure). Two acts mint a `OneShotGrant` in the caller's coroutine while the switch is off: the bubble's
+  "Use auto price" (`resumeAuto`; auto turns on with the price in one write only when the fetch returned `Accepted`
+  or `Unchanged`, a price resolves and no other write of the auto flag started during the download, checked under
+  `FuelFeedSwitch`'s write lock by `writeIfUnchanged`; else nothing is written and the price stays manual) and
+  setup's lookup (`lookUp`, when the dasher turns automatic updates on or taps Retry; one lookup, shared by a fuel
+  change while it runs, resolves every fuel type, from the cache even when the fetch failed, and turning auto off or
+  typing a price cancels it). Setup also looks up once when it opens with auto saved on, with no grant.
+- **The switch.** "Auto gas price" (`FuelFeedSwitch`, § The feed channel) gates fuel only, and turns off at the
+  instant a write that may turn auto off starts.
+- **Labels.** The anchors are stored, never a formatted string. Settings > Costs, the bubble's gas row and setup derive
+  "EIA, week of <Monday>" from the stamp and `rememberNow(60_000)`, and "Older price" once `FuelPriceAge.isOlder`
+  (the generation is past `FeedFreshness`'s 21 days, or the week started more than 14 days ago); the Monday is the
+  UTC date, so U.S. zones never show the Sunday before. The copy is `:core:designsystem`'s `fuelPriceSourceText`.
+  Settings also says "Using the <area> price" when the price came from an area above the chosen one, and that the
+  phone clock is behind when the channel's last refusal was `FeedRefusal.ClockBehind`.

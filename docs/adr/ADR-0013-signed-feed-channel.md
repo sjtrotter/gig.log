@@ -1,8 +1,8 @@
 # ADR-0013: The Signed Feed Channel (one Pages site, signing per feed, keyless CI identity)
 
 **Status:** Accepted. Partly built: the format and verifier (#1563), the phone's transport and cache (#1565), the
-rules client (#640) and the fuel publisher with the one Pages deploy (#1564) exist. Rules publishing (#641), constants
-(#695) and the fuel consumer (#1566) are open. The developer setup (#1562) is partly done: the GitHub environments
+rules client (#640), the fuel publisher with the one Pages deploy (#1564) and the fuel consumer (#1566) exist. Rules
+publishing (#641) and constants (#695) are open. The developer setup (#1562) is partly done: the GitHub environments
 and the fuel key pair (pinned, its private half in `feed-fuel`) exist; Google Cloud (billing, the KMS key, the feeds
 identity pool) and the hardware backup key do not.
 **Issue:** #1561

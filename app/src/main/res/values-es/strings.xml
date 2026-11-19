@@ -130,4 +130,40 @@
     <!-- #1601 -->
     <string name="shift_check_receipt_changed_format">Recibo %1$s · %2$s · cambió después de saldarse</string>
     <string name="receipt_match_settled_from_format">Saldado con el recibo %1$s</string>
+    <!-- #1566 -->
+    <string name="economy_fuel_area_title">Zona del precio de combustible</string>
+    <string name="economy_fuel_area_group_regions">Regiones</string>
+    <string name="economy_fuel_area_group_states">Estados</string>
+    <string name="economy_fuel_area_group_cities">Ciudades</string>
+    <string name="economy_fuel_area_using">Se usa el precio de %1$s</string>
+    <string name="economy_fuel_clock_behind">El reloj del teléfono está atrasado. Los precios nuevos se cargan cuando la fecha y la hora sean correctas.</string>
+    <string name="fuel_area_us">EE. UU.</string>
+    <string name="fuel_area_east_coast">Costa Este</string>
+    <string name="fuel_area_new_england">Nueva Inglaterra</string>
+    <string name="fuel_area_central_atlantic">Atlántico Central</string>
+    <string name="fuel_area_lower_atlantic">Atlántico Sur</string>
+    <string name="fuel_area_midwest">Medio Oeste</string>
+    <string name="fuel_area_gulf_coast">Costa del Golfo</string>
+    <string name="fuel_area_rocky_mountain">Montañas Rocosas</string>
+    <string name="fuel_area_west_coast">Costa Oeste</string>
+    <string name="fuel_area_west_coast_except_california">Costa Oeste sin California</string>
+    <string name="fuel_area_california">California</string>
+    <string name="fuel_area_colorado">Colorado</string>
+    <string name="fuel_area_florida">Florida</string>
+    <string name="fuel_area_massachusetts">Massachusetts</string>
+    <string name="fuel_area_minnesota">Minnesota</string>
+    <string name="fuel_area_new_york">Nueva York</string>
+    <string name="fuel_area_ohio">Ohio</string>
+    <string name="fuel_area_texas">Texas</string>
+    <string name="fuel_area_washington">Washington</string>
+    <string name="fuel_area_boston">Boston</string>
+    <string name="fuel_area_chicago">Chicago</string>
+    <string name="fuel_area_cleveland">Cleveland</string>
+    <string name="fuel_area_denver">Denver</string>
+    <string name="fuel_area_houston">Houston</string>
+    <string name="fuel_area_los_angeles">Los Ángeles</string>
+    <string name="fuel_area_miami">Miami</string>
+    <string name="fuel_area_new_york_city">Ciudad de Nueva York</string>
+    <string name="fuel_area_san_francisco">San Francisco</string>
+    <string name="fuel_area_seattle">Seattle</string>
 </resources>

@@ -83,6 +83,9 @@ class GigLogApplication : Application(), Configuration.Provider {
     lateinit var rulesFeed: cloud.trotter.log.gig.feed.RulesFeed
 
     @Inject
+    lateinit var fuelPriceRepository: cloud.trotter.log.gig.core.data.fuel.FuelPriceRepository
+
+    @Inject
     lateinit var platformForegrounds: cloud.trotter.log.gig.core.pipeline.accessibility.input.PlatformForegrounds
 
     @Inject
@@ -239,6 +242,17 @@ class GigLogApplication : Application(), Configuration.Provider {
             }
         }
 
+        // The fuel client: loads the cached fuel feed (no network) and keeps an auto gas price on the chosen area's.
+        applicationScope.launch {
+            try {
+                fuelPriceRepository.start()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                Timber.tag("FuelPrice").e(t, "fuel feed start failed; the stored gas price stays")
+            }
+        }
+
         // 3. Initialize State
         stateManagerV2.initialize()
         Timber.i("StateManagerV2 initialized.")
@@ -265,7 +279,7 @@ class GigLogApplication : Application(), Configuration.Provider {
     }
 
     private fun scheduleBackgroundWorkers() {
-        // Require internet connection to run the gas fetcher
+        // The daily fuel feed refresh needs a network; the feed itself checks Auto gas price before any request.
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()

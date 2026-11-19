@@ -1,39 +1,38 @@
 package cloud.trotter.log.gig.feature.setup.wizard.cards
 
+import cloud.trotter.log.gig.domain.fuel.FuelPriceStamp
 import cloud.trotter.log.gig.feature.setup.wizard.model.GasPriceSource
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDate
-import java.time.LocalTime
-import java.time.ZoneId
 
-/** #1478: "Regional average" only for a figure a lookup returned, with its day; a failure says so. */
+/** The EIA week is named only for a figure a fuel feed lookup returned, with that figure's week; a failure says so. */
 class GasPriceLineTest {
-    private val zone = ZoneId.of("America/Chicago")
-    private val oct20 = LocalDate.of(2026, 10, 20)
-    private fun at(date: LocalDate, hour: Int, minute: Int = 0) =
-        date.atTime(LocalTime.of(hour, minute)).atZone(zone).toInstant().toEpochMilli()
+    private val day = 24L * 60 * 60 * 1000
 
-    private fun line(source: GasPriceSource, failed: Boolean = false, now: Long = at(oct20, 18)) =
-        GasPriceLine.of(source, failed, 3.29f, now, zone)
+    /** 2026-11-16T00:00Z, a Monday, issued two days later. */
+    private val nov16 = LocalDate.of(2026, 11, 16)
+    private val stamp = FuelPriceStamp(1_794_787_200_000L, 1_794_787_200_000L + 2 * day)
+    private val lookup = GasPriceSource.Lookup(stamp)
+
+    private fun line(source: GasPriceSource, failed: Boolean = false, now: Long = stamp.issuedAt + day) =
+        GasPriceLine.of(source, failed, now)
 
     @Test
-    fun `a lookup from today reads today and one from an earlier day reads its date`() {
-        assertEquals(GasPriceLine.Today, line(GasPriceSource.Lookup(at(oct20, 6))))
-        assertEquals(GasPriceLine.FetchedOn(oct20), line(GasPriceSource.Lookup(at(oct20, 6)), now = at(oct20.plusDays(1), 0, 1)))
+    fun `a lookup reads its week, and older once the feed lapsed or the week is more than 14 days old`() {
+        assertEquals(GasPriceLine.Current(nov16), line(lookup))
+        assertEquals(GasPriceLine.Current(nov16), line(lookup, now = stamp.period + 14 * day))
+        assertEquals(GasPriceLine.Older(nov16), line(lookup, now = stamp.period + 14 * day + 1))
+        val lateWeek = GasPriceSource.Lookup(FuelPriceStamp(stamp.period, stamp.period + 13 * day))
+        assertEquals(GasPriceLine.Older(nov16), line(lateWeek, now = stamp.period + 15 * day))
     }
 
     @Test
-    fun `today is the device's day, not UTC's`() {
-        // 20:00 in Chicago is already the next day in UTC.
-        assertEquals(GasPriceLine.Today, line(GasPriceSource.Lookup(at(oct20, 20)), now = at(oct20, 23, 59)))
-    }
-
-    @Test
-    fun `a failed lookup names the kept figure's day, or asks for a price when none was looked up`() {
-        assertEquals(GasPriceLine.FailedUsing(3.29f, oct20), line(GasPriceSource.Lookup(at(oct20, 6)), failed = true))
+    fun `a failed lookup keeps the figure's week, or asks for a price when none was looked up`() {
+        assertEquals(GasPriceLine.FailedUsing(nov16, older = false), line(lookup, failed = true))
+        assertEquals(GasPriceLine.FailedUsing(nov16, older = true), line(lookup, failed = true, now = stamp.period + 20 * day))
         assertEquals(GasPriceLine.FailedNoLookup, line(GasPriceSource.Saved, failed = true))
         assertEquals(GasPriceLine.FailedNoLookup, line(GasPriceSource.Typed, failed = true))
     }
@@ -47,15 +46,15 @@ class GasPriceLineTest {
     @Test
     fun `only a failure offers retry`() {
         assertTrue(line(GasPriceSource.Saved, failed = true).offersRetry)
-        assertTrue(line(GasPriceSource.Lookup(at(oct20, 6)), failed = true).offersRetry)
-        assertFalse(line(GasPriceSource.Lookup(at(oct20, 6))).offersRetry)
+        assertTrue(line(lookup, failed = true).offersRetry)
+        assertFalse(line(lookup).offersRetry)
         assertFalse(line(GasPriceSource.Typed).offersRetry)
     }
 
     @Test
     fun `a stored price loads by its auto flag and stamp`() {
-        assertEquals(GasPriceSource.Typed, GasPriceSource.stored(isAuto = false, fetchedAtMillis = 1L))
-        assertEquals(GasPriceSource.Lookup(1L), GasPriceSource.stored(isAuto = true, fetchedAtMillis = 1L))
-        assertEquals(GasPriceSource.Saved, GasPriceSource.stored(isAuto = true, fetchedAtMillis = null))
+        assertEquals(GasPriceSource.Typed, GasPriceSource.stored(isAuto = false, stamp = stamp))
+        assertEquals(lookup, GasPriceSource.stored(isAuto = true, stamp = stamp))
+        assertEquals(GasPriceSource.Saved, GasPriceSource.stored(isAuto = true, stamp = null))
     }
 }

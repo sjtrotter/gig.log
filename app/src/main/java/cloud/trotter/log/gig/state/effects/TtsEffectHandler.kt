@@ -147,7 +147,7 @@ class TtsEffectHandler @Inject constructor(
         // Observe the override reactively so a settings change re-languages the live engine AND the
         // spoken copy with no restart (Reactive UI / UDF: the pref is the single source of truth).
         // distinctUntilChanged() is load-bearing: the app-prefs DataStore emits on EVERY write to the
-        // store (theme, glance, economy edits, the EIA gas-price writer), so without it an unrelated
+        // store (theme, glance, economy edits, the fuel feed's gas-price follow), so without it an unrelated
         // write would re-run applyLanguage() and issue a redundant engine setLanguage() — possibly
         // mid-utterance (same-value re-set is engine-dependent, not guaranteed inert).
         appScope.launch {

@@ -11,6 +11,7 @@ import cloud.trotter.log.gig.core.data.vehicle.VehiclesUnreadableException
 import cloud.trotter.log.gig.core.data.vehicle.GarageRepository
 import cloud.trotter.log.gig.domain.model.vehicle.Vehicle
 import cloud.trotter.log.gig.domain.model.vehicle.*
+import cloud.trotter.log.gig.core.data.fuel.FuelLookup
 import cloud.trotter.log.gig.core.data.fuel.FuelPriceRepository
 import cloud.trotter.log.gig.domain.evaluation.EconomyField
 import cloud.trotter.log.gig.feature.setup.wizard.model.SaveFailure
@@ -82,13 +83,12 @@ class WizardViewModelTest {
         whenever(appPreferencesRepository.fuelType).thenReturn(flowOf(FuelType.REGULAR))
         whenever(appPreferencesRepository.isGasPriceAuto).thenReturn(flowOf(false))
         whenever(appPreferencesRepository.gasPrice).thenReturn(flowOf(null))
-        whenever(appPreferencesRepository.gasPriceFetchedAt).thenReturn(flowOf(null))
+        whenever(appPreferencesRepository.gasPriceStamp).thenReturn(flowOf(null))
         whenever(appPreferencesRepository.userEconomy).thenReturn(flowOf(UserEconomy()))
         whenever(strategyRepository.protectStatsMode).thenReturn(flowOf(false))
         whenever(strategyRepository.scoringRules).thenReturn(flowOf(emptyList()))
         whenever { vehicleRepository.getYears() }.thenReturn(emptyList())
-        whenever { gasPriceRepository.fetchGasPriceOnly(any()) }
-            .thenReturn(Result.failure(RuntimeException("offline in test")))
+        whenever { gasPriceRepository.lookUp() }.thenReturn(FuelLookup(emptyMap()))
     }
 
     @After
@@ -667,7 +667,7 @@ class WizardViewModelTest {
 
         economy.complete(UserEconomy())
         testScheduler.advanceUntilIdle()
-        FuelType.entries.filter { it != FuelType.ELECTRICITY }.forEach { verify(gasPriceRepository).fetchGasPriceOnly(it) }
+        verify(gasPriceRepository).lookUp()
         verifyNoMoreInteractions(gasPriceRepository)
     }
 
@@ -690,7 +690,7 @@ class WizardViewModelTest {
     }
 
     @Test
-    fun `saved true fetches once per fuel type after delayed settings load`() = runTest {
+    fun `saved true looks up once for every fuel type after delayed settings load`() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         stubRepositories()
         val auto = CompletableDeferred<Boolean>()
@@ -704,12 +704,12 @@ class WizardViewModelTest {
         auto.complete(true)
         testScheduler.advanceUntilIdle()
         assertEquals(true, viewModel.state.value.isGasPriceAuto)
-        FuelType.entries.filter { it != FuelType.ELECTRICITY }.forEach { verify(gasPriceRepository).fetchGasPriceOnly(it) }
+        verify(gasPriceRepository).lookUp()
         verifyNoMoreInteractions(gasPriceRepository)
     }
 
     @Test
-    fun `turning auto pricing on invokes the existing fuel type fetch loop`() = runTest {
+    fun `turning auto pricing on runs one lookup for every fuel type`() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         stubRepositories()
         val auto = CompletableDeferred<Boolean>()
@@ -725,7 +725,7 @@ class WizardViewModelTest {
         viewModel.toggleAutoGasPrice(true)
         testScheduler.advanceUntilIdle()
         assertEquals(true, viewModel.state.value.isGasPriceAuto)
-        FuelType.entries.filter { it != FuelType.ELECTRICITY }.forEach { verify(gasPriceRepository).fetchGasPriceOnly(it) }
+        verify(gasPriceRepository).lookUp()
         verifyNoMoreInteractions(gasPriceRepository)
     }
 
