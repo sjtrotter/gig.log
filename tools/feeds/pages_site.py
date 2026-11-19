@@ -207,18 +207,25 @@ def pages_url(gh, repo: str) -> str:
 # ---- the live site --------------------------------------------------------------------------------------------
 
 
-def fetch_live(url: str) -> bytes | None:
-    """One file from the live site, or None on 404."""
+def fetch_live(url: str, attempts: int = 4, pause: float = 5, sleep=time.sleep) -> bytes | None:
+    """One file from the live site, or None on 404.
+
+    Pages answers the first request for a missing path on a cold edge with a 503 now and then, and each run's
+    ?r=<run id> makes every path cold, so a 5xx is retried; one that persists still refuses.
+    """
     request = urllib.request.Request(url, headers={"Cache-Control": "no-cache", "User-Agent": "feeds-pages"})
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            return response.read(feedlib.MAX_FILE_BYTES["rules"] + 1)
-    except urllib.error.HTTPError as e:
-        if e.code == 404:
-            return None
-        raise FeedError(f"{url}: HTTP {e.code}") from None
-    except (urllib.error.URLError, OSError) as e:
-        raise FeedError(f"{url}: {type(e).__name__}") from None
+    for attempt in range(attempts):
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                return response.read(feedlib.MAX_FILE_BYTES["rules"] + 1)
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return None
+            if e.code < 500 or attempt + 1 == attempts:
+                raise FeedError(f"{url}: HTTP {e.code}") from None
+        except (urllib.error.URLError, OSError) as e:
+            raise FeedError(f"{url}: {type(e).__name__}") from None
+        sleep(pause)
 
 
 def live_url(base_url: str, path: str, run_id: int) -> str:
