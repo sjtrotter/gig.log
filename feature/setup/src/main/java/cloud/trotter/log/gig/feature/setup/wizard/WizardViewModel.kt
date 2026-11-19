@@ -30,6 +30,7 @@ import cloud.trotter.log.gig.feature.setup.wizard.vehicle.VehicleDraft
 import cloud.trotter.log.gig.feature.setup.wizard.vehicle.VehicleDraftState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.SharingStarted
@@ -300,6 +301,19 @@ class WizardViewModel @Inject constructor(
     /** Whether a lookup has returned in this wizard; its map holds every gas fuel the area's chain prices. */
     private var lookedUp = false
 
+    /** The lookup in flight, shared by every caller until it returns; cancelled when auto turns off. */
+    private var lookup: Job? = null
+
+    /**
+     * Stops a lookup in flight: a one-shot grant dies with its coroutine, so no request is sent after auto turns off
+     * or a typed price replaces the figure.
+     */
+    private fun cancelLookup() {
+        lookup?.cancel()
+        lookup = null
+        _state.update { it.copy(isFetchingGasPrice = false) }
+    }
+
     private fun applyTrimDetails(details: VehicleDetails) {
         _state.update { it.withFuel(details.fuelType) }
     }
@@ -326,6 +340,7 @@ class WizardViewModel @Inject constructor(
     }
 
     fun toggleAutoGasPrice(isAuto: Boolean) {
+        if (!isAuto) cancelLookup()
         _state.update {
             if (isAuto) it.copy(isGasPriceAuto = true, gasPriceLookupFailed = false)
             else it.copy(isGasPriceAuto = false, gasPriceSource = GasPriceSource.Typed, gasPriceLookupFailed = false)
@@ -335,6 +350,7 @@ class WizardViewModel @Inject constructor(
 
     /** A typed price turns auto off, as the Costs screen's manual price does (#722), so no lookup replaces it. */
     fun updateGasPrice(price: Float) {
+        cancelLookup()
         _state.update {
             it.copy(gasPrice = price, isGasPriceAuto = false, gasPriceSource = GasPriceSource.Typed, gasPriceLookupFailed = false)
         }
@@ -342,9 +358,11 @@ class WizardViewModel @Inject constructor(
 
     fun attemptAutoGasPriceFetch() {
         if (!_state.value.isGasPriceAuto || EconomyField.GAS_PRICE !in EconomyFieldGroups.fieldsFor(vehicleDraft.state.value.profile)) return
+        // One lookup serves every fuel type, and its answer is applied to the fuel selected when it returns.
+        if (lookup?.isActive == true) return
 
         // The launched coroutine is the dasher's act: a one-shot grant minted inside lookUp lives no longer than it.
-        viewModelScope.launch {
+        lookup = viewModelScope.launch {
             _state.update { it.copy(isFetchingGasPrice = true) }
             val fetched = try {
                 gasPriceRepository.lookUp().prices
@@ -419,6 +437,7 @@ class WizardViewModel @Inject constructor(
         _saveStatus.value = SaveStatus.Saving
         val finalState = _state.value
         val vehicle = vehicleDraft.state.value
+        if (!finalState.isGasPriceAuto) cancelLookup()
         // #640: an off answer turns the rules feed off now, before any write, and is saved first; an on answer is
         // saved last, so a write that fails or never finishes can never leave the feed on.
         if (!finalState.keepRulesUpToDate) rulesFeedSwitch.forgetNow()

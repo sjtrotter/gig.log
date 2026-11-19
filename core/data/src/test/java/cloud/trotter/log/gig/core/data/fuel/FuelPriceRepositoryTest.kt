@@ -26,15 +26,18 @@ import cloud.trotter.log.gig.domain.model.vehicle.FuelType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -69,17 +72,24 @@ class FuelPriceRepositoryTest {
             """"STX":{"regular":2.7}},"source":"EIA","unit":"USD/gal"}""").toByteArray(),
     )
 
-    private val store = AppPreferencesDataSource(
-        PreferenceDataStoreFactory.create(scope = scope, produceFile = { File(tmp.root, "prefs.preferences_pb") }),
-    )
-    private val preferences = AppPreferencesRepository(
-        store, GarageRepository(VehicleDataSource(MemoryPreferences())), FuelFeedSwitch(store, scope),
-    )
-    private val feed = FeedRepository<FuelPrices>(
-        Feed.FUEL, FuelFeedStager(), FeedClient(fake.client) { }, policy, File(tmp.root, "feeds"), clock,
-        buildTimeMs = NOW - 30 * 24 * HOUR,
-    )
-    private val repository = FuelPriceRepository(feed, policy, preferences, scope)
+    private lateinit var store: AppPreferencesDataSource
+    private lateinit var preferences: AppPreferencesRepository
+    private lateinit var repository: FuelPriceRepository
+
+    /** Built once the temporary folder exists: the store and the switch's first read touch it at once. */
+    @Before fun setUp() {
+        store = AppPreferencesDataSource(
+            PreferenceDataStoreFactory.create(scope = scope, produceFile = { File(tmp.root, "prefs.preferences_pb") }),
+        )
+        preferences = AppPreferencesRepository(
+            store, GarageRepository(VehicleDataSource(MemoryPreferences())), FuelFeedSwitch(store, scope),
+        )
+        val feed = FeedRepository<FuelPrices>(
+            Feed.FUEL, FuelFeedStager(), FeedClient(fake.client) { }, policy, File(tmp.root, "feeds"), clock,
+            buildTimeMs = NOW - 30 * 24 * HOUR,
+        )
+        repository = FuelPriceRepository(feed, policy, preferences, scope)
+    }
 
     @After fun tearDown() {
         site.release()
@@ -89,12 +99,14 @@ class FuelPriceRepositoryTest {
 
     private fun envelopeRequests() = site.requests.count { it.url.encodedPath.endsWith("/envelope.json") }
 
-    private suspend fun awaitStored(price: Float, stamp: FuelPriceStamp = this.stamp) = withTimeout(5_000) {
-        store.gasPrice.first { it == price }
-        store.gasPriceStamp.first { it == stamp }
+    private suspend fun awaitStored(price: Float, stamp: FuelPriceStamp = this.stamp) {
+        withTimeout(5_000) {
+            store.gasPrice.first { it == price }
+            store.gasPriceStamp.first { it == stamp }
+        }
     }
 
-    @Test fun `refresh applies the chosen area's price and stamp`() = runBlocking {
+    @Test fun `refresh applies the chosen area's price and stamp`(): Unit = runBlocking {
         preferences.setGasPriceAuto(true)
         repository.start()
         site.publish(Feed.FUEL, generation)
@@ -104,7 +116,7 @@ class FuelPriceRepositoryTest {
         awaitStored(3.051f)
     }
 
-    @Test fun `an area change and a fuel change apply from the cache with no request`() = runBlocking {
+    @Test fun `an area change and a fuel change apply from the cache with no request`(): Unit = runBlocking {
         preferences.setGasPriceAuto(true)
         repository.start()
         site.publish(Feed.FUEL, generation)
@@ -122,7 +134,7 @@ class FuelPriceRepositoryTest {
         assertEquals(sent, fake.server.requestCount)
     }
 
-    @Test fun `use auto price with the switch off sends one fetch and turns auto on with the price`() = runBlocking {
+    @Test fun `use auto price with the switch off sends one fetch and turns auto on with the price`(): Unit = runBlocking {
         policy.enabled.value = false
         preferences.updateGasPriceManual(2.5f)
         repository.start()
@@ -136,7 +148,25 @@ class FuelPriceRepositoryTest {
         assertEquals(stamp, store.gasPriceStamp.first())
     }
 
-    @Test fun `a failed use auto price writes nothing and stays manual`() = runBlocking {
+    @Test fun `a manual price set while use auto price downloads stands, and auto stays off`(): Unit = runBlocking {
+        policy.enabled.value = false
+        preferences.updateGasPriceManual(2.5f)
+        repository.start()
+        site.publish(Feed.FUEL, generation)
+        site.hold("/feeds/fuel/${generation.sha256}.json")
+
+        val resume = async { repository.resumeAuto(FuelType.REGULAR) }
+        assertTrue(withContext(Dispatchers.IO) { site.awaitHeld() })
+        preferences.updateGasPriceManual(2.9f)
+        site.release()
+
+        assertEquals(FuelRefreshOutcome.Off, withTimeout(5_000) { resume.await() })
+        assertFalse(store.isGasPriceAuto.first())
+        assertEquals(2.9f, store.gasPrice.first())
+        assertNull(store.gasPriceStamp.first())
+    }
+
+    @Test fun `a failed use auto price writes nothing and stays manual`(): Unit = runBlocking {
         policy.enabled.value = false
         preferences.updateGasPriceManual(2.5f)
         repository.start()
@@ -149,7 +179,7 @@ class FuelPriceRepositoryTest {
         assertNull(store.gasPriceStamp.first())
     }
 
-    @Test fun `refresh with the switch off sends nothing`() = runBlocking {
+    @Test fun `refresh with the switch off sends nothing`(): Unit = runBlocking {
         policy.enabled.value = false
         repository.start()
         site.publish(Feed.FUEL, generation)
@@ -159,7 +189,7 @@ class FuelPriceRepositoryTest {
         assertEquals(0, fake.server.requestCount)
     }
 
-    @Test fun `setup's lookup prices every gas fuel for the stored area from one fetch`() = runBlocking {
+    @Test fun `setup's lookup prices every gas fuel for the stored area from one fetch`(): Unit = runBlocking {
         policy.enabled.value = false
         repository.start()
         site.publish(Feed.FUEL, generation)

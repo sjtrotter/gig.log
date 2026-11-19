@@ -89,16 +89,35 @@ class FuelFeedSwitch @Inject constructor(
      */
     suspend fun <R> write(mayClose: Boolean, write: suspend () -> R): R {
         val choice = if (mayClose) close() else choices.incrementAndGet()
+        return writes.withLock { saveAndSettle(choice, write) }
+    }
+
+    /** The count of writes and closes so far: [writeIfUnchanged] compares against it. */
+    fun revision(): Long = choices.get()
+
+    /**
+     * Runs [write] (a save that may turn auto on, never off) only when no other write or close came after
+     * [since], a [revision] read before the work that led to it began; null when one did, and nothing is written.
+     * The check runs under the same lock as every write, so a choice the dasher makes meanwhile is never overwritten:
+     * one made before the lock is taken skips this write, and one made after it lands after this one.
+     */
+    suspend fun <R> writeIfUnchanged(since: Long, write: suspend () -> R): R? {
+        val choice = choices.incrementAndGet()
         return writes.withLock {
-            val result = write()
-            val stored = store.isGasPriceAuto.first()
-            if (stored) {
-                openIfLatest(choice)
-            } else {
-                _enabled.value = false
-            }
-            result
+            if (choice != since + 1 || choices.get() != choice) null else saveAndSettle(choice, write)
         }
+    }
+
+    /** Must run under [writes]. */
+    private suspend fun <R> saveAndSettle(choice: Long, write: suspend () -> R): R {
+        val result = write()
+        val stored = store.isGasPriceAuto.first()
+        if (stored) {
+            openIfLatest(choice)
+        } else {
+            _enabled.value = false
+        }
+        return result
     }
 
     private companion object {

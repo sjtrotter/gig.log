@@ -16,7 +16,9 @@ import cloud.trotter.log.gig.domain.model.vehicle.Vehicle
 import cloud.trotter.log.gig.domain.model.vehicle.VehicleProfile
 import cloud.trotter.log.gig.feature.setup.wizard.model.GasPriceSource
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
@@ -28,6 +30,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.mockito.kotlin.any
 import org.mockito.kotlin.anyOrNull
+import org.mockito.kotlin.doSuspendableAnswer
 import org.mockito.kotlin.eq
 import org.mockito.kotlin.isNull
 import org.mockito.kotlin.mock
@@ -217,6 +220,57 @@ class WizardGasPriceSourceTest {
         verify(appPreferencesRepository).mirrorEconomySettings(any(), any(), any(), any(), any(), eq(true), eq(3.75f), isNull())
         // The data source removes the stamp on a null save, so a reload reads auto on with no stamp.
         assertEquals(GasPriceSource.Saved, GasPriceSource.stored(isAuto = true, stamp = null))
+    }
+
+    @Test
+    fun `turning auto off or typing a price cancels the lookup in flight`() = runTest {
+        val vm = wizard(auto = false, price = 3.29f, stamp = null)
+        var cancelled = 0
+        whenever(gasPriceRepository.lookUp()).doSuspendableAnswer {
+            try {
+                awaitCancellation()
+            } finally {
+                cancelled++
+            }
+        }
+
+        vm.toggleAutoGasPrice(true)
+        testScheduler.advanceUntilIdle()
+        assertEquals(true, vm.state.value.isFetchingGasPrice)
+        vm.toggleAutoGasPrice(false)
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, cancelled)
+        assertEquals(false, vm.state.value.isFetchingGasPrice)
+
+        vm.toggleAutoGasPrice(true)
+        testScheduler.advanceUntilIdle()
+        vm.updateGasPrice(3.75f)
+        testScheduler.advanceUntilIdle()
+        assertEquals(2, cancelled)
+        assertEquals(false, vm.state.value.isFetchingGasPrice)
+        assertEquals(GasPriceSource.Typed, vm.state.value.gasPriceSource)
+    }
+
+    @Test
+    fun `a fuel change while the lookup runs shares it, and its answer is the new fuel's`() = runTest {
+        val vm = wizard(auto = false, price = 3.29f, stamp = null)
+        val answer = CompletableDeferred<FuelLookup>()
+        whenever(gasPriceRepository.lookUp()).doSuspendableAnswer { answer.await() }
+
+        vm.toggleAutoGasPrice(true)
+        testScheduler.advanceUntilIdle()
+        vm.updateFuelType(FuelType.PREMIUM)
+        testScheduler.advanceUntilIdle()
+        answer.complete(FuelLookup(mapOf(
+            FuelType.REGULAR to FetchedGasPrice(3.10f, CURRENT),
+            FuelType.PREMIUM to FetchedGasPrice(3.90f, CURRENT),
+        )))
+        testScheduler.advanceUntilIdle()
+
+        verify(gasPriceRepository, times(1)).lookUp()
+        assertEquals(FuelType.PREMIUM, vm.state.value.fuelType)
+        assertEquals(3.90f, vm.state.value.gasPrice, 0f)
+        assertEquals(GasPriceSource.Lookup(CURRENT), vm.state.value.gasPriceSource)
     }
 
     private companion object {

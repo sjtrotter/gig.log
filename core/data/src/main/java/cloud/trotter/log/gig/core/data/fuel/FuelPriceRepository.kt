@@ -110,16 +110,19 @@ class FuelPriceRepository @Inject constructor(
     /**
      * "Use auto price": one fetch on the dasher's tap (a one-shot grant minted in the caller's coroutine), then auto
      * turns on with the price for [fuel] in one write, only when the fetch succeeded or found nothing new and a price
-     * resolves. Anything else writes nothing, and the price stays manual.
+     * resolves, and only when the dasher made no other auto gas price choice while it ran (then [FuelRefreshOutcome.Off]).
+     * Anything else writes nothing, and the price stays manual.
      */
     suspend fun resumeAuto(fuel: FuelType): FuelRefreshOutcome {
+        val since = preferences.gasAutoRevision()
         val grant = OneShotGrant.forUserAct(Feed.FUEL, policy.source(Feed.FUEL).value)
         val outcome = outcomeOf(refreshSafely(grant))
         if (outcome != FuelRefreshOutcome.Updated && outcome != FuelRefreshOutcome.Unchanged) return outcome
         val price = stamped(feed.state.value, preferences.fuelPriceArea.first(), fuel)
             ?: return FuelRefreshOutcome.Failed(retry = false)
         try {
-            preferences.updateGasPriceAuto(price.price, price.stamp)
+            // A typed price, auto turned off or an undo while the download ran is the dasher's later choice: it stands.
+            if (!preferences.updateGasPriceAutoIfUnchanged(price.price, price.stamp, since)) return FuelRefreshOutcome.Off
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

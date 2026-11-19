@@ -281,6 +281,16 @@ class AppPreferencesRepository @Inject constructor(
      */
     suspend fun updateGasPriceAuto(price: Float, stamp: FuelPriceStamp) =
         fuelSwitch.write(mayClose = false) { dataSource.updateGasPriceAuto(price, stamp) }
+
+    /** How many writes of the auto gas price flag have started; [updateGasPriceAutoIfUnchanged] compares against it. */
+    fun gasAutoRevision(): Long = fuelSwitch.revision()
+
+    /**
+     * [updateGasPriceAuto] only when no write of the auto gas price flag started after [since] (a typed price, auto
+     * turned off, an undo): false, writing nothing, when one did. "Use auto price" reads [since] before its download.
+     */
+    suspend fun updateGasPriceAutoIfUnchanged(price: Float, stamp: FuelPriceStamp, since: Long): Boolean =
+        fuelSwitch.writeIfUnchanged(since) { dataSource.updateGasPriceAuto(price, stamp) } != null
     // Deferred saves commit their captured garage profile once, then mirror legacy preferences.
     suspend fun mirrorFuelType(type: FuelType) = dataSource.updateFuelType(type.name)
     suspend fun mirrorVehicleClass(type: VehicleClass) = dataSource.updateVehicleClass(type.name)
