@@ -72,6 +72,7 @@ class BubbleGoalMarkTest {
         whenever(preferences.dailyGoalDollars).thenReturn(flowOf(null))
         whenever(preferences.gasPrice).thenReturn(flowOf(null))
         whenever(preferences.isGasPriceAuto).thenReturn(flowOf(true))
+        whenever(preferences.gasPriceStamp).thenReturn(flowOf(null))
     }
     @After fun cleanup() { Dispatchers.resetMain() }
     private fun garage(): cloud.trotter.log.gig.core.data.vehicle.GarageRepository {

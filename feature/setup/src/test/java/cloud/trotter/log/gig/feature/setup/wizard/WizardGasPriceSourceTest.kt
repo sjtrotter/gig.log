@@ -1,5 +1,7 @@
 package cloud.trotter.log.gig.feature.setup.wizard
 
+import cloud.trotter.log.gig.core.data.fuel.FetchedGasPrice
+import cloud.trotter.log.gig.core.data.fuel.FuelLookup
 import cloud.trotter.log.gig.core.data.fuel.FuelPriceRepository
 import cloud.trotter.log.gig.core.data.settings.AppPreferencesRepository
 import cloud.trotter.log.gig.core.data.state.AppStateRepository
@@ -8,6 +10,7 @@ import cloud.trotter.log.gig.core.data.vehicle.Garage
 import cloud.trotter.log.gig.core.data.vehicle.GarageRepository
 import cloud.trotter.log.gig.core.data.vehicle.VehicleRepository
 import cloud.trotter.log.gig.domain.evaluation.UserEconomy
+import cloud.trotter.log.gig.domain.fuel.FuelPriceStamp
 import cloud.trotter.log.gig.domain.model.vehicle.FuelType
 import cloud.trotter.log.gig.domain.model.vehicle.Vehicle
 import cloud.trotter.log.gig.domain.model.vehicle.VehicleProfile
@@ -32,11 +35,8 @@ import org.mockito.kotlin.never
 import org.mockito.kotlin.times
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
-import java.time.Clock
-import java.time.Instant
-import java.time.ZoneOffset
 
-/** #1478: the wizard's gas price says where it came from, and a failed lookup keeps the figure and says so. */
+/** The wizard's gas price says where it came from, and a failed lookup keeps the figure and says so. */
 @OptIn(ExperimentalCoroutinesApi::class)
 class WizardGasPriceSourceTest {
     private val strategyRepository: StrategyRepository = mock()
@@ -46,15 +46,13 @@ class WizardGasPriceSourceTest {
     private val gasPriceRepository: FuelPriceRepository = mock()
     private val garageRepository: GarageRepository = mock()
     private val rulesFeedSwitch = rulesFeedSwitchStub()
-    private val clock = Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC)
-    private val gasFuels = FuelType.entries.filter { it != FuelType.ELECTRICITY }
 
     @After
     fun tearDown() {
         Dispatchers.resetMain()
     }
 
-    private suspend fun TestScope.wizard(auto: Boolean, price: Float?, stamp: Long?): WizardViewModel {
+    private suspend fun TestScope.wizard(auto: Boolean, price: Float?, stamp: FuelPriceStamp?): WizardViewModel {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         whenever(garageRepository.garage).thenReturn(flowOf(Garage(emptyList(), null, true)))
         whenever(garageRepository.addVehicle(isNull(), any(), any(), any())).thenReturn(Vehicle("new-id", null, 1L))
@@ -68,29 +66,28 @@ class WizardGasPriceSourceTest {
         whenever(appPreferencesRepository.fuelType).thenReturn(flowOf(FuelType.REGULAR))
         whenever(appPreferencesRepository.isGasPriceAuto).thenReturn(flowOf(auto))
         whenever(appPreferencesRepository.gasPrice).thenReturn(flowOf(price))
-        whenever(appPreferencesRepository.gasPriceFetchedAt).thenReturn(flowOf(stamp))
+        whenever(appPreferencesRepository.gasPriceStamp).thenReturn(flowOf(stamp))
         whenever(appPreferencesRepository.userEconomy).thenReturn(flowOf(UserEconomy()))
         whenever(strategyRepository.protectStatsMode).thenReturn(flowOf(false))
         whenever(strategyRepository.scoringRules).thenReturn(flowOf(emptyList()))
         whenever(vehicleRepository.getYears()).thenReturn(emptyList())
         lookupFails()
         val vm = WizardViewModel(strategyRepository, appPreferencesRepository, appStateRepository,
-            vehicleRepository, gasPriceRepository, garageRepository, rulesFeedSwitch, clock)
+            vehicleRepository, gasPriceRepository, garageRepository, rulesFeedSwitch)
         testScheduler.advanceUntilIdle()
         return vm
     }
 
     private suspend fun lookupFails() {
-        whenever(gasPriceRepository.fetchGasPriceOnly(any())).thenReturn(Result.failure(IllegalStateException("no key")))
+        whenever(gasPriceRepository.lookUp()).thenReturn(FuelLookup(emptyMap()))
     }
 
     private suspend fun lookupReturns(vararg prices: Pair<FuelType, Float>) {
-        lookupFails()
-        for ((fuel, price) in prices) whenever(gasPriceRepository.fetchGasPriceOnly(fuel)).thenReturn(Result.success(price))
+        whenever(gasPriceRepository.lookUp()).thenReturn(FuelLookup(prices.associate { (fuel, price) -> fuel to FetchedGasPrice(price, CURRENT) }))
     }
 
     @Test
-    fun `auto on with a stored stamp loads as a lookup from that time`() = runTest {
+    fun `auto on with a stored stamp loads as a lookup with that stamp`() = runTest {
         val vm = wizard(auto = true, price = 3.29f, stamp = EARLIER)
         assertEquals(GasPriceSource.Lookup(EARLIER), vm.state.value.gasPriceSource)
     }
@@ -106,18 +103,18 @@ class WizardGasPriceSourceTest {
         val vm = wizard(auto = false, price = 3.29f, stamp = EARLIER)
         assertEquals(GasPriceSource.Typed, vm.state.value.gasPriceSource)
         assertEquals(false, vm.state.value.gasPriceLookupFailed)
-        verify(gasPriceRepository, never()).fetchGasPriceOnly(any())
+        verify(gasPriceRepository, never()).lookUp()
     }
 
     @Test
-    fun `a lookup that returns a price shows it as a lookup from now`() = runTest {
+    fun `a lookup that returns a price shows it with the feed's stamp`() = runTest {
         val vm = wizard(auto = true, price = 3.29f, stamp = EARLIER)
         lookupReturns(FuelType.REGULAR to 3.10f)
         vm.attemptAutoGasPriceFetch()
         testScheduler.advanceUntilIdle()
 
         assertEquals(3.10f, vm.state.value.gasPrice, 0f)
-        assertEquals(GasPriceSource.Lookup(NOW), vm.state.value.gasPriceSource)
+        assertEquals(GasPriceSource.Lookup(CURRENT), vm.state.value.gasPriceSource)
         assertEquals(false, vm.state.value.gasPriceLookupFailed)
     }
 
@@ -153,9 +150,9 @@ class WizardGasPriceSourceTest {
         vm.attemptAutoGasPriceFetch()
         testScheduler.advanceUntilIdle()
 
-        gasFuels.forEach { verify(gasPriceRepository, times(2)).fetchGasPriceOnly(it) }
+        verify(gasPriceRepository, times(2)).lookUp()
         assertEquals(3.10f, vm.state.value.gasPrice, 0f)
-        assertEquals(GasPriceSource.Lookup(NOW), vm.state.value.gasPriceSource)
+        assertEquals(GasPriceSource.Lookup(CURRENT), vm.state.value.gasPriceSource)
         assertEquals(false, vm.state.value.gasPriceLookupFailed)
     }
 
@@ -169,7 +166,7 @@ class WizardGasPriceSourceTest {
     }
 
     @Test
-    fun `switching to a fuel a lookup returned shows that lookup, and to a missing one keeps the figure`() = runTest {
+    fun `switching fuel reads the one lookup's map, and a fuel missing from it keeps the figure`() = runTest {
         val vm = wizard(auto = true, price = 3.29f, stamp = EARLIER)
         lookupReturns(FuelType.REGULAR to 3.10f, FuelType.PREMIUM to 3.90f)
         vm.attemptAutoGasPriceFetch()
@@ -177,13 +174,15 @@ class WizardGasPriceSourceTest {
 
         vm.updateFuelType(FuelType.PREMIUM)
         assertEquals(3.90f, vm.state.value.gasPrice, 0f)
-        assertEquals(GasPriceSource.Lookup(NOW), vm.state.value.gasPriceSource)
+        assertEquals(GasPriceSource.Lookup(CURRENT), vm.state.value.gasPriceSource)
 
         vm.updateFuelType(FuelType.DIESEL)
         testScheduler.advanceUntilIdle()
         assertEquals(3.90f, vm.state.value.gasPrice, 0f)
-        assertEquals(GasPriceSource.Lookup(NOW), vm.state.value.gasPriceSource)
+        assertEquals(GasPriceSource.Lookup(CURRENT), vm.state.value.gasPriceSource)
         assertEquals(true, vm.state.value.gasPriceLookupFailed)
+        // The load's lookup and the attempt above; the fuel switches looked nothing up.
+        verify(gasPriceRepository, times(2)).lookUp()
     }
 
     @Test
@@ -194,7 +193,7 @@ class WizardGasPriceSourceTest {
         testScheduler.advanceUntilIdle()
         looked.save()
         testScheduler.advanceUntilIdle()
-        verify(appPreferencesRepository).mirrorEconomySettings(any(), any(), any(), any(), any(), eq(true), eq(3.10f), eq(NOW))
+        verify(appPreferencesRepository).mirrorEconomySettings(any(), any(), any(), any(), any(), eq(true), eq(3.10f), eq(CURRENT))
 
         looked.updateGasPrice(3.75f)
         looked.save()
@@ -217,11 +216,16 @@ class WizardGasPriceSourceTest {
 
         verify(appPreferencesRepository).mirrorEconomySettings(any(), any(), any(), any(), any(), eq(true), eq(3.75f), isNull())
         // The data source removes the stamp on a null save, so a reload reads auto on with no stamp.
-        assertEquals(GasPriceSource.Saved, GasPriceSource.stored(isAuto = true, fetchedAtMillis = null))
+        assertEquals(GasPriceSource.Saved, GasPriceSource.stored(isAuto = true, stamp = null))
     }
 
     private companion object {
-        const val NOW = 1_762_850_000_000L
-        const val EARLIER = NOW - 22L * 24 * 60 * 60 * 1000
+        const val DAY = 24L * 60 * 60 * 1000
+
+        /** 2026-11-16T00:00Z, a Monday, issued two days later. */
+        val CURRENT = FuelPriceStamp(1_794_787_200_000L, 1_794_787_200_000L + 2 * DAY)
+
+        /** Three weeks before [CURRENT]. */
+        val EARLIER = FuelPriceStamp(CURRENT.period - 21 * DAY, CURRENT.issuedAt - 21 * DAY)
     }
 }

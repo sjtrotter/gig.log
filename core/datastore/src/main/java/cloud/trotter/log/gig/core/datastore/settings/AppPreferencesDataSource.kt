@@ -13,6 +13,8 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import cloud.trotter.log.gig.core.datastore.di.AppPreferences
 import cloud.trotter.log.gig.domain.evaluation.EconomyField
+import cloud.trotter.log.gig.domain.fuel.FuelArea
+import cloud.trotter.log.gig.domain.fuel.FuelPriceStamp
 import cloud.trotter.log.gig.domain.model.vehicle.FuelType
 import cloud.trotter.log.gig.domain.model.vehicle.VehicleClass
 import cloud.trotter.log.gig.domain.model.vehicle.*
@@ -35,11 +37,12 @@ class SaveCapture<T> {
     }
 }
 
-/** The manual price's undo snapshot; the fetch stamp travels with the price it describes (#1478). */
+/** The manual price's undo snapshot; the feed stamp travels with the price it describes. */
 data class StoredGasPrice(
     val price: StoredPreference<Float>,
     val auto: StoredPreference<Boolean>,
-    val fetchedAt: StoredPreference<Long>,
+    val period: StoredPreference<Long>,
+    val issuedAt: StoredPreference<Long>,
 )
 
 /** The legacy count_real_expenses_in_kept key is no longer read; DataStore ignores it. */
@@ -69,8 +72,12 @@ class AppPreferencesDataSource @Inject constructor(
         // which runs the write through FuelFeedSwitch so the feed closes before the write lands.
         val IS_GAS_PRICE_AUTO = booleanPreferencesKey("is_gas_price_auto")
         val GAS_PRICE = floatPreferencesKey("gas_price")
-        // When a lookup returned the stored GAS_PRICE (epoch ms). A typed price leaves it alone: auto off marks it.
-        val GAS_PRICE_FETCHED_AT = longPreferencesKey("gas_price_fetched_at")
+        // The fuel feed stamp of the stored GAS_PRICE: its EIA week and the feed generation's issued_at (epoch ms).
+        // Written with the price in one edit; a typed price leaves them alone, since auto off marks it.
+        val GAS_PRICE_PERIOD = longPreferencesKey("gas_price_period")
+        val GAS_PRICE_ISSUED_AT = longPreferencesKey("gas_price_issued_at")
+        // The area whose fuel feed price the app uses, as the feed's area code. Never leaves the phone.
+        val FUEL_PRICE_AREA = stringPreferencesKey("fuel_price_area")
         val VEHICLE_LOOKUP_ALLOWED = booleanPreferencesKey("vehicle_lookup_allowed")
         val FUEL_TYPE = stringPreferencesKey("fuel_type")
         // Legacy key (pre-v2 schema, "CAR"/"E_BIKE"). VEHICLE_CLASS supersedes it.
@@ -189,7 +196,15 @@ class AppPreferencesDataSource @Inject constructor(
     val isGasPriceAuto: Flow<Boolean> = ds.data.map { it[Keys.IS_GAS_PRICE_AUTO] ?: false }
     val electricityPricePerKwh: Flow<Double?> = ds.data.map { it[Keys.ELECTRICITY_PRICE_PER_KWH] }
     val gasPrice: Flow<Float?> = ds.data.map { it[Keys.GAS_PRICE] }
-    val gasPriceFetchedAt: Flow<Long?> = ds.data.map { it[Keys.GAS_PRICE_FETCHED_AT] }
+    /** The stored price's feed stamp; null unless both halves are stored. */
+    val gasPriceStamp: Flow<FuelPriceStamp?> = ds.data.map { prefs ->
+        val period = prefs[Keys.GAS_PRICE_PERIOD]
+        val issuedAt = prefs[Keys.GAS_PRICE_ISSUED_AT]
+        if (period != null && issuedAt != null) FuelPriceStamp(period, issuedAt) else null
+    }
+
+    /** The chosen fuel price area; the U.S. until the dasher picks one, or for a code this build does not know. */
+    val fuelPriceArea: Flow<FuelArea> = ds.data.map { prefs -> prefs[Keys.FUEL_PRICE_AREA]?.let { FuelArea.fromCode(it) } ?: FuelArea.US }
 
     val vehicleLookupAllowed: Flow<Boolean> = ds.data.map { it[Keys.VEHICLE_LOOKUP_ALLOWED] ?: false }
     val fuelType: Flow<String?> = ds.data.map { it[Keys.FUEL_TYPE] }
@@ -287,40 +302,55 @@ class AppPreferencesDataSource @Inject constructor(
     }
 
     /**
-     * Turning auto on over a price stored while it was off (a typed price) drops the fetch stamp: the stamp
-     * described an earlier looked-up price, not this one. Must be called from inside a [DataStore.edit] block.
+     * Turning auto on over a price stored while it was off (a typed price) drops the feed stamp: the stamp
+     * described an earlier feed price, not this one. Must be called from inside a [DataStore.edit] block.
      */
     private fun MutablePreferences.setGasAuto(auto: Boolean) {
-        if (auto && this[Keys.IS_GAS_PRICE_AUTO] != true) remove(Keys.GAS_PRICE_FETCHED_AT)
+        if (auto && this[Keys.IS_GAS_PRICE_AUTO] != true) removeGasStamp()
         this[Keys.IS_GAS_PRICE_AUTO] = auto
     }
 
+    private fun MutablePreferences.setGasStamp(stamp: FuelPriceStamp) {
+        this[Keys.GAS_PRICE_PERIOD] = stamp.period
+        this[Keys.GAS_PRICE_ISSUED_AT] = stamp.issuedAt
+    }
+
+    private fun MutablePreferences.removeGasStamp() {
+        remove(Keys.GAS_PRICE_PERIOD)
+        remove(Keys.GAS_PRICE_ISSUED_AT)
+    }
+
     /**
-     * A looked-up price, stamped with when the lookup returned it, in one edit, and only while auto is still on: a
-     * lookup that returns after the dasher typed a price never overwrites it. Returns whether it wrote.
+     * A feed price with its [stamp], in one edit, and only while auto is still on: a price that arrives after the
+     * dasher typed one never overwrites it. Returns whether it wrote.
      */
-    suspend fun updateGasPrice(price: Float, fetchedAtMillis: Long): Boolean {
+    suspend fun updateGasPrice(price: Float, stamp: FuelPriceStamp): Boolean {
         var written = false
         ds.edit {
             if (it[Keys.IS_GAS_PRICE_AUTO] == true) {
                 it[Keys.GAS_PRICE] = price
-                it[Keys.GAS_PRICE_FETCHED_AT] = fetchedAtMillis
+                it.setGasStamp(stamp)
                 written = true
             }
         }
         return written
     }
 
+    /** Saves the chosen fuel price area; the price that follows it is written separately. */
+    suspend fun setFuelPriceArea(area: FuelArea) {
+        ds.edit { it[Keys.FUEL_PRICE_AREA] = area.code }
+    }
+
     /**
      * Driver override of the pump price (e.g. the bubble's between-dash quick edit, #693): writes the
-     * price AND flips auto OFF in one edit, so the daily EIA worker won't clobber the manual value on
-     * its next run. Same store / same keys the economy wizard owns — no second gas-price copy.
+     * price AND flips auto OFF in one edit, so no feed price replaces the manual value. Same store / same
+     * keys the economy wizard owns — no second gas-price copy.
      */
     suspend fun updateGasPriceManual(price: Float, capture: SaveCapture<StoredGasPrice>? = null): StoredGasPrice {
         lateinit var previous: StoredGasPrice
         ds.edit {
             fun prior() = StoredGasPrice(it.capture(Keys.GAS_PRICE, EconomyField.GAS_PRICE), it.capture(Keys.IS_GAS_PRICE_AUTO),
-                it.capture(Keys.GAS_PRICE_FETCHED_AT))
+                it.capture(Keys.GAS_PRICE_PERIOD), it.capture(Keys.GAS_PRICE_ISSUED_AT))
             previous = capture?.capture { prior() } ?: prior()
             it[Keys.GAS_PRICE] = price
             it[Keys.IS_GAS_PRICE_AUTO] = false
@@ -331,10 +361,12 @@ class AppPreferencesDataSource @Inject constructor(
         var restored = false
         ds.edit {
             if (current() && it.capture(Keys.GAS_PRICE, EconomyField.GAS_PRICE) == expected.price &&
-                it.capture(Keys.IS_GAS_PRICE_AUTO) == expected.auto && it.capture(Keys.GAS_PRICE_FETCHED_AT) == expected.fetchedAt) {
+                it.capture(Keys.IS_GAS_PRICE_AUTO) == expected.auto && it.capture(Keys.GAS_PRICE_PERIOD) == expected.period &&
+                it.capture(Keys.GAS_PRICE_ISSUED_AT) == expected.issuedAt) {
                 it.restore(Keys.GAS_PRICE, EconomyField.GAS_PRICE, previous.price)
                 it.restore(Keys.IS_GAS_PRICE_AUTO, null, previous.auto)
-                it.restore(Keys.GAS_PRICE_FETCHED_AT, null, previous.fetchedAt)
+                it.restore(Keys.GAS_PRICE_PERIOD, null, previous.period)
+                it.restore(Keys.GAS_PRICE_ISSUED_AT, null, previous.issuedAt)
                 restored = true
             }
         }
@@ -342,15 +374,13 @@ class AppPreferencesDataSource @Inject constructor(
     }
 
     /**
-     * "Resume auto" (#722): the inverse of [updateGasPriceManual] — re-enables auto (EIA) fetching
-     * AND applies a freshly-fetched price in one atomic write, so the bubble's MANUAL-mode chip
-     * can't leave auto=true paired with a stale/pre-fetch price. Same store/keys — no second
-     * gas-price copy.
+     * "Use auto price" (#722): the inverse of [updateGasPriceManual]. Turns auto on AND applies a feed price with its
+     * [stamp] in one edit, so auto is never on beside a typed price. Same store and keys, no second gas-price copy.
      */
-    suspend fun updateGasPriceAuto(price: Float, fetchedAtMillis: Long) {
+    suspend fun updateGasPriceAuto(price: Float, stamp: FuelPriceStamp) {
         ds.edit {
             it[Keys.GAS_PRICE] = price
-            it[Keys.GAS_PRICE_FETCHED_AT] = fetchedAtMillis
+            it.setGasStamp(stamp)
             it[Keys.IS_GAS_PRICE_AUTO] = true
         }
     }
@@ -380,12 +410,12 @@ class AppPreferencesDataSource @Inject constructor(
     }
 
     /**
-     * The wizard's save is authoritative about [price]'s provenance: [gasPriceFetchedAt] is when a lookup returned it,
+     * The wizard's save is authoritative about [price]'s provenance: [stamp] is the feed stamp of a looked-up price,
      * and null (a typed or saved price) removes the stored stamp.
      */
     suspend fun updateEconomySettings(
         year: String, make: String, model: String, trim: String,
-        mpg: Float, isGasAuto: Boolean, price: Float, gasPriceFetchedAt: Long?,
+        mpg: Float, isGasAuto: Boolean, price: Float, stamp: FuelPriceStamp?,
     ) {
         ds.edit { prefs ->
             prefs[Keys.VEHICLE_YEAR] = year
@@ -395,8 +425,7 @@ class AppPreferencesDataSource @Inject constructor(
             prefs[Keys.ESTIMATED_MPG] = mpg
             prefs[Keys.IS_GAS_PRICE_AUTO] = isGasAuto
             prefs[Keys.GAS_PRICE] = price
-            if (gasPriceFetchedAt != null) prefs[Keys.GAS_PRICE_FETCHED_AT] = gasPriceFetchedAt
-            else prefs.remove(Keys.GAS_PRICE_FETCHED_AT)
+            if (stamp != null) prefs.setGasStamp(stamp) else prefs.removeGasStamp()
         }
     }
 
@@ -566,14 +595,14 @@ class AppPreferencesDataSource @Inject constructor(
         return restoreIfUnchanged(key, field, previous, expected, current)
     }
 
-    /** Shared settings only; legacy vehicle keys and their markers stay intact. */
+    /** Shared settings only; legacy vehicle keys and their markers, and the fuel price area, stay intact. */
     suspend fun resetSharedEconomyDefaults() {
         val shared = setOf(EconomyField.ELECTRICITY_PRICE, EconomyField.PHONE_PLAN_TOTAL,
             EconomyField.PHONE_PLAN_LINES, EconomyField.PHONE_BUSINESS_PERCENT,
             EconomyField.AVG_MIN_PER_MILE, EconomyField.BASE_PICKUP_MIN, EconomyField.GAS_PRICE)
         ds.edit { prefs ->
             prefs.remove(Keys.GAS_PRICE)
-            prefs.remove(Keys.GAS_PRICE_FETCHED_AT)
+            prefs.removeGasStamp()
             prefs.remove(Keys.IS_GAS_PRICE_AUTO)
             prefs.remove(Keys.ELECTRICITY_PRICE_PER_KWH)
             prefs.remove(Keys.PHONE_PLAN_TOTAL)
