@@ -77,7 +77,18 @@ class FuelPriceRepositoryTest {
     private lateinit var repository: FuelPriceRepository
 
     /** Built once the temporary folder exists: the store and the switch's first read touch it at once. */
+    /** DIAGNOSTIC (remove before merge): prints every log line, so a swallowed follow error shows in CI output. */
+    private val printing = object : timber.log.Timber.Tree() {
+        override fun log(priority: Int, tag: String?, message: String, t: Throwable?) {
+            println("LOG p=$priority tag=$tag $message")
+            t?.printStackTrace(System.out)
+        }
+    }
+
+    @After fun unplant() { timber.log.Timber.uproot(printing) }
+
     @Before fun setUp() {
+        timber.log.Timber.plant(printing)
         store = AppPreferencesDataSource(
             PreferenceDataStoreFactory.create(scope = scope, produceFile = { File(tmp.root, "prefs.preferences_pb") }),
         )

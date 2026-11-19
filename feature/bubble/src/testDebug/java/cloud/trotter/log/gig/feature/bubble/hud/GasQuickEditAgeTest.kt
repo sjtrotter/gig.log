@@ -4,6 +4,8 @@ import androidx.activity.ComponentActivity
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.printToString
 import androidx.compose.ui.test.performClick
 import cloud.trotter.log.gig.core.designsystem.theme.GigLogTheme
 import cloud.trotter.log.gig.core.designsystem.time.LocalNowProvider
@@ -61,6 +63,8 @@ class GasQuickEditAgeTest {
         show(GasRowModel(3.05f, auto = true, stamp = stamp))
         compose.onNodeWithText("Auto").performClick()
         settle()
+        // DIAGNOSTIC (remove before merge): the tree the assertion below searches.
+        println(compose.onRoot(useUnmergedTree = true).printToString())
         compose.onNodeWithText("EIA, week of Nov 16").assertExists()
 
         ageThePrice()
