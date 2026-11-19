@@ -4,8 +4,8 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.preferencesOf
 import cloud.trotter.feed.contract.Feed
-import cloud.trotter.log.gig.core.data.settings.AppPreferencesRepository
 import cloud.trotter.log.gig.core.datastore.feed.RulesFeedDataSource
+import cloud.trotter.log.gig.core.datastore.settings.AppPreferencesDataSource
 import cloud.trotter.log.gig.core.network.feed.FeedClient
 import cloud.trotter.log.gig.core.network.feed.FeedGate
 import cloud.trotter.log.gig.core.network.feed.FeedReply
@@ -15,7 +15,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -25,8 +24,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
-import org.mockito.kotlin.doReturn
-import org.mockito.kotlin.mock
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneId
@@ -50,6 +47,7 @@ class RulesFeedSwitchTest {
     }
 
     private val enabledKey = booleanPreferencesKey("rules_updates_enabled")
+    private val autoKey = booleanPreferencesKey("is_gas_price_auto")
     private val MINUTE = 60_000L
     private val lastCheckKey = longPreferencesKey("last_foreground_check_at")
 
@@ -57,7 +55,7 @@ class RulesFeedSwitchTest {
         RulesFeedSwitch(RulesFeedDataSource(store), scope)
 
     private fun policy(switch: RulesFeedSwitch) =
-        AppFeedPolicy(mock<AppPreferencesRepository> { on { isGasPriceAuto } doReturn MutableStateFlow(true) }, switch, scope)
+        AppFeedPolicy(FuelFeedSwitch(AppPreferencesDataSource(MemoryPreferences(preferencesOf(autoKey to true))), scope), switch)
 
     @Test fun `off by default, and read once from the store`() = runBlocking {
         assertFalse(RulesFeedSwitch(RulesFeedDataSource(MemoryPreferences()), scope).current())

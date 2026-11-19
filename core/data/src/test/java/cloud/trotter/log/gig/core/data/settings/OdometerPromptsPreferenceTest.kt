@@ -3,6 +3,7 @@ package cloud.trotter.log.gig.core.data.settings
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import cloud.trotter.log.gig.core.datastore.settings.AppPreferencesDataSource
 import cloud.trotter.log.gig.core.datastore.settings.SimplePrefs
+import cloud.trotter.log.gig.core.data.feed.FuelFeedSwitch
 import cloud.trotter.log.gig.core.data.vehicle.GarageRepository
 import cloud.trotter.log.gig.core.datastore.vehicle.VehicleDataSource
 import kotlinx.coroutines.flow.first
@@ -19,7 +20,7 @@ class OdometerPromptsPreferenceTest {
             produceFile = { tmp.newFile("app.preferences_pb") }))
         val repo = AppPreferencesRepository(source, GarageRepository(VehicleDataSource(
             PreferenceDataStoreFactory.create(scope = backgroundScope,
-                produceFile = { tmp.newFile("vehicles.preferences_pb") }))))
+                produceFile = { tmp.newFile("vehicles.preferences_pb") }))), FuelFeedSwitch(source, backgroundScope))
         assertTrue(repo.odometerPrompts.first())
         repo.setOdometerPrompts(false)
         assertFalse(source.read(SimplePrefs.odometerPrompts).first())

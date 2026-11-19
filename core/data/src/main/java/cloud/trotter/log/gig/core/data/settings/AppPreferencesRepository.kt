@@ -5,6 +5,7 @@ import cloud.trotter.log.gig.core.datastore.settings.StoredGasPrice
 import cloud.trotter.log.gig.core.datastore.settings.SaveCapture
 import cloud.trotter.log.gig.core.datastore.settings.AppPreferencesDataSource
 import cloud.trotter.log.gig.core.datastore.settings.SimplePrefs
+import cloud.trotter.log.gig.core.data.feed.FuelFeedSwitch
 import cloud.trotter.log.gig.core.data.vehicle.GarageRepository
 import cloud.trotter.log.gig.domain.analytics.AnalyticsWindowSelection
 import cloud.trotter.log.gig.domain.analytics.WindowGranularity
@@ -32,6 +33,11 @@ class AppPreferencesRepository @Inject constructor(
      * on every read, and vehicle edits use the same source; the garage never reads settings.
      */
     private val garageRepository: GarageRepository,
+    /**
+     * Every write of the auto gas price flag goes through it, so the fuel feed closes the instant a write may turn auto
+     * off, before the store write lands. A write of `is_gas_price_auto` that bypassed this class would skip it.
+     */
+    private val fuelSwitch: FuelFeedSwitch,
 ) {
     // ============================================================================================
     // STREAMS
@@ -259,14 +265,16 @@ class AppPreferencesRepository @Inject constructor(
      * frozen cost basis.
      */
     suspend fun updateGasPriceManual(price: Float) = updateGasPriceManual(price, null)
-    suspend fun updateGasPriceManual(price: Float, capture: SaveCapture<StoredGasPrice>?) = dataSource.updateGasPriceManual(price, capture)
+    suspend fun updateGasPriceManual(price: Float, capture: SaveCapture<StoredGasPrice>?) =
+        fuelSwitch.write(mayClose = true) { dataSource.updateGasPriceManual(price, capture) }
 
     /**
      * "Resume auto" (#722) — re-enables auto (EIA) fetching AND applies a freshly-fetched price in
      * one atomic write; the bubble's MANUAL-mode "Resume auto" chip routes here. The inverse of
      * [updateGasPriceManual]. Frozen-economics invariant (#314): affects only FUTURE evaluations.
      */
-    suspend fun updateGasPriceAuto(price: Float, fetchedAtMillis: Long) = dataSource.updateGasPriceAuto(price, fetchedAtMillis)
+    suspend fun updateGasPriceAuto(price: Float, fetchedAtMillis: Long) =
+        fuelSwitch.write(mayClose = false) { dataSource.updateGasPriceAuto(price, fetchedAtMillis) }
     // Deferred saves commit their captured garage profile once, then mirror legacy preferences.
     suspend fun mirrorFuelType(type: FuelType) = dataSource.updateFuelType(type.name)
     suspend fun mirrorVehicleClass(type: VehicleClass) = dataSource.updateVehicleClass(type.name)
@@ -297,7 +305,9 @@ class AppPreferencesRepository @Inject constructor(
     suspend fun mirrorEconomySettings(
         year: String, make: String, model: String, trim: String,
         mpg: Float, isGasAuto: Boolean, price: Float, gasPriceFetchedAt: Long?,
-    ) = dataSource.updateEconomySettings(year, make, model, trim, mpg, isGasAuto, price, gasPriceFetchedAt)
+    ) = fuelSwitch.write(mayClose = !isGasAuto) {
+        dataSource.updateEconomySettings(year, make, model, trim, mpg, isGasAuto, price, gasPriceFetchedAt)
+    }
 
     suspend fun updatePhoneTotal(value: Double) = updatePhoneTotal(value, null)
     suspend fun updatePhoneTotal(value: Double, capture: SaveCapture<StoredPreference<Double>>?) = dataSource.updatePhoneTotal(value, capture)
@@ -308,7 +318,8 @@ class AppPreferencesRepository @Inject constructor(
     suspend fun updateElectricityPrice(value: Double) = updateElectricityPrice(value, null)
     suspend fun updateElectricityPrice(value: Double, capture: SaveCapture<StoredPreference<Double>>?) = dataSource.updateElectricityPrice(value, capture)
     suspend fun setGasPriceAuto(value: Boolean) = setGasPriceAuto(value, null)
-    suspend fun setGasPriceAuto(value: Boolean, capture: SaveCapture<StoredPreference<Boolean>>?) = dataSource.setGasPriceAuto(value, capture)
+    suspend fun setGasPriceAuto(value: Boolean, capture: SaveCapture<StoredPreference<Boolean>>?) =
+        fuelSwitch.write(mayClose = !value) { dataSource.setGasPriceAuto(value, capture) }
     suspend fun setTimeConstantOverride(field: EconomyField, value: Double?) = setTimeConstantOverride(field, value, null)
     suspend fun setTimeConstantOverride(field: EconomyField, value: Double?, capture: SaveCapture<StoredPreference<Double>>?) = dataSource.setTimeConstantOverride(field, value, capture)
 
@@ -316,8 +327,10 @@ class AppPreferencesRepository @Inject constructor(
     suspend fun restorePhoneTotal(previous: StoredPreference<Double>, expected: StoredPreference<Double>, current: () -> Boolean = { true }) = dataSource.restorePhoneTotal(previous, expected, current)
     suspend fun restorePhoneLines(previous: StoredPreference<Int>, expected: StoredPreference<Int>, current: () -> Boolean = { true }) = dataSource.restorePhoneLines(previous, expected, current)
     suspend fun restorePhoneShare(previous: StoredPreference<Double>, expected: StoredPreference<Double>, current: () -> Boolean = { true }) = dataSource.restorePhoneShare(previous, expected, current)
-    suspend fun restoreGasPriceAuto(previous: StoredPreference<Boolean>, expected: StoredPreference<Boolean>, current: () -> Boolean = { true }) = dataSource.restoreGasPriceAuto(previous, expected, current)
-    suspend fun restoreGasPriceManual(previous: StoredGasPrice, expected: StoredGasPrice, current: () -> Boolean = { true }) = dataSource.restoreGasPriceManual(previous, expected, current)
+    suspend fun restoreGasPriceAuto(previous: StoredPreference<Boolean>, expected: StoredPreference<Boolean>, current: () -> Boolean = { true }) =
+        fuelSwitch.write(mayClose = previous.value != true) { dataSource.restoreGasPriceAuto(previous, expected, current) }
+    suspend fun restoreGasPriceManual(previous: StoredGasPrice, expected: StoredGasPrice, current: () -> Boolean = { true }) =
+        fuelSwitch.write(mayClose = previous.auto.value != true) { dataSource.restoreGasPriceManual(previous, expected, current) }
     suspend fun restoreTimeConstantOverride(field: EconomyField, previous: StoredPreference<Double>, expected: StoredPreference<Double>, current: () -> Boolean = { true }) = dataSource.restoreTimeConstantOverride(field, previous, expected, current)
 
     /** Legacy app_prefs writes only; deferred editors own their targeted garage write. */
@@ -372,11 +385,12 @@ class AppPreferencesRepository @Inject constructor(
         }
     }
 
-    suspend fun resetSharedEconomyDefaults() = dataSource.resetSharedEconomyDefaults()
+    /** Removes the auto gas price flag among the rest, so auto is off afterwards. */
+    suspend fun resetSharedEconomyDefaults() = fuelSwitch.write(mayClose = true) { dataSource.resetSharedEconomyDefaults() }
 
     suspend fun clearPreferences() {
         Timber.tag(TAG).w("Clearing App Preferences")
-        dataSource.clear()
+        fuelSwitch.write(mayClose = true) { dataSource.clear() }
     }
 
     private companion object {

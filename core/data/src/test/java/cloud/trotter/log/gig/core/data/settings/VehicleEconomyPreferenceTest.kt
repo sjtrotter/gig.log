@@ -1,6 +1,7 @@
 package cloud.trotter.log.gig.core.data.settings
 
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import cloud.trotter.log.gig.core.data.feed.FuelFeedSwitch
 import cloud.trotter.log.gig.core.data.vehicle.Garage
 import cloud.trotter.log.gig.core.data.vehicle.GarageRepository
 import cloud.trotter.log.gig.core.datastore.settings.AppPreferencesDataSource
@@ -34,7 +35,7 @@ class VehicleEconomyPreferenceTest {
             produceFile = { tmp.newFile("typed-prefs.preferences_pb") }))
         val garage = GarageRepository(VehicleDataSource(PreferenceDataStoreFactory.create(scope = backgroundScope,
             produceFile = { tmp.newFile("typed-garage.preferences_pb") })))
-        val repo = AppPreferencesRepository(source, garage)
+        val repo = AppPreferencesRepository(source, garage, FuelFeedSwitch(source, backgroundScope))
         val sedan = garage.addVehicle("Sedan", 1, GasCar())
         val before = 3.5 / 30 + 800.0 / 40_000 + 60.0 / 5_000 + 400.0 / 40_000 + 150.0 / 30_000 +
             500.0 / 12_000 + 28_000.0 / 200_000 + 80 * .30 * 12 / 10_000
@@ -63,7 +64,7 @@ class VehicleEconomyPreferenceTest {
             produceFile = { tmp.newFile("cost-only-garage.preferences_pb") }))
         source.updateTireCost(0.0, 45_000.0)
         vehicleSource.save("unreadable", "old")
-        val repo = AppPreferencesRepository(source, GarageRepository(vehicleSource))
+        val repo = AppPreferencesRepository(source, GarageRepository(vehicleSource), FuelFeedSwitch(source, backgroundScope))
         val economy = repo.userEconomy.first()
         assertEquals(0.0, economy.tireSetCost, 0.0)
         assertEquals(45_000.0, economy.tireLifetimeMi, 0.0)
@@ -77,7 +78,7 @@ class VehicleEconomyPreferenceTest {
             produceFile = { tmp.newFile("mirror-prefs.preferences_pb") }))
         val garage = GarageRepository(VehicleDataSource(PreferenceDataStoreFactory.create(scope = backgroundScope,
             produceFile = { tmp.newFile("mirror-garage.preferences_pb") })))
-        val repo = AppPreferencesRepository(source, garage)
+        val repo = AppPreferencesRepository(source, garage, FuelFeedSwitch(source, backgroundScope))
         val first = garage.addVehicle("First", 1L, LegacyProfile(make = "Honda").toTyped())
         val second = garage.addVehicle("Second", 2L, LegacyProfile(make = "Toyota").toTyped())
         garage.selectVehicle(first.id)
@@ -122,7 +123,7 @@ class VehicleEconomyPreferenceTest {
             produceFile = { tmp.newFile("shared-prefs.preferences_pb") }))
         val garage = GarageRepository(VehicleDataSource(PreferenceDataStoreFactory.create(scope = backgroundScope,
             produceFile = { tmp.newFile("shared-garage.preferences_pb") })))
-        AppPreferencesRepository(source, garage).mirrorUserSetEconomy(EconomyDraft(
+        AppPreferencesRepository(source, garage, FuelFeedSwitch(source, backgroundScope)).mirrorUserSetEconomy(EconomyDraft(
             shared = SharedEconomy(avgMinutesPerMile = 3.0), userSetFields = setOf(EconomyField.AVG_MIN_PER_MILE),
         ))
         assertTrue(garage.garage.first().vehicles.isEmpty())
@@ -133,7 +134,7 @@ class VehicleEconomyPreferenceTest {
             produceFile = { tmp.newFile("phone.preferences_pb") }))
         val garage = GarageRepository(VehicleDataSource(PreferenceDataStoreFactory.create(scope = backgroundScope,
             produceFile = { tmp.newFile("phone-garage.preferences_pb") })))
-        val repo = AppPreferencesRepository(source, garage)
+        val repo = AppPreferencesRepository(source, garage, FuelFeedSwitch(source, backgroundScope))
         repo.updatePhoneTotal(125.0)
         assertEquals(setOf(EconomyField.PHONE_PLAN_TOTAL.name), source.userSetEconomyFields.first())
         assertNull(source.phonePlanLines.first())
@@ -148,7 +149,7 @@ class VehicleEconomyPreferenceTest {
             produceFile = { tmp.newFile("reset.preferences_pb") }))
         val garage = GarageRepository(VehicleDataSource(PreferenceDataStoreFactory.create(scope = backgroundScope,
             produceFile = { tmp.newFile("reset-garage.preferences_pb") })))
-        val repo = AppPreferencesRepository(source, garage)
+        val repo = AppPreferencesRepository(source, garage, FuelFeedSwitch(source, backgroundScope))
         source.updateOilCost(72.0, 5000.25)
         garage.addVehicle("EV", 1, ElectricCar(kwhPer100Mi = 42.0, wear = WearProfile(tireSetCost = 999.0)))
         val before = garage.garage.first()
@@ -169,7 +170,7 @@ class VehicleEconomyPreferenceTest {
             produceFile = { tmp.newFile("undo.preferences_pb") }))
         val garage = GarageRepository(VehicleDataSource(PreferenceDataStoreFactory.create(scope = backgroundScope,
             produceFile = { tmp.newFile("undo-garage.preferences_pb") })))
-        val repo = AppPreferencesRepository(source, garage)
+        val repo = AppPreferencesRepository(source, garage, FuelFeedSwitch(source, backgroundScope))
         repo.updatePhoneTotal(125.0)
         repo.updatePhoneShare(45.0)
         val absent = repo.updatePhoneLines(3)

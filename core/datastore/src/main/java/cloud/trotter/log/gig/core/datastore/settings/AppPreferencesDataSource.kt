@@ -65,6 +65,8 @@ class AppPreferencesDataSource @Inject constructor(
         val VEHICLE_MODEL = stringPreferencesKey("vehicle_model")
         val VEHICLE_TRIM = stringPreferencesKey("vehicle_trim")
         val ESTIMATED_MPG = floatPreferencesKey("estimated_mpg")
+        // The fuel feed's consent. Every method here that writes it is called only through AppPreferencesRepository,
+        // which runs the write through FuelFeedSwitch so the feed closes before the write lands.
         val IS_GAS_PRICE_AUTO = booleanPreferencesKey("is_gas_price_auto")
         val GAS_PRICE = floatPreferencesKey("gas_price")
         // When a lookup returned the stored GAS_PRICE (epoch ms). A typed price leaves it alone: auto off marks it.

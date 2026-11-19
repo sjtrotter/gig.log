@@ -15,6 +15,7 @@ import cloud.trotter.log.gig.core.data.analytics.AnalyticsProjector
 import cloud.trotter.log.gig.core.data.analytics.TimeConstantRepository
 import cloud.trotter.log.gig.core.data.capability.RuleCapabilityRepository
 import cloud.trotter.log.gig.core.data.event.AppEventRepo
+import cloud.trotter.log.gig.core.data.feed.FuelFeedSwitch
 import cloud.trotter.log.gig.core.data.location.OdometerRepository
 import cloud.trotter.log.gig.core.data.settings.AppPreferencesRepository
 import cloud.trotter.log.gig.core.data.strategy.StrategyRepository
@@ -168,9 +169,11 @@ class E2ESessionReplay(
     val projector: AnalyticsProjector
 
     // ── Preferences (real data sources + repositories over memory stores) ──────────────────────
+    private val appPreferencesSource = AppPreferencesDataSource(durable?.app ?: ReplayEdges.MemoryPreferences())
     val appPreferences = AppPreferencesRepository(
-        AppPreferencesDataSource(durable?.app ?: ReplayEdges.MemoryPreferences()),
+        appPreferencesSource,
         GarageRepository(VehicleDataSource(ReplayEdges.MemoryPreferences())),
+        FuelFeedSwitch(appPreferencesSource, appScope),
     )
     val strategy = StrategyRepository(
         StrategyDataSource(durable?.strategy ?: ReplayEdges.MemoryPreferences()), appPreferences, dispatcher,
