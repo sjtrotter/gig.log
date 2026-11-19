@@ -2,7 +2,9 @@ package cloud.trotter.log.gig.core.data.wipe
 
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.emptyPreferences
+import androidx.datastore.preferences.core.preferencesOf
 import cloud.trotter.census.contract.auth.Bearer
 import cloud.trotter.census.contract.auth.InstallSecret
 import cloud.trotter.log.gig.core.data.census.CensusCredentialStore
@@ -11,9 +13,11 @@ import cloud.trotter.log.gig.core.data.census.CensusSpool
 import cloud.trotter.log.gig.core.data.census.CensusUploadLock
 import cloud.trotter.log.gig.core.data.census.KeystoreSealer
 import cloud.trotter.log.gig.core.data.census.PersistentHealthSink
+import cloud.trotter.log.gig.core.data.feed.FuelFeedSwitch
 import cloud.trotter.log.gig.core.data.feed.RulesFeedSwitch
 import cloud.trotter.log.gig.core.data.settings.DevSettingsRepository
 import cloud.trotter.log.gig.core.datastore.feed.RulesFeedDataSource
+import cloud.trotter.log.gig.core.datastore.settings.AppPreferencesDataSource
 import cloud.trotter.log.gig.core.datastore.settings.DevSettingsDataSource
 import cloud.trotter.log.gig.core.network.census.CensusApiFactory
 import cloud.trotter.log.gig.core.network.census.CensusSentObserver
@@ -65,9 +69,15 @@ class PhoneWipeTest {
     @get:Rule val tmp = TemporaryFolder()
 
     private val rulesFeed = RulesFeedSwitch(RulesFeedDataSource(MemoryPreferences()), CoroutineScope(Dispatchers.Unconfined))
+    private val fuelFeed = FuelFeedSwitch(
+        AppPreferencesDataSource(MemoryPreferences(preferencesOf(booleanPreferencesKey("is_gas_price_auto") to true))),
+        CoroutineScope(Dispatchers.Unconfined),
+    )
+    /** The fuel switch as Android's clear found it. */
+    private var fuelOpenAtClear: Boolean? = null
 
-    private class MemoryPreferences : DataStore<Preferences> {
-        override val data = MutableStateFlow(emptyPreferences())
+    private class MemoryPreferences(initial: Preferences = emptyPreferences()) : DataStore<Preferences> {
+        override val data = MutableStateFlow(initial)
         override suspend fun updateData(transform: suspend (Preferences) -> Preferences): Preferences =
             transform(data.value).also { data.value = it }
     }
@@ -120,6 +130,7 @@ class PhoneWipeTest {
     }
     private var clearStarts = true
     private val clearer = AppStorageClearer {
+        fuelOpenAtClear = fuelFeed.enabled.value
         events += "clear locked=${lock.mutex.isLocked} committed=${intentFile.isFile}"
         clearStarts
     }
@@ -140,7 +151,7 @@ class PhoneWipeTest {
             },
             backgroundScope, "test",
         )
-        return PhoneWipe(credentials, deletion, preferences, lock, sealer, clearer, intent(), backgroundScope, rulesFeed)
+        return PhoneWipe(credentials, deletion, preferences, lock, sealer, clearer, intent(), backgroundScope, rulesFeed, fuelFeed)
     }
 
     /** The wipe runs on the background (application) scope, which advanceUntilIdle does not wait for. */
@@ -166,6 +177,15 @@ class PhoneWipeTest {
         assertEquals(wiped, events)
         assertEquals("no census client is created", 0, clients)
         assertEquals(WipeFlow.State.Done, wipe.progress.value)
+    }
+
+    @Test fun `the clear closes the fuel feed's switch before Android's clear`() = runTest {
+        assertTrue(fuelFeed.enabled.value)
+        confirmed()
+        settle()
+
+        assertEquals(wiped, events)
+        assertEquals(false, fuelOpenAtClear)
     }
 
     @Test fun `Cancel on the confirmation ends the flow with nothing held`() = runTest {

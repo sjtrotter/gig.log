@@ -188,7 +188,7 @@ class FeedRepository<T> internal constructor(
             is FeedResult.Ok -> built.value
             is FeedResult.Refused -> return fail(source, FeedError.Refused(built.reason))
         }
-        // Today's pin file holds no gig.log key, so nothing is requested from a source this build cannot verify.
+        // Nothing is requested from a source this build cannot verify (a feed with no pinned gig.log key).
         if (!trust.trusts(source.id, feed)) return fail(source, FeedError.Refused(FeedRefusal.NoTrustedEpoch))
 
         val envelope = when (val reply = client.envelope(source, feed, current.etag, gate)) {

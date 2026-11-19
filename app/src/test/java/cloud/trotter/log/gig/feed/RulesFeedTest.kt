@@ -21,10 +21,11 @@ import cloud.trotter.log.gig.core.data.feed.AppFeedPolicy
 import cloud.trotter.log.gig.core.data.feed.FeedError
 import cloud.trotter.log.gig.core.data.feed.FeedRepository
 import cloud.trotter.log.gig.core.data.feed.RulesCheckOutcome
+import cloud.trotter.log.gig.core.data.feed.FuelFeedSwitch
 import cloud.trotter.log.gig.core.data.feed.RulesFeedSwitch
-import cloud.trotter.log.gig.core.data.settings.AppPreferencesRepository
 import cloud.trotter.log.gig.core.datastore.capability.RuleCapabilityDataSource
 import cloud.trotter.log.gig.core.datastore.feed.RulesFeedDataSource
+import cloud.trotter.log.gig.core.datastore.settings.AppPreferencesDataSource
 import cloud.trotter.log.gig.core.network.feed.FeedClient
 import cloud.trotter.log.gig.core.pipeline.accessibility.input.AccEvent
 import cloud.trotter.log.gig.core.pipeline.accessibility.input.PlatformForegrounds
@@ -87,9 +88,7 @@ class RulesFeedTest {
 
     private val switchStore = MemoryPreferences()
     private val switch = RulesFeedSwitch(RulesFeedDataSource(switchStore), scope, clock, ElapsedRealtime { now })
-    private val policy = AppFeedPolicy(
-        mock<AppPreferencesRepository> { on { isGasPriceAuto } doReturn MutableStateFlow(false) }, switch, scope,
-    )
+    private val policy = AppFeedPolicy(FuelFeedSwitch(AppPreferencesDataSource(MemoryPreferences()), scope), switch)
     private val grants = RuleCapabilityRepository(RuleCapabilityDataSource(MemoryPreferences()), scope, "test")
 
     @After fun tearDown() {

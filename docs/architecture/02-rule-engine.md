@@ -701,7 +701,8 @@ seam, the worker thread, visits and the health report are in `01-sensor-pipeline
 One layer fetches, keeps and swaps every signed feed (fuel, constants, rules): `FeedClient` in `:core:network`
 (`network.feed`) and `FeedRepository` in `:core:data` (`data.feed`). Every check of the bytes is `feed-contract`'s;
 this layer re-implements none. Its first consumer is the rules client (#640, below); fuel is #1566, constants #695.
-gig.log's pin file holds no key yet (#641 pins the rules key), so this build sends no feed request.
+gig.log's pin file holds the fuel key and no rules key yet (#641 pins it), and nothing calls the fuel feed's
+`refresh()` yet, so this build sends no feed request.
 
 - **Transport.** `FeedClient` GETs `<feedsUrl><feed>/envelope.json`, then each payload at `<feed>/<sha256>.json`,
   built from the signed hash under the envelope's own feed directory (a non-hex name is refused before any request).
@@ -718,16 +719,19 @@ gig.log's pin file holds no key yet (#641 pins the rules key), so this build sen
   read bounded (`FeedLimits.readBounded`). The feed client has no HTTP logging in any build (`ClientProfile.Feed`),
   since a request line carries the source's URL.
 - **Consent.** `FeedPolicy` gives each feed's switch and source as `StateFlow`s (`AppFeedPolicy`: fuel follows
-  `isGasPriceAuto`, started eagerly and off until read; constants and rules are off until their own switches exist;
-  every feed reads gig.log's site until #1567). One `RefreshGate` per refresh reads their current values, so the
+  `FuelFeedSwitch`, rules follow `RulesFeedSwitch`, each off until its stored value is read; constants stay off until
+  their own switch exists; every feed reads gig.log's site until #1567). One `RefreshGate` per refresh reads their current values, so the
   check before every request (retries included), the one inside every network exchange, and the ones before staging,
   committing and activating never disagree and never wait for a watcher. A watcher cancels the work as soon as the switch turns off or the source changes.
-  Residual (open, #1566): the fuel switch's `StateFlow` mirrors DataStore through a collector, so for the moment
-  between the stored switch turning off and that collector running, both checks still read on and one request can
-  start. #1566 closes it at the owner: the code that saves the fuel switch also sets the in-memory value at once.
   Each feed has its own switch: the fuel switch never gates rules or constants, and the rules switch (#640, below)
-  gates the rules feed only. The rules switch has no such window: its in-memory value turns off at the instant it is
-  saved. A `OneShotGrant` (an explicit user act, such as "Resume auto") is one call's parameter, bound to its feed and source
+  gates the rules feed only. Both turn off at the instant the dasher turns them off, before the store write lands; neither
+  mirrors the store through a collector: each is read once at start, and a choice made before that read wins over it.
+  The fuel switch, `FuelFeedSwitch`, keeps "Auto gas price" as its stored value (`is_gas_price_auto`; manual mode is
+  that flag off). Every write of that key goes through `AppPreferencesRepository`, which routes it through
+  `FuelFeedSwitch.write`: a write that may turn auto off closes the switch before anything suspends, and the switch
+  opens again only once the stored flag reads on and no later write or close came in. The phone wipe closes both
+  switches just before Android's clear. (History: until #1566 the fuel switch was a `StateFlow` collected from
+  DataStore, so between the stored flag turning off and that collector running one request could still start.) A `OneShotGrant` (an explicit user act, such as "Resume auto") is one call's parameter, bound to its feed and source
   id. It is dead from the moment the coroutine that minted it starts cancelling: the refresh holds a child job of
   that owner, which is cancelled at the onset, before the owner finishes. One call spends it, so a cancelled act,
   another feed, another source or a second use is refused before any request. It is never stored, so a background

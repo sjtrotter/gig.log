@@ -2,6 +2,7 @@ package cloud.trotter.log.gig.core.data.strategy
 
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import cloud.trotter.log.gig.core.data.analytics.TimeConstantRepository
+import cloud.trotter.log.gig.core.data.feed.FuelFeedSwitch
 import cloud.trotter.log.gig.core.data.settings.AppPreferencesRepository
 import cloud.trotter.log.gig.core.data.vehicle.GarageRepository
 import cloud.trotter.log.gig.core.datastore.settings.AppPreferencesDataSource
@@ -50,7 +51,8 @@ class StrategyRepositoryTimeConstantsTest {
         val prefsStore = PreferenceDataStoreFactory.create(scope = backgroundScope,
             produceFile = { tmp.newFile("prefs.preferences_pb") })
         val source = StrategyDataSource(strategyStore)
-        val prefs = AppPreferencesRepository(AppPreferencesDataSource(prefsStore), garage())
+        val prefsSource = AppPreferencesDataSource(prefsStore)
+        val prefs = AppPreferencesRepository(prefsSource, garage(), FuelFeedSwitch(prefsSource, backgroundScope))
         source.replaceTimeConstants(mapOf(platforms[0] to learned))
         val snapshots = MutableSharedFlow<Map<Platform, LearnedTimeConstants>>(extraBufferCapacity = 8)
         val reader = mock<TimeConstantRepository> { on { learnedTimeConstants } doReturn snapshots }
@@ -87,7 +89,7 @@ class StrategyRepositoryTimeConstantsTest {
         val ds = PreferenceDataStoreFactory.create(scope = backgroundScope,
             produceFile = { tmp.newFile("independent.preferences_pb") })
         val source = AppPreferencesDataSource(ds)
-        val repo = AppPreferencesRepository(source, garage())
+        val repo = AppPreferencesRepository(source, garage(), FuelFeedSwitch(source, backgroundScope))
         repo.mirrorUserSetEconomy(EconomyDraft(shared = SharedEconomy(avgMinutesPerMile = 3.0),
             userSetFields = setOf(EconomyField.AVG_MIN_PER_MILE)))
         assertEquals(setOf(EconomyField.AVG_MIN_PER_MILE.name), source.userSetEconomyFields.first())
@@ -102,8 +104,9 @@ class StrategyRepositoryTimeConstantsTest {
     @Test fun `collector retries transient reads but preserves cancellation`() = runTest {
         val source = StrategyDataSource(PreferenceDataStoreFactory.create(scope = backgroundScope,
             produceFile = { tmp.newFile("retry.preferences_pb") }))
-        val prefs = AppPreferencesRepository(AppPreferencesDataSource(PreferenceDataStoreFactory.create(scope = backgroundScope,
-            produceFile = { tmp.newFile("retry-prefs.preferences_pb") })), garage())
+        val prefsSource = AppPreferencesDataSource(PreferenceDataStoreFactory.create(scope = backgroundScope,
+            produceFile = { tmp.newFile("retry-prefs.preferences_pb") }))
+        val prefs = AppPreferencesRepository(prefsSource, garage(), FuelFeedSwitch(prefsSource, backgroundScope))
         var attempts = 0
         val values = mapOf(platforms[0] to learned)
         val transient = flow {

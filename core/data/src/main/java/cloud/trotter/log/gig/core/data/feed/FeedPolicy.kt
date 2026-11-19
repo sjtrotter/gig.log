@@ -1,17 +1,12 @@
 package cloud.trotter.log.gig.core.data.feed
 
 import cloud.trotter.feed.contract.Feed
-import cloud.trotter.log.gig.core.data.settings.AppPreferencesRepository
 import cloud.trotter.log.gig.core.network.feed.FeedSource
-import cloud.trotter.log.gig.domain.di.ApplicationScope
 import kotlinx.coroutines.CompletableJob
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.stateIn
 import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -27,24 +22,23 @@ interface FeedPolicy {
 }
 
 /**
- * The app's switches, one per feed. Fuel uses the existing auto gas price switch; rules use "Keep recognition rules up
- * to date" ([RulesFeedSwitch], #640), whose value turns off at the instant it is saved. Constants stay off until their
- * own switch exists (#695, default off). Every feed reads gig.log's site until the custom source setting (#1567).
+ * The app's switches, one per feed, each gating its own feed only. Fuel uses "Auto gas price" ([FuelFeedSwitch]) and
+ * rules use "Keep recognition rules up to date" ([RulesFeedSwitch], #640); each turns off at the instant the dasher
+ * turns it off, before the store write lands. Constants stay off until their own switch exists (#695, default off).
+ * Every feed reads gig.log's site until the custom source setting (#1567).
  */
 @Singleton
 class AppFeedPolicy @Inject constructor(
-    preferences: AppPreferencesRepository,
+    fuel: FuelFeedSwitch,
     rules: RulesFeedSwitch,
-    @ApplicationScope scope: CoroutineScope,
 ) : FeedPolicy {
-    /** Off until the stored switch is read (fail closed). */
-    private val fuel: StateFlow<Boolean> = preferences.isGasPriceAuto.stateIn(scope, SharingStarted.Eagerly, false)
+    private val fuelOn: StateFlow<Boolean> = fuel.enabled
     private val rulesOn: StateFlow<Boolean> = rules.enabled
     private val off: StateFlow<Boolean> = MutableStateFlow(false)
     private val gigLog: StateFlow<FeedSource> = MutableStateFlow(FeedSource.GigLog)
 
     override fun enabled(feed: Feed): StateFlow<Boolean> = when (feed) {
-        Feed.FUEL -> fuel
+        Feed.FUEL -> fuelOn
         Feed.RULES -> rulesOn
         Feed.CONSTANTS -> off
     }

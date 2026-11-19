@@ -14,12 +14,14 @@ import cloud.trotter.log.gig.core.data.census.CensusSpool
 import cloud.trotter.log.gig.core.data.census.CensusUploadLock
 import cloud.trotter.log.gig.core.data.census.KeystoreSealer
 import cloud.trotter.log.gig.core.data.census.PersistentHealthSink
+import cloud.trotter.log.gig.core.data.feed.FuelFeedSwitch
 import cloud.trotter.log.gig.core.data.feed.RulesFeedSwitch
 import cloud.trotter.log.gig.core.data.settings.DevSettingsRepository
 import cloud.trotter.log.gig.core.data.wipe.AppStorageClearer
 import cloud.trotter.log.gig.core.data.wipe.PhoneWipe
 import cloud.trotter.log.gig.core.data.wipe.WipeIntent
 import cloud.trotter.log.gig.core.datastore.feed.RulesFeedDataSource
+import cloud.trotter.log.gig.core.datastore.settings.AppPreferencesDataSource
 import cloud.trotter.log.gig.core.datastore.settings.DevSettingsDataSource
 import cloud.trotter.log.gig.core.designsystem.theme.GigLogTheme
 import cloud.trotter.log.gig.core.network.census.CensusApiFactory
@@ -134,7 +136,8 @@ class WipePhoneDialogTest {
         whenever(credentials.held).thenReturn(flowOf(enrolled))
         runBlocking { whenever(credentials.current()).thenReturn(ENROLLED.takeIf { enrolled }) }
         val wipe = PhoneWipe(credentials, deletion, repo, lock, sealer, clearer, WipeIntent(context), scope,
-            RulesFeedSwitch(RulesFeedDataSource(MemoryPreferences()), scope))
+            RulesFeedSwitch(RulesFeedDataSource(MemoryPreferences()), scope),
+            FuelFeedSwitch(AppPreferencesDataSource(MemoryPreferences()), scope))
         beforeShow(wipe)
         val vm = WipePhoneViewModel(wipe)
         compose.setContent {

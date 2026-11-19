@@ -4,6 +4,7 @@ import cloud.trotter.log.gig.core.data.census.CensusCredentialStore
 import cloud.trotter.log.gig.core.data.census.CensusDataDeletion
 import cloud.trotter.log.gig.core.data.census.CensusUploadLock
 import cloud.trotter.log.gig.core.data.census.KeystoreSealer
+import cloud.trotter.log.gig.core.data.feed.FuelFeedSwitch
 import cloud.trotter.log.gig.core.data.feed.RulesFeedSwitch
 import cloud.trotter.log.gig.core.data.settings.DevSettingsRepository
 import cloud.trotter.log.gig.core.data.wipe.WipeFlow.Effect
@@ -60,6 +61,7 @@ class PhoneWipe @Inject constructor(
     private val intent: WipeIntent,
     @param:ApplicationScope private val scope: CoroutineScope,
     private val rulesFeed: RulesFeedSwitch,
+    private val fuelFeed: FuelFeedSwitch,
 ) {
     private val state = MutableStateFlow<State?>(null)
 
@@ -263,8 +265,9 @@ class PhoneWipe @Inject constructor(
     /** Holding the lock: deletes the census key, then asks Android to clear the app's storage. */
     private fun clearStorage(): Boolean {
         Timber.tag(TAG).i("phone wipe: clearing app storage")
-        // #640: no rules feed request starts between here and the clear.
+        // No rules (#640) or fuel (#1566) feed request starts between here and the clear.
         rulesFeed.forgetNow()
+        fuelFeed.closeNow()
         try {
             sealer.reset()
         } catch (_: Exception) {
