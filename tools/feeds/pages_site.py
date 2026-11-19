@@ -47,6 +47,7 @@ DEPLOY_STEP = "Deploy to Pages"
 TRUSTED_EVENTS = {"push", "schedule", "workflow_dispatch"}
 RETENTION_DAYS = 90
 MAX_RUN_PAGES = 10
+MAX_JOB_PAGES = 20
 VERIFY_SECONDS = 12 * 60
 VERIFY_INTERVAL = 30
 SNAPSHOT_FORMAT = 1
@@ -157,7 +158,14 @@ def trusted_run(run: dict) -> bool:
 def deployments(gh, repo: str, run_id: int) -> list[Deployment]:
     """Every attempt's successful deploy step in one run. The deploy job's name carries the snapshot it deployed
     (`deploy feeds-site-<attempt>`); a job named plainly `deploy` predates the snapshot."""
-    jobs = (gh.get(f"/repos/{repo}/actions/runs/{run_id}/jobs?filter=all&per_page=100") or {}).get("jobs") or []
+    jobs = []
+    for page in range(1, MAX_JOB_PAGES + 1):
+        batch = (gh.get(f"/repos/{repo}/actions/runs/{run_id}/jobs?filter=all&per_page=100&page={page}") or {}).get("jobs") or []
+        jobs += batch
+        if len(batch) < 100:
+            break
+    else:
+        raise FeedError(f"run {run_id}: more than {MAX_JOB_PAGES * 100} jobs; a truncated history is not an absent deploy")
     out = []
     for job in jobs:
         name = job.get("name") or ""

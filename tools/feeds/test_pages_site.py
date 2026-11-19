@@ -245,10 +245,12 @@ class FakeGitHub:
             return {"workflow_runs": self.runs[(page - 1) * 100:page * 100]}
         if "/jobs?filter=all" in path:
             run_id = int(path.split("/runs/")[1].split("/")[0])
-            return {"jobs": [{"name": "build", "run_attempt": a, "steps": []} for a, *_ in self.jobs.get(run_id, [])]
+            page = int(path.rsplit("page=", 1)[1])
+            jobs = ([{"name": "build", "run_attempt": a, "steps": []} for a, *_ in self.jobs.get(run_id, [])]
                     + [{"name": name, "run_attempt": a,
                         "steps": [{"name": "Deploy to Pages", "conclusion": c, "completed_at": at(h)}]}
-                       for a, name, c, h in self.jobs.get(run_id, [])]}
+                       for a, name, c, h in self.jobs.get(run_id, [])])
+            return {"jobs": jobs[(page - 1) * 100:page * 100]}
         if "/artifacts?name=" in path:
             run_id = int(path.split("/runs/")[1].split("/")[0])
             name = path.split("name=")[1].split("&")[0]
@@ -289,6 +291,20 @@ class SnapshotLookupTest(unittest.TestCase):
         self.assertFalse(any(f"/runs/{n}/" in c for n in (60, 59, 57) for c in gh.calls))
         # The scan stops once no older-updated run can hold a later deploy.
         self.assertFalse(any("/runs/55/" in c for c in gh.calls))
+
+    def test_a_deploy_on_a_later_jobs_page_is_found(self):
+        # 60 failed attempts fill the first jobs page (build + deploy per attempt); the success is on page two.
+        attempts = [(a, f"deploy feeds-site-{a}", "failure", 200 - a) for a in range(1, 61)]
+        attempts.append((61, "deploy feeds-site-61", "success", 1))
+        gh = FakeGitHub([FakeGitHub.run(90, updated_hours_ago=1)], {90: attempts})
+        found = self.find(gh)
+        self.assertEqual((90, 61, "feeds-site-61"), (found.run_id, found.attempt, found.snapshot))
+
+    def test_a_jobs_history_past_the_page_cap_refuses_instead_of_reading_as_no_deploy(self):
+        attempts = [(a, f"deploy feeds-site-{a}", "failure", 5000 - a) for a in range(1, 1001)]
+        gh = FakeGitHub([FakeGitHub.run(91, updated_hours_ago=1)], {91: attempts})
+        with self.assertRaises(pages_site.FeedError):
+            self.find(gh)
 
     def test_a_later_failed_attempt_does_not_hide_an_earlier_successful_deploy(self):
         gh = FakeGitHub([FakeGitHub.run(70, updated_hours_ago=1)], {
