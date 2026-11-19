@@ -93,7 +93,7 @@ The project uses modular Clean Architecture with a strict dependency graph:
 :core:datastore → :domain
 
 :feature:settings  → :domain, :core:data, :core:designsystem
-:feature:setup     → :domain, :core:data
+:feature:setup     → :domain, :core:data, :core:designsystem
 :feature:dashboard → :domain, :core:designsystem
 :feature:bubble    → :domain, :core:designsystem
 
@@ -124,8 +124,8 @@ module, the bubble HUD, the Garage or navigation, read
   exported schema JSON, adds the `AutoMigration` (or `Migration`) and its `MigrationTestHelper` case; CI's
   `Schemas committed` step and `SchemaVersionGuardTest` enforce it. Before changing the schema, read
   `docs/architecture/05-analytics-read-model.md` § Database safety posture.
-- **`:core:data`**: repository implementations and mappers. **`:core:network`**: Retrofit/OkHttp, EIA gas prices,
-  the census transport. **`:core:location`**: Play Services GPS.
+- **`:core:data`**: repository implementations and mappers. **`:core:network`**: Retrofit/OkHttp, the feed and
+  census transports. **`:core:location`**: Play Services GPS.
 - **`:core:datastore`**: Preferences DataStore, one store per concern behind Hilt qualifiers. A user artifact that
   nothing in `app_events` can rebuild (the weekly plan, the vehicles) lives here, never in Room, because a
   `PROJECTOR_VERSION` bump wipes the read model.
@@ -318,7 +318,7 @@ Every new feature or refactor holds to these; they are design inputs, not aftert
    - **PII is hashed at the edge before it is persisted or could be uploaded** (`sha256`, fail-closed: never echo
      plaintext on failure). Captures are debug-only (release binds `NoOpCaptureBus`). Evidence screenshots need
      `EvidenceConfig`'s master toggle (default off) AND a per-category toggle; an uncategorized capture never fires.
-   - **Secrets never reach logs** (the EIA `api_key` is redacted); network logging is debug-gated.
+   - **Secrets never reach logs**; network logging is debug-gated.
    - **Capability gates fail closed.** An effect whose permission tier is not granted (live OS state) does not fire.
      Taps are app-owned `RuleAction`s verified at fire time (package scope, label allowlist, strict click); any
      failed check aborts to manual. An automation tap also needs a granted capability key, one per (rule, action),

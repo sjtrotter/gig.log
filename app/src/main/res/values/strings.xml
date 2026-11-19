@@ -48,7 +48,7 @@
 
     <string name="perm_title_location">Location</string>
     <string name="perm_pitch_location">Counts your miles during a shift.</string>
-    <string name="perm_body_location">gig.log counts miles with GPS only while a shift is on. Choose Precise; approximate location counts no miles. Gas-price lookups use your last location each time they run (daily when automatic, in setup for each fuel type while automatic updates are on, and when you refresh it or choose Use auto price in the bubble), even off shift, and Android\'s address lookup may send it, rounded to about 11 km, to its provider to find your region.</string>
+    <string name="perm_body_location">gig.log counts miles with GPS only while a shift is on. Choose Precise; approximate location counts no miles.</string>
     <string name="perm_without_location">gig.log can\'t track your driven miles.</string>
     <string name="perm_action_location">Allow location</string>
 

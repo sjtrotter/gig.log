@@ -12,9 +12,6 @@ claim. When the code or PRIVACY.md changes a claim made here, this file changes 
 **Live tracking.** gig.log counts the miles a driver drives during a shift. It samples GPS for as long as the shift
 runs and stops when the shift ends. The store listing promotes this under "SHIFTS AND MILES".
 
-The gas-price lookup also reads a location, but it needs only the U.S. state. It rounds the location to about 11 km
-before using it, so it is not a reason for precise location and is not declared.
-
 ### Why approximate location or the location button is not enough
 
 > gig.log records a delivery driver's miles while a shift is running, the miles behind each delivery's pay per
@@ -30,5 +27,4 @@ before using it, so it is not a reason for precise location and is not declared.
 - The odometer requests high-accuracy fixes every 5 seconds (at least 2 seconds and 5 metres apart,
   `FusedLocationDataSource`), only while a shift is active (`OdometerEffectHandler`). `OdometerFixPolicy` judges each
   fix before it can move the mileage, and a rejected fix is logged as numbers and a reason, never as a coordinate.
-- The gas-price lookup is off by default. It gives Android's `Geocoder` a location rounded to one decimal place of a
-  degree (`GeocoderInput`), never the exact fix.
+- The gas-price refresh reads no location: the driver picks a fuel price area in Settings > Costs.

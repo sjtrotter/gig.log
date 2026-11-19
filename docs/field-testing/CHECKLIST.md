@@ -98,6 +98,7 @@ Five items the dev confirmed on 2026-10-07. Each full item appears once, with it
 
 ### 0/2 or 1/2 younger than 6 weeks — newest first
 
+- [#1566 the gas price follows the area picked in Settings > Costs, and reads its EIA week](checklist/open/1566-fuel-price-area-and-older-price.md)
 - [#1620 a Play-build install with the census on uploads once a day, on Wi-Fi only](checklist/open/1620-census-daily-upload-play-build.md)
 - [#1621 the census turns on only through its disclosure](checklist/open/1621-census-opt-in-disclosure.md)
 - [#1622 What gig.log sent matches the server, and Delete my census data empties it](checklist/open/1622-census-sent-and-delete.md)

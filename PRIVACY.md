@@ -112,18 +112,15 @@ what is forwarded). Only the platforms the service is bound to (§2.1) can be en
 
 ### 2.4 Location
 
-`ACCESS_FINE_LOCATION` / `ACCESS_COARSE_LOCATION` are used in two places:
+`ACCESS_FINE_LOCATION` / `ACCESS_COARSE_LOCATION` are used in one place:
 
 - **The on-device odometer** (`core/location`, `OdometerEffectHandler`): GPS fixes are sampled **only while a dash
   is active** and stop when the dash ends. Each fix is judged by `OdometerFixPolicy` (accuracy, speed and jump
   limits) before it can move the mileage. A location is never written to a log line — a rejected fix is logged as
   numbers and a reason, never as a coordinate (`domain/.../OdometerFixPolicy`).
-- **The gas-price refresh** (`FuelPriceRepository`, off by default on new installs; an existing setting is kept, §6): once per refresh the last known location
-  is read (`FusedLocationDataSource.getUserLocation`), rounded to one decimal place of a degree (about 11 km;
-  `GeocoderInput`), and that rounded point is passed to Android's `Geocoder` to resolve the state for the regional
-  price. `Geocoder` never gets the exact fix. It is a platform service that may use the network, so on this feature
-  the rounded location does leave the app, to Android's geocoding provider — not to gig.log and not to the EIA.
-  The daily worker checks the saved automatic-refresh setting before fetching. Tap the bubble's gas price to enter manual mode, or turn off daily updates in setup and save setup, to stop automatic refreshes. Setup waits for the saved settings before its initial gas-price fetch (`WizardViewModel.loadExistingSettings`).
+
+The gas-price refresh reads no location. The dasher picks a fuel price area in Settings > Costs (`FuelPriceRepository`,
+the `fuel_price_area` preference); the area never leaves the phone (§6).
 
 ### 2.5 What gig.log never processes
 
@@ -190,11 +187,11 @@ There is no account, no analytics SDK, no advertising identifier. Gas-price refr
 Every connection the app makes is HTTPS (#1620). The app's network security config
 (`app/src/main/res/xml/network_security_config.xml`, referenced from the manifest of every build) refuses cleartext
 traffic for every host with no exception, and `HttpsEndpointGuardTest` checks that every URL in shipped source is
-`https`: the census server, gig.log's feed site, `api.eia.gov` and `fueleconomy.gov`.
+`https`: the census server, gig.log's feed site and `fueleconomy.gov`.
 
 | Feature | Default | Where it goes | What is sent |
 |---|---|---|---|
-| Gas-price refresh (`isGasPriceAuto`, `AppPreferencesDataSource`) | **off by default on new installs; an existing setting is kept**; tap the bubble gas price for manual mode, or disable daily updates in setup and save | the U.S. EIA public price API (`api.eia.gov`, `core/network/.../eia`), after Android's `Geocoder` resolves your state from your location rounded to about 11 km, never the exact fix (§2.4) | a request for the regional price for your fuel type; no account, no identifier. The API key is never logged (#348). |
+| Gas-price refresh ("Auto gas price", `isGasPriceAuto`, `AppPreferencesDataSource`; the fuel client `FuelPriceRepository`) | **off by default on new installs; an existing setting is kept**; tap the bubble gas price for manual mode, turn off Auto gas price in Settings > Costs, or disable daily updates in setup and save; turning it off stops any request not yet sent at once (`FuelFeedSwitch`) | gig.log's site on GitHub Pages (`https://gig.log.trotter.cloud/feeds/fuel/`), served through GitHub's CDN, Fastly (`FeedClient`, `FeedSource.GigLog`) | a GET of the signed fuel envelope, then of the prices file it names by its sha256; no account, install ID, location, area or cookie; the headers are those of the rules row (a fixed `User-Agent` and, once the site has answered, the `If-None-Match` tag it gave); every phone downloads the same bytes, the prices of all 29 areas, and the area is chosen on the phone (`FuelPriceResolution`). GitHub and Fastly see the phone's IP address, its user agent and the time of each request. **Timing:** daily while it is on (`DailyGasPriceWorker`); in setup when the dasher turns automatic updates on, one fetch per act (`OneShotGrant`); a bubble refresh; "Use auto price" in the bubble, one fetch, after which auto turns on only if a price arrived. A downloaded generation is checked against the pinned gig.log fuel key before it is used. Nothing is uploaded. |
 | Vehicle list in the setup wizard (`EpaVehicleDataSource`) | asks first (#1258): off until "Look up my vehicle" is tapped; choice is saved | the U.S. EPA public vehicle API (`fueleconomy.gov`) | vehicle-list request after opt-in, including on later setup visits; selected year, make, model and vehicle ID as the user chooses, to retrieve MPG; no account or install ID |
 | Recognition rules updates (#640; "Keep recognition rules up to date", Settings > Recognition rules and the setup wizard, `RulesFeedSwitch`; the rules client `RulesFeed`) | **off in every build**; with it off, the rules in use stay (the built-in ones or the last downloaded set) and a request goes only when the dasher taps Check now, or Check for new rules on the recognition notice, one fetch per tap; the notice's Keep rules up to date only opens Settings | gig.log's site on GitHub Pages (`https://gig.log.trotter.cloud/feeds/rules/`), served through GitHub's CDN, Fastly (`FeedClient`, `FeedSource.GigLog`) | a GET of the signed rules envelope, then of each rules file it names by its sha256; no account, install ID, location or cookie; the only headers of gig.log's own are a fixed `User-Agent` and, once the site has answered, the `If-None-Match` tag it gave (gig.log's own site only, #1565); every phone downloads the same bytes. GitHub and Fastly see the phone's IP address, its user agent and the time of each request. **Timing:** with the switch on, a check runs when the dasher opens or returns to a delivery app they turned on: the first accessibility event from that app after 10 minutes with none, by elapsed time (`PlatformForegrounds`; active use never counts again, and no window is read for it), at most once an hour by elapsed time, a stored last check in the future counting as just now (`RulesFeedSwitch.claimForegroundCheck`, persisted), so GitHub and Fastly can tell when this phone's IP address opens a delivery app; the switch's copy and the accessibility service description say so. A downloaded generation is checked against the pinned gig.log rules key and the batch loader before it is used (`VerifiedRulesetBytes.fromFeedFile`); its tap capabilities land undecided. Nothing is uploaded. |
 | Google MPG search | manual button press | Google in the user's browser (`VehicleCard`) | entered vehicle year, make and model plus `mpg`; browser cookies/account settings apply |
@@ -498,9 +495,9 @@ identity export. Vehicle/default resets preserve these learned preferences.
 
 
 - Storage and transport: the Room database and the DataStore files live in the app's private storage, which other
-  apps cannot read and which Android's device encryption covers; gig.log adds no encryption of its own. The gas-price
-  (`https://api.eia.gov/`, `GasPriceApiModule`) and vehicle (`https://www.fueleconomy.gov/`, `VehicleNetworkModule`)
-  lookups use HTTPS, and the app targets an SDK at which Android refuses plain HTTP by default. Screenshots (§4) and
+  apps cannot read and which Android's device encryption covers; gig.log adds no encryption of its own. The fuel feed
+  (`https://gig.log.trotter.cloud/feeds/`, `FeedClient`) and the vehicle lookup (`https://www.fueleconomy.gov/`,
+  `VehicleNetworkModule`) use HTTPS, and the app targets an SDK at which Android refuses plain HTTP by default. Screenshots (§4) and
   exports (§6) are ordinary files outside that storage, readable by any app the user lets see photos or files.
 - The event log and the analytics tables are a Room database on the device (`core/database`); the read-model
   tables are a rebuildable projection of your own event log. The database is backed up and transferred so your
@@ -684,6 +681,14 @@ under `core/pipeline/`, the consent model under `docs/design/rule-capability-con
 
 ## Revision history
 
+- **r30 (2026-11-19)** — §2.4, §6 and §7: the gas price comes from gig.log's signed fuel feed (#1566), for an area
+  the dasher picks in Settings > Costs, in place of a request to the EIA's API after Android's `Geocoder` resolved
+  the state from a rounded location. The gas-price refresh reads no location, and nothing location-derived leaves
+  the phone for it; every phone downloads the same file of all areas, and GitHub and Fastly see the IP address and
+  the time. Turning Auto gas price off stops any request not yet sent at once. The app holds no EIA key. The Privacy
+  page's "What gig.log reads" (`privacy_reads_body`) and "What leaves your phone" (`privacy_leaves_body`), the
+  location permission card (`perm_body_location`) and setup's gas-price card (`wizard_gas_price_auto_update_desc`)
+  say so. Receipts created under r29 retain that revision.
 - **r29 (2026-11-16)** — §6: the census health report (#1630) carries `shadowDaily`, coarse daily levels for each draft
   (shadow) rule the app is testing: how often the phone saw the rule's screen that day and how the draft did there,
   never the exact counts; a report can show that the phone saw a particular kind of screen that day. Draft rules ship
