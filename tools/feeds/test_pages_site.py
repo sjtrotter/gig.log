@@ -9,6 +9,7 @@ import json
 import os
 import tempfile
 import unittest
+import urllib.error
 import zipfile
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -357,6 +358,50 @@ class SnapshotLookupTest(unittest.TestCase):
         gh.zip = evil.getvalue()
         with tempfile.TemporaryDirectory() as tmp, self.assertRaises(FeedError):
             pages_site.fetch_snapshot(gh, "o/r", 56, "feeds-site-2", Path(tmp))
+
+
+class FetchLiveTest(unittest.TestCase):
+    """A Pages 5xx is retried; a 404 is an absent file; a 5xx that persists, or a 4xx, refuses."""
+
+    URL = "https://example.test/feeds/rules/envelope.json?r=1"
+
+    @staticmethod
+    def error(code):
+        return urllib.error.HTTPError(FetchLiveTest.URL, code, "x", {}, None)
+
+    def fetch(self, *replies):
+        replies = list(replies)
+        calls = []
+
+        def urlopen(request, timeout):
+            calls.append(request.full_url)
+            reply = replies.pop(0)
+            if isinstance(reply, Exception):
+                raise reply
+            return io.BytesIO(reply)
+
+        with mock.patch.object(pages_site.urllib.request, "urlopen", urlopen):
+            try:
+                return pages_site.fetch_live(self.URL, sleep=lambda _: None), len(calls)
+            except FeedError as e:
+                return e, len(calls)
+
+    def test_a_503_then_404_is_absent(self):
+        self.assertEqual((None, 2), self.fetch(self.error(503), self.error(404)))
+
+    def test_a_503_then_the_file_returns_the_file(self):
+        self.assertEqual((b"{}", 3), self.fetch(self.error(503), self.error(502), b"{}"))
+
+    def test_a_persistent_503_refuses(self):
+        result, calls = self.fetch(*[self.error(503)] * 4)
+        self.assertIsInstance(result, FeedError)
+        self.assertIn("HTTP 503", str(result))
+        self.assertEqual(4, calls)
+
+    def test_a_403_refuses_without_retry(self):
+        result, calls = self.fetch(self.error(403))
+        self.assertIsInstance(result, FeedError)
+        self.assertEqual(1, calls)
 
 
 if __name__ == "__main__":
