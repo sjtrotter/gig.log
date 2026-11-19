@@ -851,7 +851,8 @@ a module build file.
   `FuelArea`, the one owner of the codes; `FuelAreaParityTest` pins them to the publisher's `AREAS`). The area never
   leaves the phone: every phone downloads the same file, and `FuelPriceResolution` walks the chosen area, then its
   parents (city, state, sub-PADD, PADD, U.S.), to the first area with a price for the fuel. Texas diesel is the Gulf
-  Coast's, since EIA publishes no state or city diesel. INFO logs say whether a price fell back, never the area.
+  Coast's: EIA publishes diesel for California alone among states and cities (`DIESEL_AREAS`). INFO logs say
+  whether a price fell back, never the area.
 - **Bounds.** `FuelPriceAcceptance` (`:domain`) applies the publisher's rules on the phone: 0.50 to 15.00 a gallon,
   and a move of at most 40 % from the pair's anchor (an earlier week's price, dropped after 8 weeks); corrections of a
   week all compare to the same anchor. The anchors ride in the generation's carry (`meta.json`).
@@ -864,9 +865,11 @@ a module build file.
   sends only with the switch on (`FuelRefreshOutcome.Failed(retry)` asks WorkManager for a retry on a transport, 5xx
   or 404 failure). Two acts mint a `OneShotGrant` in the caller's coroutine while the switch is off: the bubble's
   "Use auto price" (`resumeAuto`; auto turns on with the price in one write only when the fetch returned `Accepted`
-  or `Unchanged` and a price resolves, else nothing is written and the price stays manual) and setup's lookup
-  (`lookUp`, when the dasher turns automatic updates on; one lookup resolves every fuel type, from the cache even
-  when the fetch failed).
+  or `Unchanged`, a price resolves and no other write of the auto flag started during the download, checked under
+  `FuelFeedSwitch`'s write lock by `writeIfUnchanged`; else nothing is written and the price stays manual) and
+  setup's lookup (`lookUp`, when the dasher turns automatic updates on or taps Retry; one lookup, shared by a fuel
+  change while it runs, resolves every fuel type, from the cache even when the fetch failed, and turning auto off or
+  typing a price cancels it). Setup also looks up once when it opens with auto saved on, with no grant.
 - **The switch.** "Auto gas price" (`FuelFeedSwitch`, § The feed channel) gates fuel only, and turns off at the
   instant a write that may turn auto off starts.
 - **Labels.** The anchors are stored, never a formatted string. Settings > Costs, the bubble's gas row and setup derive

@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="app_accordion_expanded">Expandido</string>
+    <string name="app_accordion_collapsed">Contraído</string>
+    <string name="app_placeholder_loading">Cargando</string>
+    <string name="app_could_not_load">No se pudo cargar %1$s</string>
+    <string name="app_retry">Reintentar</string>
     <string name="fuel_price_source_week">EIA, semana del %1$s</string>
     <string name="fuel_price_older_week">Precio anterior: EIA, semana del %1$s</string>
     <string name="fuel_price_older">Precio anterior</string>
