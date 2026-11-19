@@ -287,7 +287,7 @@ def read_live(live_dir: Path | None, epoch: feedlib.Epoch) -> tuple[dict | None,
         raise FeedError("the live fuel manifest names no prices file")
     data = (live_dir / f"{entry[1]}.json").read_bytes()
     feedlib.verify_payload(verified, entry[1], data)
-    payload = feedlib.strict_loads(data)
+    payload = feedlib.bounded_loads(data, "the live fuel payload")
     if not isinstance(payload, dict) or type(payload.get("period")) is not int or not isinstance(
             payload.get("prices"), dict):
         raise FeedError("the live fuel payload is malformed")
@@ -311,7 +311,7 @@ def write_generation(out: Path, payload: dict, anchors: dict, key: Path, source:
     """Writes fuel/<sha256>.json, fuel/envelope.json and anchors.json under [out]; returns the manifest."""
     data = feedlib.canonical_json(payload)
     if len(data) > feedlib.MAX_FILE_BYTES["fuel"]:
-        raise FeedError("the fuel payload is over 64 KB")
+        raise FeedError(f"the fuel payload is over {feedlib.MAX_FILE_BYTES['fuel']} bytes")
     manifest = feedlib.build_manifest(source, "fuel", issued_at, CONTRACT, [("prices", data)])
     der = feedlib.public_der_of_private_key(key)
     sig = feedlib.sign(key, manifest.encode("ascii"))

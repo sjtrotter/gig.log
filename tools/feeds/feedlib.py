@@ -27,8 +27,14 @@ KEY_ID_HEX_CHARS = 16
 # The feeds of the channel (feed-contract Feed.kt) and the one payload name of each; rules names are per platform.
 FEEDS = ("fuel", "constants", "rules")
 FILE_NAMES = {"fuel": "prices", "constants": "values"}
-MAX_ENVELOPE_BYTES = 32 * 1024
-MAX_FILE_BYTES = {"fuel": 64 * 1024, "constants": 16 * 1024, "rules": 1024 * 1024}
+# feed-contract FeedLimits, the one owner of these numbers.
+MAX_ENVELOPE_BYTES = 32_000
+MAX_PIN_FILE_BYTES = 32_000
+MAX_FILE_BYTES = {"fuel": 64_000, "constants": 16_000, "rules": 1_000_000}
+MAX_GENERATION_BYTES = {"fuel": 64_000, "constants": 16_000, "rules": 4_000_000}
+MAX_STRUCTURE_DEPTH = 4
+MAX_FILES_PER_MANIFEST = 16
+MAX_SIGNATURE_BASE64_CHARS = 512
 MIN_MS = 10**12
 
 # The DER prefix of every P-256 SubjectPublicKeyInfo (id-ecPublicKey, prime256v1, a 65-byte uncompressed point).
@@ -85,6 +91,23 @@ def strict_loads(data: bytes | str):
         return json.loads(data, object_pairs_hook=_no_duplicates, parse_constant=_no_constant)
     except json.JSONDecodeError as e:
         raise FeedError(f"malformed JSON: {e.msg}") from e
+
+
+def depth(value) -> int:
+    """Nesting depth as feed-contract's pre-pass counts it: each object or array is one level."""
+    if isinstance(value, dict):
+        return 1 + max((depth(v) for v in value.values()), default=0)
+    if isinstance(value, list):
+        return 1 + max((depth(v) for v in value), default=0)
+    return 0
+
+
+def bounded_loads(data: bytes | str, what: str):
+    """[strict_loads] plus the structure-depth bound of the envelope, the manifest, the pin file and fuel payloads."""
+    value = strict_loads(data)
+    if depth(value) > MAX_STRUCTURE_DEPTH:
+        raise FeedError(f"{what} nests deeper than {MAX_STRUCTURE_DEPTH}")
+    return value
 
 
 def public_der_from_b64(b64: str) -> bytes:
@@ -157,19 +180,30 @@ class Epoch:
 def read_pin_file(path: Path) -> dict[str, Epoch]:
     """gig.log's pins by feed wire name. A missing or malformed pin file is refused, never read as empty."""
     try:
-        root = strict_loads(path.read_bytes())
+        data = path.read_bytes()
     except OSError as e:
         raise FeedError(f"cannot read the pin file {path}") from e
-    if not isinstance(root, dict) or root.get("format_version") != 1 or not isinstance(root.get("feeds"), dict):
+    if len(data) > MAX_PIN_FILE_BYTES:
+        raise FeedError(f"pin file {path} is over {MAX_PIN_FILE_BYTES} bytes")
+    root = bounded_loads(data, "the pin file")
+    if not isinstance(root, dict) or type(root.get("format_version")) is not int or root["format_version"] != 1 \
+            or not isinstance(root.get("feeds"), dict):
         raise FeedError(f"malformed pin file {path}")
     out = {}
     for feed, entry in root["feeds"].items():
+        # The same checks as feed-contract FeedTrust.readPinFile: a known feed, an epoch >= 1, two different keys.
         if feed not in FEEDS or not isinstance(entry, dict):
             raise FeedError(f"malformed pin file entry {feed!r}")
+        epoch = entry.get("epoch")
+        if type(epoch) is not int or epoch < 1:
+            raise FeedError(f"pin file entry {feed!r} needs an epoch of 1 or more")
         primary, backup = entry.get("primary"), entry.get("backup")
         if not isinstance(primary, str) or not isinstance(backup, str):
             raise FeedError(f"pin file entry {feed!r} needs a primary and a backup key")
-        out[feed] = Epoch(GIG_LOG, [public_der_from_b64(primary), public_der_from_b64(backup)])
+        keys = [public_der_from_b64(primary), public_der_from_b64(backup)]
+        if key_id(keys[0]) == key_id(keys[1]):
+            raise FeedError(f"pin file entry {feed!r} pins the same key as primary and backup")
+        out[feed] = Epoch(GIG_LOG, keys)
     return out
 
 
@@ -235,19 +269,22 @@ def verify_envelope(envelope_bytes: bytes, feed: str, epoch: Epoch) -> Verified:
     """The checks the app makes before it trusts a manifest (feed-contract VerifiedManifest.verify)."""
     if len(envelope_bytes) > MAX_ENVELOPE_BYTES:
         raise FeedError(f"{feed}: envelope over {MAX_ENVELOPE_BYTES} bytes")
-    root = strict_loads(envelope_bytes)
+    root = bounded_loads(envelope_bytes, f"{feed}: the envelope")
     if not isinstance(root, dict):
         raise FeedError(f"{feed}: envelope is not an object")
     manifest_text, kid, sig = root.get("manifest"), root.get("key"), root.get("sig")
     if not all(isinstance(v, str) for v in (manifest_text, kid, sig)):
         raise FeedError(f"{feed}: envelope needs manifest, key and sig strings")
+    if len(sig) > MAX_SIGNATURE_BASE64_CHARS:
+        raise FeedError(f"{feed}: signature over {MAX_SIGNATURE_BASE64_CHARS} characters")
     if kid not in epoch:
         raise FeedError(f"{feed}: signed by key {kid}, which the current pins do not name")
     manifest_bytes = manifest_text.encode("utf-8")
     if not verifies(epoch.keys[kid], manifest_bytes, sig):
         raise FeedError(f"{feed}: bad signature")
-    manifest = strict_loads(manifest_text)
-    if not isinstance(manifest, dict) or manifest.get("format_version") != FORMAT_VERSION:
+    manifest = bounded_loads(manifest_text, f"{feed}: the manifest")
+    if not isinstance(manifest, dict) or type(manifest.get("format_version")) is not int \
+            or manifest["format_version"] != FORMAT_VERSION:
         raise FeedError(f"{feed}: unsupported format_version")
     if manifest.get("source") != epoch.source:
         raise FeedError(f"{feed}: source {manifest.get('source')!r} is not {epoch.source!r}")
@@ -260,6 +297,8 @@ def verify_envelope(envelope_bytes: bytes, feed: str, epoch: Epoch) -> Verified:
     entries = manifest.get("files")
     if not isinstance(entries, list):
         raise FeedError(f"{feed}: manifest files is not a list")
+    if len(entries) > MAX_FILES_PER_MANIFEST:
+        raise FeedError(f"{feed}: more than {MAX_FILES_PER_MANIFEST} files")
     files = []
     for entry in entries:
         if not isinstance(entry, dict) or set(entry) != {"name", "sha256", "size"}:
@@ -271,7 +310,11 @@ def verify_envelope(envelope_bytes: bytes, feed: str, epoch: Epoch) -> Verified:
             raise FeedError(f"{feed}: malformed file sha256")
         if type(size) is not int or not 0 <= size <= MAX_FILE_BYTES[feed]:
             raise FeedError(f"{feed}: file size out of range")
+        if any(f[0] == name for f in files):
+            raise FeedError(f"{feed}: file name {name!r} twice")
         files.append((name, digest, size))
+    if sum(f[2] for f in files) > MAX_GENERATION_BYTES[feed]:
+        raise FeedError(f"{feed}: files over {MAX_GENERATION_BYTES[feed]} bytes in all")
     return Verified(epoch.source, feed, kid, sha256_hex(manifest_bytes), sequence, contract, files, envelope_bytes)
 
 
