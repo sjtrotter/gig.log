@@ -1,6 +1,13 @@
-# #1582: builds gig.log's GitHub Pages site (https://gig.log.trotter.cloud) and, on master, deploys it.
-# A Pages deploy publishes the whole site, so this is the site's only deploy: the feeds (#1564) add their output to
-# the directory tools/site/build_site.py writes, in this workflow, and never deploy a site of their own.
+# #1582, #1564: builds gig.log's GitHub Pages site (https://gig.log.trotter.cloud) and, on master, deploys it with the
+# signed feeds under /feeds/. A Pages deploy publishes the whole site, so this is the site's only deploy workflow:
+# every deploy assembles the privacy pages (tools/site/build_site.py) and every feed. The fuel feed is signed here on
+# the schedule; the rules and constants tag deploys (#641, #695) add their jobs to this same workflow.
+#
+# prepare -> fuel -> build -> deploy. A feed this run did not sign is carried over from the snapshot of the last
+# successful deploy of this workflow, found by run id and attempt (tools/feeds/pages_site.py). Artifact names carry
+# the run attempt, since a name is fixed once uploaded and a re-run must upload its own; the deploy job's name records
+# which snapshot it deployed.
+# Pull requests build and test only; they never deploy. docs/feeds/SELF_HOSTING.md is the operator's guide.
 name: Pages
 
 on:
@@ -9,6 +16,9 @@ on:
     paths:
       - site/**
       - tools/site/**
+      - tools/feeds/**
+      - docs/feeds/**
+      - feed-contract/pins/**
       - feature/settings/src/main/res/values/strings.xml
       - PRIVACY.md
       - domain/src/main/java/cloud/trotter/log/gig/domain/capability/ConsentReceipt.kt
@@ -17,41 +27,183 @@ on:
     paths:
       - site/**
       - tools/site/**
+      - tools/feeds/**
+      - docs/feeds/**
+      - feed-contract/pins/**
       - feature/settings/src/main/res/values/strings.xml
       - PRIVACY.md
       - domain/src/main/java/cloud/trotter/log/gig/domain/capability/ConsentReceipt.kt
       - .github/workflows/pages.yml
   workflow_dispatch:
+  schedule:
+    # EIA releases Tuesday about 10 a.m. Eastern (Wednesday after a Monday holiday): hourly Tuesday and Wednesday
+    # 14:30-23:30 UTC, plus once a day. A run that finds nothing new signs and deploys nothing.
+    - cron: '30 14-23 * * 2,3'
+    - cron: '45 12 * * *'
 
-permissions:
-  contents: read
+permissions: {}
 
+# One deploy at a time, never cancelled midway. GitHub keeps one pending run per group and drops an older pending
+# one; a dropped fuel run is safe (the next one republishes). Pull requests queue apart so they never drop a deploy.
 concurrency:
-  group: pages-${{ github.ref }}
+  group: ${{ github.event_name == 'pull_request' && format('pages-pr-{0}', github.ref) || 'feeds-pages' }}
   cancel-in-progress: false
 
 jobs:
-  build:
+  prepare:
+    name: prepare
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      pages: read
+    outputs:
+      base_url: ${{ steps.carry.outputs.base_url }}
+      fuel_state: ${{ steps.carry.outputs.fuel_state }}
+      carried: feeds-carried-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      # Finds the snapshot, refuses when the live site does not serve what it recorded, re-verifies every carried
+      # file against the current pins and drops (with one warning) a feed that fails them.
+      - name: Carry the live feeds over
+        id: carry
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FEED_FUEL_PUBLIC_KEY: ${{ vars.FEED_FUEL_PUBLIC_KEY }}
+        run: >-
+          python3 -I tools/feeds/pages_site.py carry --repo "$GITHUB_REPOSITORY" --run-id "$GITHUB_RUN_ID"
+          --out "$RUNNER_TEMP/carried"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: feeds-carried-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/carried
+          retention-days: 1
+          if-no-files-found: error
+
+  # The only job with the fuel secrets. It runs the pinned checkout, shell, the Python standard library and openssl,
+  # nothing else: its input (the live fuel feed and its anchors) and its output (the signed files) are job outputs,
+  # so no artifact action runs beside the key. Environment feed-fuel is deployable only from master.
+  fuel:
+    name: fuel
+    needs: prepare
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: feed-fuel
+    permissions:
+      contents: read
+    outputs:
+      published: ${{ steps.publish.outputs.published }}
+      bundle: ${{ steps.publish.outputs.bundle }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      # Not set up (no key and no pin) exits cleanly with one notice; any half-setup fails and names both secrets.
+      - name: Publish fuel prices
+        id: publish
+        env:
+          EIA_API_KEY: ${{ secrets.EIA_API_KEY }}
+          FEED_FUEL_SIGNING_KEY: ${{ secrets.FEED_FUEL_SIGNING_KEY }}
+          FEED_FUEL_PUBLIC_KEY: ${{ vars.FEED_FUEL_PUBLIC_KEY }}
+          FUEL_STATE: ${{ needs.prepare.outputs.fuel_state }}
+        run: python3 -I tools/feeds/publish_fuel.py ci --out "$RUNNER_TEMP/fuel"
+
+  build:
+    name: build
+    needs: [prepare, fuel]
+    # A pull request builds alone. Otherwise prepare must pass and fuel pass or be skipped; a scheduled run whose fuel
+    # job signed nothing deploys nothing.
+    if: >-
+      !cancelled() && (github.event_name == 'pull_request' || (
+        needs.prepare.result == 'success' &&
+        (needs.fuel.result == 'success' || needs.fuel.result == 'skipped') &&
+        (github.event_name != 'schedule' || needs.fuel.outputs.published == 'true')))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      index: ${{ steps.assemble.outputs.index }}
+      snapshot: feeds-site-${{ github.run_attempt }}
+      pages: github-pages-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - name: Build the site
         run: python3 -I tools/site/build_site.py . _site
+      # By run id, so a build re-run alone still finds the carried feeds an earlier attempt of prepare uploaded.
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: github.event_name != 'pull_request'
+        with:
+          name: ${{ needs.prepare.outputs.carried }}
+          path: ${{ runner.temp }}/carried
+          run-id: ${{ github.run_id }}
+          github-token: ${{ github.token }}
+      # Adds this run's fuel generation (verified against the pins) or the carried one, and every other carried
+      # feed; refuses a sequence below the live one or equal to it with another manifest; writes the next snapshot.
+      - name: Assemble the feeds
+        id: assemble
+        env:
+          FUEL_BUNDLE: ${{ needs.fuel.outputs.bundle }}
+          FEED_FUEL_PUBLIC_KEY: ${{ vars.FEED_FUEL_PUBLIC_KEY }}
+          BASE_URL: ${{ needs.prepare.outputs.base_url }}
+          CARRIED: ${{ github.event_name != 'pull_request' && 'carried' || '' }}
+        run: >-
+          python3 -I tools/feeds/pages_site.py assemble --site _site --snapshot "$RUNNER_TEMP/snapshot"
+          --run-id "$GITHUB_RUN_ID" --base-url "$BASE_URL" ${CARRIED:+--carried "$RUNNER_TEMP/$CARRIED"}
+      # The snapshot is uploaded before the deploy, so the run that deploys is always the run that recorded it.
+      # Retention 90 days is the most a public repository allows; a longer lapse bootstraps.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: github.event_name != 'pull_request'
+        with:
+          name: feeds-site-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/snapshot
+          retention-days: 90
+          if-no-files-found: error
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         if: github.event_name != 'pull_request'
         with:
+          name: github-pages-${{ github.run_attempt }}
           path: _site
 
   deploy:
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
+    # The snapshot this deploy publishes, read back by pages_site.py: "deploy feeds-site-<attempt>".
+    name: deploy ${{ needs.build.outputs.snapshot }}
     needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}privacy/
     permissions:
+      contents: read
       pages: write
       id-token: write
     steps:
-      - id: deployment
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      # This job can request an identity token, so it proves the Play login refuses it: the step passes only when
+      # Google refuses the token exchange, and it never keeps what Google returns (docs/RELEASE.md § 4).
+      - name: Rejected-identity check (Play)
+        env:
+          PLAY_WIF_PROVIDER: ${{ vars.PLAY_WIF_PROVIDER }}
+          PLAY_SERVICE_ACCOUNT: ${{ vars.PLAY_SERVICE_ACCOUNT }}
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -I tools/feeds/play_identity_refused.py
+      # pages_site.py finds the last deploy by this step's name, conclusion and completion time.
+      - name: Deploy to Pages
+        id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+        with:
+          artifact_name: ${{ needs.build.outputs.pages }}
+      # Pages edge-caches for 600 s: every file is fetched with ?r=<run id> until its hash is served, up to 12 min.
+      - name: Verify the live site
+        env:
+          INDEX: ${{ needs.build.outputs.index }}
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: python3 -I tools/feeds/pages_site.py verify-live --base-url "$PAGE_URL" --run-id "$GITHUB_RUN_ID"

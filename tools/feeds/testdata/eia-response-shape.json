@@ -1,0 +1,77 @@
+{
+  "response": {
+    "total": "4",
+    "dateFormat": "YYYY-MM-DD",
+    "frequency": "weekly",
+    "data": [
+      {
+        "period": "2026-11-16",
+        "duoarea": "NUS",
+        "area-name": "U.S.",
+        "product": "EPMR",
+        "product-name": "Regular Gasoline",
+        "process": "PTE",
+        "process-name": "Retail Sales by All Sellers",
+        "series": "EMM_EPMR_PTE_NUS_DPG",
+        "series-description": "U.S. Regular All Formulations Retail Gasoline Prices (Dollars per Gallon)",
+        "value": "3.051",
+        "units": "$/GAL"
+      },
+      {
+        "period": "2026-11-16",
+        "duoarea": "SCA",
+        "area-name": "CALIFORNIA",
+        "product": "EPD2D",
+        "product-name": "No 2 Diesel",
+        "process": "PTE",
+        "process-name": "Retail Sales by All Sellers",
+        "series": "EMD_EPD2D_PTE_SCA_DPG",
+        "series-description": "California No 2 Diesel Retail Prices (Dollars per Gallon)",
+        "value": 5.402,
+        "units": "$/GAL"
+      },
+      {
+        "period": "2026-11-09",
+        "duoarea": "NUS",
+        "area-name": "U.S.",
+        "product": "EPMR",
+        "product-name": "Regular Gasoline",
+        "process": "PTE",
+        "process-name": "Retail Sales by All Sellers",
+        "series": "EMM_EPMR_PTE_NUS_DPG",
+        "series-description": "U.S. Regular All Formulations Retail Gasoline Prices (Dollars per Gallon)",
+        "value": "3.074",
+        "units": "$/GAL"
+      },
+      {
+        "period": "2026-11-16",
+        "duoarea": "Y05SF",
+        "area-name": "SAN FRANCISCO",
+        "product": "EPMP",
+        "product-name": "Premium Gasoline",
+        "process": "PTE",
+        "process-name": "Retail Sales by All Sellers",
+        "series": "EMM_EPMP_PTE_Y05SF_DPG",
+        "series-description": "San Francisco Premium All Formulations Retail Gasoline Prices (Dollars per Gallon)",
+        "value": null,
+        "units": "$/GAL"
+      }
+    ],
+    "description": "Weekly retail gasoline and diesel prices",
+    "total_pages": 1
+  },
+  "request": {
+    "command": "/v2/petroleum/pri/gnd/data/",
+    "params": {
+      "frequency": "weekly",
+      "data": ["value"],
+      "facets": {"series": ["EMM_EPMR_PTE_NUS_DPG", "EMD_EPD2D_PTE_SCA_DPG", "EMM_EPMP_PTE_Y05SF_DPG"]},
+      "start": "2026-10-12",
+      "sort": [{"column": "period", "direction": "desc"}],
+      "offset": 0,
+      "length": 5000
+    }
+  },
+  "apiVersion": "2.1.8",
+  "ExcelAddInVersion": "2.1.0"
+}
