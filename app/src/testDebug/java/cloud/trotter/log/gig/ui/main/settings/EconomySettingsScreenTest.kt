@@ -84,7 +84,7 @@ class EconomySettingsScreenTest {
     /** #1478: the Auto gas price row is one toggle; the label flips it and is read with the switch's state. */
     @Test fun `the auto gas price row is one switch named by its label`() {
         val auto = MutableStateFlow(true)
-        val preferences: AppPreferencesRepository = mock {
+        val preferences: AppPreferencesRepository = mock<AppPreferencesRepository> {
             on { userEconomy } doReturn flowOf(UserEconomy())
             on { isGasPriceAuto } doReturn auto
         }.stubFuelPrice()
@@ -117,7 +117,7 @@ class EconomySettingsScreenTest {
 
     @Test fun `finished phone lines offers snackbar undo restoring shown lines and retaining siblings`() {
         val economy = MutableStateFlow(UserEconomy(phonePlanTotal = 125.0, phonePlanLines = 2, phoneBusinessPercent = 45.0))
-        val preferences: AppPreferencesRepository = mock {
+        val preferences: AppPreferencesRepository = mock<AppPreferencesRepository> {
             on { userEconomy } doReturn economy
             on { isGasPriceAuto } doReturn flowOf(false)
         }.stubFuelPrice()
