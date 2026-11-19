@@ -60,6 +60,8 @@ class GasQuickEditAgeTest {
     }
 
     @Test fun `the auto caption reads the week and turns older with the clock`() {
+        // The quick-edit has no ticker of its own (its host passes the clock reading), so this test's clock may run.
+        compose.mainClock.autoAdvance = true
         var now by mutableLongStateOf(stamp.issuedAt + day)
         compose.setContent {
             GigLogTheme {
@@ -71,7 +73,7 @@ class GasQuickEditAgeTest {
         compose.onNodeWithText("EIA, week of Nov 16").assertExists()
 
         now = stamp.issuedAt + 21 * day + 1
-        settle()
+        compose.waitForIdle()
 
         compose.onNodeWithText("Older price: EIA, week of Nov 16").assertExists()
         compose.onNodeWithText("EIA, week of Nov 16").assertDoesNotExist()

@@ -29,6 +29,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -77,18 +78,7 @@ class FuelPriceRepositoryTest {
     private lateinit var repository: FuelPriceRepository
 
     /** Built once the temporary folder exists: the store and the switch's first read touch it at once. */
-    /** DIAGNOSTIC (remove before merge): prints every log line, so a swallowed follow error shows in CI output. */
-    private val printing = object : timber.log.Timber.Tree() {
-        override fun log(priority: Int, tag: String?, message: String, t: Throwable?) {
-            println("LOG t=${System.currentTimeMillis()} p=$priority tag=$tag $message")
-            t?.printStackTrace(System.out)
-        }
-    }
-
-    @After fun unplant() { timber.log.Timber.uproot(printing) }
-
     @Before fun setUp() {
-        timber.log.Timber.plant(printing)
         store = AppPreferencesDataSource(
             PreferenceDataStoreFactory.create(scope = scope, produceFile = { File(tmp.root, "prefs.preferences_pb") }),
         )
@@ -110,11 +100,10 @@ class FuelPriceRepositoryTest {
 
     private fun envelopeRequests() = site.requests.count { it.url.encodedPath.endsWith("/envelope.json") }
 
+    /** Polls the stored pair: a collector that subscribes while the follow's write lands can miss that update. */
     private suspend fun awaitStored(price: Float, stamp: FuelPriceStamp = this.stamp) {
-        println("LOG t=${System.currentTimeMillis()} await price=$price")
-        withTimeout(30_000) {
-            store.gasPrice.first { println("LOG t=${System.currentTimeMillis()} stored price=$it"); it == price }
-            store.gasPriceStamp.first { it == stamp }
+        withTimeout(10_000) {
+            while (store.gasPrice.first() != price || store.gasPriceStamp.first() != stamp) delay(20)
         }
     }
 
