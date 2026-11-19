@@ -15,9 +15,9 @@ import java.util.Base64
 class FeedTrustTest {
 
     @Test
-    fun `the shipped pin file reads and holds no gig_log key yet`() {
+    fun `the shipped pin file reads and pins gig_log's fuel key only`() {
         val trust = (FeedTrust.shipped() as FeedResult.Ok).value
-        for (feed in Feed.entries) assertFalse("$feed", trust.trusts(FeedSources.GIG_LOG, feed))
+        for (feed in Feed.entries) assertEquals("$feed", feed == Feed.FUEL, trust.trusts(FeedSources.GIG_LOG, feed))
         // The classpath copy is the repository file workflows read: one file, no second copy.
         val repoFile = File("pins/feed-pins.json")
         assertTrue("run from the feed-contract build dir", repoFile.isFile)

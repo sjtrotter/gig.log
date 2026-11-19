@@ -82,7 +82,7 @@ reads this path. One epoch per feed, keyed by the feed's wire name:
 ```
 
 Each entry needs both keys and they must differ. New trust for a gig.log feed comes only from an app release that
-changes this file; a manifest never names a successor key. The file ships with no keys until the developer creates
-them (#1562). A user pin (a custom source) is a primary key and an optional backup, filed under `custom:<key id of the
+changes this file; a manifest never names a successor key. The file pins gig.log's fuel key; the rules and constants
+keys come with their publishers (#641, #695). A user pin (a custom source) is a primary key and an optional backup, filed under `custom:<key id of the
 primary>`, never under `gig.log` and never for rules. The pin-file reader is private: production reads only the
 shipped file.

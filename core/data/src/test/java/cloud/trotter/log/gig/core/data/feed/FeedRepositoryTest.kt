@@ -420,9 +420,9 @@ class FeedRepositoryTest {
         assertFalse(File(feedDir(), "CURRENT").exists())
     }
 
-    @Test fun `gig_log's feeds have no pins yet, so nothing is requested from it`() = runBlocking {
+    @Test fun `a gig_log feed with no pin requests nothing`() = runBlocking {
         policy.source.value = FeedSource.GigLog
-        val repository = repo()
+        val repository = repo(feed = Feed.CONSTANTS)
         repository.start()
         assertEquals(FeedRefresh.Failed(FeedError.Refused(FeedRefusal.NoTrustedEpoch)), repository.refresh())
         assertEquals(0, fake.server.requestCount)
