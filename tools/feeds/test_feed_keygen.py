@@ -32,10 +32,28 @@ class FeedKeygenTest(unittest.TestCase):
             self.assertEqual(feedlib.key_id(der), lines["key id"])
             self.assertEqual(f"custom:{feedlib.key_id(der)}", lines["source id"])
             self.assertNotIn("PRIVATE", done.stdout)
+            self.assertEqual(["fuel.pem"], [p.name for p in Path(tmp).iterdir()], "no temporary file left")
 
             again = self.run_keygen(key)
             self.assertNotEqual(0, again.returncode)
             self.assertIn("already exists", again.stderr)
+
+    def test_it_refuses_a_symbolic_link_even_a_dangling_one(self):
+        inside = Path(__file__).resolve().parent / "never-written-through-link.pem"
+        with tempfile.TemporaryDirectory() as tmp:
+            dangling = Path(tmp) / "fuel.pem"
+            dangling.symlink_to(inside)
+            done = self.run_keygen(dangling)
+            self.assertNotEqual(0, done.returncode)
+            self.assertIn("symbolic link", done.stderr)
+            self.assertFalse(inside.exists())
+            existing = Path(tmp) / "target"
+            existing.write_text("not a key")
+            linked = Path(tmp) / "linked.pem"
+            linked.symlink_to(existing)
+            self.assertNotEqual(0, self.run_keygen(linked).returncode)
+            self.assertEqual("not a key", existing.read_text())
+            self.assertEqual({"fuel.pem", "target", "linked.pem"}, {p.name for p in Path(tmp).iterdir()})
 
     def test_it_refuses_a_path_inside_a_git_repository(self):
         inside = Path(__file__).resolve().parent / "never-written.pem"
