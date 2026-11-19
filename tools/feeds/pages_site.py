@@ -6,7 +6,7 @@ and every feed. A feed this run did not sign is carried over from the snapshot o
 deployed, found by run id (never by artifact name: a fork's pull request can upload an artifact of any name). Stdlib
 and `openssl` only.
 
-  pages_site.py carry --repo OWNER/NAME --run-id N --out DIR [--bootstrap]
+  pages_site.py carry --repo OWNER/NAME --run-id N --out DIR
       Finds the snapshot, checks the live site still serves what it recorded, re-verifies every file against the
       current pins and writes the carried feeds to DIR. Outputs base_url and fuel_state (the fuel job's input).
   pages_site.py assemble --site DIR --carried DIR --snapshot DIR --run-id N [--base-url URL]
@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import io
+import re
 import json
 import os
 import shutil
@@ -37,7 +38,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import feedlib  # noqa: E402
 from feedlib import FeedError  # noqa: E402
 
-SNAPSHOT_ARTIFACT = "feeds-site"
+# The snapshot artifact is `feeds-site-<run attempt>`: artifact names are fixed once uploaded, so a re-run uploads its
+# own, and the deploy job's name records which one it deployed.
+SNAPSHOT_NAME = re.compile(r"feeds-site-[1-9][0-9]{0,4}")
 WORKFLOW_FILE = "pages.yml"
 DEPLOY_JOB = "deploy"
 DEPLOY_STEP = "Deploy to Pages"
@@ -100,53 +103,79 @@ class GitHub:
             raise FeedError(f"GitHub API {path}: HTTP {e.code}") from None
 
 
-def find_snapshot_run(gh, repo: str, current_run_id: int, now: dt.datetime) -> dict | None:
-    """The newest run of pages.yml that deployed: on master, from this repository, a push, schedule or dispatch, whose
-    deploy step succeeded. None when there is none inside the artifact retention window (bootstrap).
+class Deployment:
+    """One successful deploy step: which run and attempt, when it finished, and the snapshot artifact it deployed."""
 
-    A run counts by its deploy step, not its conclusion: a run whose deploy went through and whose verify step then
-    timed out is what the live site serves, so its snapshot is the one the next run must carry.
+    def __init__(self, run_id: int, attempt: int, completed_at: dt.datetime, snapshot: str | None):
+        self.run_id = run_id
+        self.attempt = attempt
+        self.completed_at = completed_at
+        self.snapshot = snapshot
+
+
+def _time(text: str) -> dt.datetime:
+    return dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+
+
+def find_last_deployment(gh, repo: str, now: dt.datetime) -> Deployment | None:
+    """The last successful deploy of pages.yml: on master, from this repository, a push, schedule or dispatch run,
+    across every attempt of every run, by the deploy step's completion time. None when there is none inside the
+    artifact retention window (bootstrap).
+
+    A deploy counts by its step, not the run's conclusion: a deploy that went through before its verify step timed out
+    is what the live site serves. A re-run attempt can deploy after a newer run did, so run ids do not order deploys;
+    a run's `updated_at` bounds when any of its attempts finished, which ends the scan. GitHub re-runs only runs under
+    30 days old, so the 90-day listing holds every attempt that could still be newest.
     """
     oldest = now - dt.timedelta(days=RETENTION_DAYS)
+    runs = []
     for page in range(1, MAX_RUN_PAGES + 1):
-        listing = gh.get(f"/repos/{repo}/actions/workflows/{WORKFLOW_FILE}/runs"
-                         f"?branch=master&status=completed&per_page=100&page={page}")
-        runs = (listing or {}).get("workflow_runs") or []
-        for run in runs:
-            created = dt.datetime.fromisoformat(run["created_at"].replace("Z", "+00:00"))
-            if created < oldest:
-                return None
-            if not trusted_run(run, current_run_id):
-                continue
-            if deployed(gh, repo, run["id"]):
-                return run
-        if len(runs) < 100:
-            return None
-    return None
+        listing = gh.get(f"/repos/{repo}/actions/workflows/{WORKFLOW_FILE}/runs?branch=master&per_page=100&page={page}")
+        batch = (listing or {}).get("workflow_runs") or []
+        runs += [r for r in batch if _time(r["created_at"]) >= oldest and trusted_run(r)]
+        if len(batch) < 100 or any(_time(r["created_at"]) < oldest for r in batch):
+            break
+    best = None
+    for run in sorted(runs, key=lambda r: _time(r["updated_at"]), reverse=True):
+        if best is not None and _time(run["updated_at"]) < best.completed_at:
+            break
+        for found in deployments(gh, repo, run["id"]):
+            if best is None or found.completed_at > best.completed_at:
+                best = found
+    return best
 
 
-def trusted_run(run: dict, current_run_id: int) -> bool:
+def trusted_run(run: dict) -> bool:
     head, base = run.get("head_repository") or {}, run.get("repository") or {}
     return (
-        run.get("id", 0) < current_run_id
-        and run.get("event") in TRUSTED_EVENTS
+        run.get("event") in TRUSTED_EVENTS
         and run.get("head_branch") == "master"
         and head.get("id") is not None and head.get("id") == base.get("id")
     )
 
 
-def deployed(gh, repo: str, run_id: int) -> bool:
-    jobs = (gh.get(f"/repos/{repo}/actions/runs/{run_id}/jobs?per_page=100") or {}).get("jobs") or []
+def deployments(gh, repo: str, run_id: int) -> list[Deployment]:
+    """Every attempt's successful deploy step in one run. The deploy job's name carries the snapshot it deployed
+    (`deploy feeds-site-<attempt>`); a job named plainly `deploy` predates the snapshot."""
+    jobs = (gh.get(f"/repos/{repo}/actions/runs/{run_id}/jobs?filter=all&per_page=100") or {}).get("jobs") or []
+    out = []
     for job in jobs:
-        if job.get("name") == DEPLOY_JOB:
-            return any(s.get("name") == DEPLOY_STEP and s.get("conclusion") == "success" for s in job.get("steps", []))
-    return False
+        name = job.get("name") or ""
+        if name != DEPLOY_JOB and not name.startswith(DEPLOY_JOB + " "):
+            continue
+        snapshot = name[len(DEPLOY_JOB) + 1:] or None
+        if snapshot is not None and not SNAPSHOT_NAME.fullmatch(snapshot):
+            continue
+        for step in job.get("steps") or []:
+            if step.get("name") == DEPLOY_STEP and step.get("conclusion") == "success" and step.get("completed_at"):
+                out.append(Deployment(run_id, job.get("run_attempt", 1), _time(step["completed_at"]), snapshot))
+    return out
 
 
-def fetch_snapshot(gh, repo: str, run_id: int, dest: Path) -> bool:
-    """Extracts that run's snapshot artifact into [dest]. False when the run has none (expired, or a pre-feeds run)."""
-    listing = gh.get(f"/repos/{repo}/actions/runs/{run_id}/artifacts?name={SNAPSHOT_ARTIFACT}&per_page=10") or {}
-    found = [a for a in listing.get("artifacts") or [] if a.get("name") == SNAPSHOT_ARTIFACT and not a.get("expired")]
+def fetch_snapshot(gh, repo: str, run_id: int, name: str, dest: Path) -> bool:
+    """Extracts the snapshot artifact [name] of that run into [dest]. False when it is gone (expired or deleted)."""
+    listing = gh.get(f"/repos/{repo}/actions/runs/{run_id}/artifacts?name={name}&per_page=10") or {}
+    found = [a for a in listing.get("artifacts") or [] if a.get("name") == name and not a.get("expired")]
     if not found:
         return False
     data = gh.download(f"/repos/{repo}/actions/artifacts/{found[0]['id']}/zip")
@@ -456,17 +485,18 @@ def cmd_carry(args) -> None:
     epochs = epochs_from_env(args.pins)
     base_url = pages_url(gh, args.repo)
     snapshot = None
-    if args.bootstrap:
-        notice("bootstrap requested: the snapshot is ignored")
-    else:
-        run = find_snapshot_run(gh, args.repo, args.run_id, dt.datetime.now(dt.timezone.utc))
-        if run is not None:
-            dest = Path(args.out).parent / "snapshot"
-            if fetch_snapshot(gh, args.repo, run["id"], dest):
-                print(f"snapshot: run {run['id']}")
-                snapshot = dest
-            else:
-                notice(f"run {run['id']} deployed but has no {SNAPSHOT_ARTIFACT} artifact (expired, or before #1564)")
+    last = find_last_deployment(gh, args.repo, dt.datetime.now(dt.timezone.utc))
+    if last is not None:
+        where = f"run {last.run_id} attempt {last.attempt}"
+        dest = Path(args.out).parent / "snapshot"
+        if last.snapshot is None:
+            notice(f"the last deploy ({where}) predates the feeds snapshot")
+        elif fetch_snapshot(gh, args.repo, last.run_id, last.snapshot, dest):
+            print(f"snapshot: {last.snapshot} of {where}")
+            snapshot = dest
+        else:
+            notice(f"the last deploy ({where}) recorded {last.snapshot}, which is gone (expired after "
+                   f"{RETENTION_DAYS} days, or deleted)")
     out = Path(args.out)
     carried = carry(snapshot, epochs, out, base_url, args.run_id)
     fuel_state = out / "fuel-state"
@@ -502,7 +532,6 @@ def main(argv=None) -> int:
     c = sub.add_parser("carry")
     c.add_argument("--repo", required=True)
     c.add_argument("--out", required=True)
-    c.add_argument("--bootstrap", action="store_true")
     a = sub.add_parser("assemble")
     a.add_argument("--site", required=True)
     a.add_argument("--carried")

@@ -36,7 +36,7 @@ You need a GitHub account, a computer with `openssl`, `git` and `bash`, and abou
    fuel file against it.
 7. **Enable Actions and the schedule.** Forks start with both off. Open the Actions tab and enable workflows, then
    open the **Pages** workflow and enable it if GitHub shows it as disabled.
-8. **Run it once.** Actions > Pages > Run workflow, on `master`, with `bootstrap` left off. When it finishes, the
+8. **Run it once.** Actions > Pages > Run workflow, on `master`. When it finishes, the
    deploy job links the site. Open `<site>/feeds/fuel/envelope.json`: it names `custom:<your key id>` as its source.
    The first run has no earlier site to carry over, so it publishes only the fuel feed (and the privacy pages).
 9. **Paste into the app.** In the app's custom fuel source setting (#1567), enter the feed URL
@@ -59,24 +59,34 @@ file only when EIA's numbers changed.
   then stops, and about 21 days after its last file the app labels its prices as old. Re-enable the workflow on the
   Actions tab, or push any commit, to restart it.
 - **A lapse over 90 days also expires the snapshot.** Each deploy keeps a copy of the site as the artifact
-  `feeds-site` for 90 days, the most GitHub allows on a public repository; the next deploy carries the feeds over from
+  `feeds-site-<attempt>` for 90 days, the most GitHub allows on a public repository; the next deploy carries the feeds over from
   it. After a longer lapse the next run starts from an empty site and publishes only the fuel feed, which is all a
   fork has. Phones keep their last good file until then.
 - The rejected-identity check in the deploy job passes with a notice in a fork: a fork has no Play login to check.
 
 ## Recovery
 
-A run refuses to deploy when the live site does not serve the files its snapshot recorded (for example, the site was
-deployed from somewhere else). Find out why first. To start over from an empty site, run the Pages workflow by hand
-with **bootstrap** on: it ignores the snapshot and publishes only the fuel feed, with a sequence above the live one.
-In gig.log's own repository a bootstrap also drops the rules and constants feeds until their tags run again (#641,
-#695).
+A run refuses to deploy when the live site does not serve the files the last deploy's snapshot recorded. The
+`prepare` log names that snapshot (`feeds-site-<attempt>` of a run and attempt) and each feed whose live envelope
+differs. Every deploy of this workflow records its snapshot, so a mismatch means something else deployed the site.
+The workflow has no switch that skips the check; a person decides.
+
+1. Find what deployed. Settings > Environments > `github-pages` lists each deployment and the run behind it; check
+   whether another workflow deploys Pages, and whether Settings > Pages still has Source: GitHub Actions.
+2. Stop that other deployer.
+3. Put the recorded site back: open the run the log names and re-run its `deploy` job. That works while its Pages
+   artifact (`github-pages-<attempt>`) exists, one day after the run.
+4. Or start from an empty site: on the same run's page, delete the snapshot artifact the log names. The next run
+   finds no snapshot and starts empty. Starting empty discards the fuel anchors (the next week is checked against
+   0.50-15.00 only, not against last week's price) and the previous payloads (a phone that fetched the old envelope
+   moments before may miss its file once), and it drops every feed the run does not sign. In gig.log's repository
+   that means the rules and constants feeds until their tags run again (#641, #695).
 
 ## How it is built
 
 - `.github/workflows/pages.yml` is the only deploy workflow, since a Pages deploy replaces the whole site. Its jobs:
-  - `prepare` finds the snapshot of the last run of this workflow that deployed, by run id, checks the live site
-    against it and re-verifies every file it carries;
+  - `prepare` finds the snapshot of this workflow's last successful deploy (by run id and attempt, ordered by when
+    the deploy finished), checks the live site against it and re-verifies every file it carries;
   - `fuel` signs, in environment `feed-fuel`, with only the pinned checkout, the Python standard library and
     `openssl`;
   - `build` assembles the site and uploads the next snapshot;

@@ -224,9 +224,18 @@ class PagesSiteTest(unittest.TestCase):
             feedlib.unpack_index(feedlib.pack_index({"../etc/passwd": "a" * 64}))
 
 
+T0 = dt.datetime(2026, 11, 17, tzinfo=dt.timezone.utc)
+
+
+def at(hours: float) -> str:
+    return (T0 - dt.timedelta(hours=hours)).isoformat().replace("+00:00", "Z")
+
+
 class FakeGitHub:
-    def __init__(self, runs, deployed_ids, artifacts=None):
-        self.runs, self.deployed_ids, self.artifacts = runs, set(deployed_ids), artifacts or {}
+    """runs: workflow runs; jobs: {run id: [(attempt, deploy job name, conclusion, completed hours ago)]}."""
+
+    def __init__(self, runs, jobs=None, artifacts=None):
+        self.runs, self.jobs, self.artifacts = runs, jobs or {}, artifacts or {}
         self.calls = []
 
     def get(self, path):
@@ -234,70 +243,104 @@ class FakeGitHub:
         if "/actions/workflows/pages.yml/runs" in path:
             page = int(path.rsplit("page=", 1)[1])
             return {"workflow_runs": self.runs[(page - 1) * 100:page * 100]}
-        if path.endswith("/jobs?per_page=100"):
+        if "/jobs?filter=all" in path:
             run_id = int(path.split("/runs/")[1].split("/")[0])
-            conclusion = "success" if run_id in self.deployed_ids else "skipped"
-            return {"jobs": [{"name": "build", "steps": []},
-                             {"name": "deploy", "steps": [{"name": "Deploy to Pages", "conclusion": conclusion}]}]}
+            return {"jobs": [{"name": "build", "run_attempt": a, "steps": []} for a, *_ in self.jobs.get(run_id, [])]
+                    + [{"name": name, "run_attempt": a,
+                        "steps": [{"name": "Deploy to Pages", "conclusion": c, "completed_at": at(h)}]}
+                       for a, name, c, h in self.jobs.get(run_id, [])]}
         if "/artifacts?name=" in path:
             run_id = int(path.split("/runs/")[1].split("/")[0])
-            return {"artifacts": self.artifacts.get(run_id, [])}
+            name = path.split("name=")[1].split("&")[0]
+            return {"artifacts": [a for a in self.artifacts.get(run_id, []) if a["name"] == name]}
         raise AssertionError(path)
 
     def download(self, path):
         return self.zip
 
     @staticmethod
-    def run(run_id, event="schedule", branch="master", fork=False, days_ago=1):
-        created = dt.datetime(2026, 11, 17, tzinfo=dt.timezone.utc) - dt.timedelta(days=days_ago)
+    def run(run_id, event="schedule", branch="master", fork=False, days_ago=1, updated_hours_ago=None):
+        created = T0 - dt.timedelta(days=days_ago)
+        updated = T0 - dt.timedelta(hours=updated_hours_ago) if updated_hours_ago is not None else created
         return {"id": run_id, "event": event, "head_branch": branch, "created_at": created.isoformat(),
-                "repository": {"id": 1}, "head_repository": {"id": 2 if fork else 1}}
+                "updated_at": updated.isoformat(), "repository": {"id": 1}, "head_repository": {"id": 2 if fork else 1}}
 
 
 class SnapshotLookupTest(unittest.TestCase):
-    NOW = dt.datetime(2026, 11, 17, tzinfo=dt.timezone.utc)
+    def find(self, gh):
+        return pages_site.find_last_deployment(gh, "o/r", T0)
 
-    def test_the_newest_trusted_run_whose_deploy_step_succeeded_is_chosen(self):
+    def test_only_trusted_runs_count(self):
         run = FakeGitHub.run
         runs = [
-            run(60, event="pull_request"),           # a fork's PR from a branch named master
-            run(59, fork=True, event="push"),         # a fork's run
-            run(58),                                  # a no-change cron: deploy skipped
-            run(57, branch="feature"),                # another branch
-            run(56, event="workflow_dispatch"),       # deployed
-            run(55, event="push"),                    # deployed, older
+            run(60, event="pull_request", updated_hours_ago=1),  # a fork's PR from a branch named master
+            run(59, fork=True, event="push", updated_hours_ago=2),
+            run(58, updated_hours_ago=3),                          # a no-change cron: deploy skipped
+            run(57, branch="feature", updated_hours_ago=4),
+            run(56, event="workflow_dispatch", updated_hours_ago=5),
+            run(55, event="push", updated_hours_ago=6),
         ]
-        gh = FakeGitHub(runs, deployed_ids={60, 59, 57, 56, 55})
-        self.assertEqual(56, pages_site.find_snapshot_run(gh, "o/r", 61, self.NOW)["id"])
-        self.assertFalse(any("/runs/60/" in c or "/runs/59/" in c or "/runs/57/" in c for c in gh.calls))
+        jobs = {r: [(1, f"deploy feeds-site-1", "success", h)] for r, h in [(60, 1), (59, 2), (57, 4), (55, 6)]}
+        jobs[58] = [(1, "deploy feeds-site-1", "skipped", 3)]
+        jobs[56] = [(1, "deploy feeds-site-1", "success", 5)]
+        gh = FakeGitHub(runs, jobs)
+        found = self.find(gh)
+        self.assertEqual((56, 1, "feeds-site-1"), (found.run_id, found.attempt, found.snapshot))
+        self.assertFalse(any(f"/runs/{n}/" in c for n in (60, 59, 57) for c in gh.calls))
+        # The scan stops once no older-updated run can hold a later deploy.
+        self.assertFalse(any("/runs/55/" in c for c in gh.calls))
 
-    def test_the_current_and_later_runs_never_count(self):
-        gh = FakeGitHub([FakeGitHub.run(70), FakeGitHub.run(61)], deployed_ids={70, 61})
-        self.assertEqual(61, pages_site.find_snapshot_run(gh, "o/r", 65, self.NOW)["id"])
+    def test_a_later_failed_attempt_does_not_hide_an_earlier_successful_deploy(self):
+        gh = FakeGitHub([FakeGitHub.run(70, updated_hours_ago=1)], {
+            70: [(1, "deploy feeds-site-1", "success", 3), (2, "deploy feeds-site-2", "failure", 1)]})
+        found = self.find(gh)
+        self.assertEqual((70, 1, "feeds-site-1"), (found.run_id, found.attempt, found.snapshot))
+
+    def test_a_deploy_only_re_run_keeps_the_snapshot_its_build_attempt_uploaded(self):
+        gh = FakeGitHub([FakeGitHub.run(70, updated_hours_ago=1)], {
+            70: [(1, "deploy feeds-site-1", "failure", 3), (2, "deploy feeds-site-1", "success", 1)]})
+        found = self.find(gh)
+        self.assertEqual((2, "feeds-site-1"), (found.attempt, found.snapshot))
+
+    def test_deploys_order_by_completion_not_run_id(self):
+        # Run 80 deployed first; run 71 was re-run afterwards and deployed last.
+        gh = FakeGitHub([FakeGitHub.run(80, updated_hours_ago=5), FakeGitHub.run(71, days_ago=3, updated_hours_ago=1)],
+                        {80: [(1, "deploy feeds-site-1", "success", 5)],
+                         71: [(1, "deploy feeds-site-1", "success", 70), (2, "deploy feeds-site-2", "success", 1)]})
+        found = self.find(gh)
+        self.assertEqual((71, 2, "feeds-site-2"), (found.run_id, found.attempt, found.snapshot))
+
+    def test_an_unnamed_or_malformed_deploy_job(self):
+        gh = FakeGitHub([FakeGitHub.run(5, updated_hours_ago=1)], {5: [(1, "deploy", "success", 1)]})
+        self.assertIsNone(self.find(gh).snapshot, "a deploy from before the snapshot existed")
+        gh = FakeGitHub([FakeGitHub.run(5, updated_hours_ago=1)], {5: [(1, "deploy ../x", "success", 1)]})
+        self.assertIsNone(self.find(gh))
 
     def test_nothing_inside_the_retention_window_is_a_bootstrap(self):
-        gh = FakeGitHub([FakeGitHub.run(5, days_ago=91)], deployed_ids={5})
-        self.assertIsNone(pages_site.find_snapshot_run(gh, "o/r", 10, self.NOW))
-        self.assertIsNone(pages_site.find_snapshot_run(FakeGitHub([], set()), "o/r", 10, self.NOW))
+        gh = FakeGitHub([FakeGitHub.run(5, days_ago=91)], {5: [(1, "deploy feeds-site-1", "success", 1)]})
+        self.assertIsNone(self.find(gh))
+        self.assertIsNone(self.find(FakeGitHub([])))
 
-    def test_the_artifact_is_taken_from_that_run_and_extracted_safely(self):
+    def test_the_named_artifact_is_taken_from_that_run_and_extracted_safely(self):
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w") as archive:
             archive.writestr("snapshot.json", "{}")
             archive.writestr("feeds/fuel/envelope.json", "{}")
-        gh = FakeGitHub([], set(), artifacts={56: [{"id": 7, "name": "feeds-site", "expired": False}]})
+        gh = FakeGitHub([], artifacts={56: [{"id": 7, "name": "feeds-site-2", "expired": False},
+                                            {"id": 6, "name": "feeds-site-1", "expired": False}]})
         gh.zip = buffer.getvalue()
         with tempfile.TemporaryDirectory() as tmp:
-            self.assertTrue(pages_site.fetch_snapshot(gh, "o/r", 56, Path(tmp)))
+            self.assertTrue(pages_site.fetch_snapshot(gh, "o/r", 56, "feeds-site-2", Path(tmp)))
+            self.assertIn("/actions/runs/56/artifacts?name=feeds-site-2&per_page=10", gh.calls[-1])
             self.assertTrue((Path(tmp) / "feeds" / "fuel" / "envelope.json").is_file())
-            self.assertFalse(pages_site.fetch_snapshot(gh, "o/r", 55, Path(tmp)))
+            self.assertFalse(pages_site.fetch_snapshot(gh, "o/r", 56, "feeds-site-3", Path(tmp)))
 
         evil = io.BytesIO()
         with zipfile.ZipFile(evil, "w") as archive:
             archive.writestr("../outside.json", "{}")
         gh.zip = evil.getvalue()
         with tempfile.TemporaryDirectory() as tmp, self.assertRaises(FeedError):
-            pages_site.fetch_snapshot(gh, "o/r", 56, Path(tmp))
+            pages_site.fetch_snapshot(gh, "o/r", 56, "feeds-site-2", Path(tmp))
 
 
 if __name__ == "__main__":
