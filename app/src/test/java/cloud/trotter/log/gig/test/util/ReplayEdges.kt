@@ -19,7 +19,6 @@ import cloud.trotter.log.gig.core.pipeline.accessibility.input.AccessibilitySour
 import cloud.trotter.log.gig.domain.model.accessibility.UiNode
 import cloud.trotter.log.gig.domain.model.cards.FlowCardSnapshot
 import cloud.trotter.log.gig.domain.model.location.Coordinates
-import cloud.trotter.log.gig.domain.model.location.UserLocation
 import cloud.trotter.log.gig.domain.state.OfferIntent
 import cloud.trotter.log.gig.domain.state.Platform
 import cloud.trotter.log.gig.state.effects.OfferActionReceiver
@@ -133,9 +132,6 @@ object ReplayEdges {
                 delay(intervalMs)
             }
         }.onStart { activeCollectors++ }.onCompletion { activeCollectors-- }
-
-        override suspend fun getLastKnownLocation(): Coordinates? = null
-        override suspend fun getUserLocation(): UserLocation? = null
     }
 
     /**

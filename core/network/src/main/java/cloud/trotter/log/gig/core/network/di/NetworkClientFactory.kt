@@ -36,16 +36,15 @@ object NetworkClientFactory {
     private const val DEFAULT_TIMEOUT_SECONDS = 30L
 
     /**
-     * Query parameters redacted from HTTP logs by default (#348). The EIA gas-price API
-     * carries its secret as an `api_key` query param, so it must never reach logcat or
-     * the persisted file log. Redaction is the default so a new caller cannot forget it.
+     * Query parameters redacted from HTTP logs by default (#348). No current upstream carries a
+     * secret in its query; `api_key`, the common name for one, stays redacted so a new caller
+     * that adds such a key cannot leak it to logcat or the persisted file log.
      */
     private val DEFAULT_REDACTED_QUERY_PARAMS = listOf("api_key")
 
     /**
      * Lenient JSON for government APIs whose schemas we do not control: ignore unknown
-     * keys, tolerate loose typing, coerce nulls into defaults. Shared so both gov-API
-     * providers parse identically.
+     * keys, tolerate loose typing, coerce nulls into defaults.
      */
     val govApiJson: Json = Json {
         ignoreUnknownKeys = true

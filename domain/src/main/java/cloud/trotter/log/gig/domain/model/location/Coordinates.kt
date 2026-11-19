@@ -14,7 +14,7 @@ import kotlin.math.sqrt
  * without them (#1057/#918 — the platform dropped all of them on the floor, so a single ~1,457 km
  * fused fix added 905 mi to the persisted odometer with nothing to reject it). All three are
  * **nullable** — a fix may genuinely lack an accuracy estimate, and every non-sensor construction
- * site (tests, geocoding, fuel-price lookups) legitimately has none of them. The policy degrades to
+ * site (tests among them) legitimately has none of them. The policy degrades to
  * a bounded jump check when it cannot compute an elapsed time.
  *
  * None of the three participates in [distanceTo], and none is persisted — they live in memory for

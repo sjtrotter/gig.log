@@ -1,7 +1,6 @@
 package cloud.trotter.log.gig.core.location
 
 import cloud.trotter.log.gig.domain.model.location.Coordinates
-import cloud.trotter.log.gig.domain.model.location.UserLocation
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -14,6 +13,4 @@ interface LocationDataSource {
      * The GPS hardware is only active while this Flow is being collected.
      */
     val locationUpdates: Flow<Coordinates>
-    suspend fun getLastKnownLocation(): Coordinates?
-    suspend fun getUserLocation(): UserLocation?
 }
