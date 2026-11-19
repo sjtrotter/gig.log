@@ -189,6 +189,21 @@ class FuelFeedSwitchTest {
         assertEquals(false, phone.store.current[autoKey])
     }
 
+    @Test fun `a use auto price write that loses to a Costs on leaves the feed on`() = runBlocking {
+        val phone = Phone(auto = false)
+        val since = phone.repository.gasAutoRevision()
+        phone.store.holdWrites()
+        val costs = launch(start = CoroutineStart.UNDISPATCHED) { phone.repository.setGasPriceAuto(true) }
+        val resume = async(start = CoroutineStart.UNDISPATCHED) {
+            phone.repository.updateGasPriceAutoIfUnchanged(3.1f, FuelPriceStamp(0L, 1L), since)
+        }
+        phone.store.releaseWrites()
+        costs.join()
+        assertFalse("the Costs choice came after the revision was read", resume.await())
+        assertEquals(true, phone.store.current[autoKey])
+        assertTrue(phone.switch.enabled.value)
+    }
+
     @Test fun `the stored flag is read once at start, and no collector follows the store`() = runBlocking {
         val on = Phone(auto = true)
         assertTrue(on.switch.enabled.value)

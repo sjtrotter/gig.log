@@ -98,14 +98,14 @@ class FuelFeedSwitch @Inject constructor(
     /**
      * Runs [write] (a save that may turn auto on, never off) only when no other write or close came after
      * [since], a [revision] read before the work that led to it began; null when one did, and nothing is written.
-     * The check runs under the same lock as every write, so a choice the dasher makes meanwhile is never overwritten:
-     * one made before the lock is taken skips this write, and one made after it lands after this one.
+     * The check and the new choice number are one step under the same lock as every write, so a choice the dasher
+     * makes meanwhile is never overwritten: one made before the lock is taken skips this write, and one made after it
+     * lands after this one. A skipped write takes no choice number, so it never stops the write it lost to from
+     * turning the switch on.
      */
-    suspend fun <R> writeIfUnchanged(since: Long, write: suspend () -> R): R? {
-        val choice = choices.incrementAndGet()
-        return writes.withLock {
-            if (choice != since + 1 || choices.get() != choice) null else saveAndSettle(choice, write)
-        }
+    suspend fun <R> writeIfUnchanged(since: Long, write: suspend () -> R): R? = writes.withLock {
+        val choice = synchronized(latest) { if (choices.get() == since) choices.incrementAndGet() else null }
+        if (choice == null) null else saveAndSettle(choice, write)
     }
 
     /** Must run under [writes]. */
