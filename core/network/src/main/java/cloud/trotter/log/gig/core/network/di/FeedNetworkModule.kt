@@ -7,7 +7,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
 
-/** #1565: the one feed transport. It has no consumer yet; fuel (#1566) and rules (#640) inject it. */
+/** #1565: the one feed transport. The rules (#640) and fuel (#1566) feed channels inject it. */
 @Module
 @InstallIn(SingletonComponent::class)
 object FeedNetworkModule {

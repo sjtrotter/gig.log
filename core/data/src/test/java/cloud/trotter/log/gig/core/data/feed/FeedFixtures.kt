@@ -4,8 +4,10 @@ import cloud.trotter.feed.contract.Feed
 import cloud.trotter.feed.contract.FeedFiles
 import cloud.trotter.feed.contract.FeedKeys
 import cloud.trotter.feed.contract.FeedResult
+import cloud.trotter.feed.contract.FeedTrust
 import cloud.trotter.feed.contract.UserPin
 import cloud.trotter.feed.contract.VerifiedFeedFile
+import cloud.trotter.feed.contract.VerifiedManifest
 import cloud.trotter.log.gig.core.network.feed.FeedSource
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -19,6 +21,7 @@ import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
 import mockwebserver3.RecordedRequest
 import okio.Buffer
+import java.io.ByteArrayInputStream
 import java.security.KeyPair
 import java.security.KeyPairGenerator
 import java.security.Signature
@@ -48,8 +51,11 @@ class SignedSource(val feed: Feed, url: String = FeedTestServer.CUSTOM_FEEDS_URL
     }
 
     /** A generation of one payload file whose body is the test stager's `{"v":…, "period":…}`. */
-    fun generation(sequence: Long, value: String, period: Long = sequence - 7 * 24 * HOUR): Generation {
-        val payload = """{"v":"$value","period":$period}""".toByteArray()
+    fun generation(sequence: Long, value: String, period: Long = sequence - 7 * 24 * HOUR): Generation =
+        generation(sequence, """{"v":"$value","period":$period}""".toByteArray())
+
+    /** A generation of one payload file holding [payload] as given. */
+    fun generation(sequence: Long, payload: ByteArray): Generation {
         val manifest = """{"format_version":1,"source":"${source.id}","feed":"${feed.wire}","sequence":$sequence,""" +
             """"issued_at":$sequence,"contract":1,"files":[{"name":"${feed.fileName}","sha256":"${FeedKeys.sha256Hex(payload)}",""" +
             """"size":${payload.size}}]}"""
@@ -61,6 +67,14 @@ class SignedSource(val feed: Feed, url: String = FeedTestServer.CUSTOM_FEEDS_URL
         val keyId = FeedKeys.keyId(keys.public.encoded)
         val envelope = """{"manifest":${JsonPrimitive(manifest)},"key":"$keyId","sig":"$sig"}""".toByteArray()
         return Generation(sequence, envelope, payload)
+    }
+
+    /** [generation]'s payload file as the verifier hands it to a stager: through the real envelope and file checks. */
+    fun verified(generation: Generation): List<VerifiedFeedFile> {
+        val trust = (FeedTrust.shipped(listOf(source.userPin)) as FeedResult.Ok).value
+        val manifest = (VerifiedManifest.verify(trust, source.id, feed, ByteArrayInputStream(generation.envelope)) as FeedResult.Ok).value
+        val name = requireNotNull(feed.fileName)
+        return listOf((VerifiedFeedFile.verify(manifest, name, ByteArrayInputStream(generation.payload)) as FeedResult.Ok).value)
     }
 }
 
