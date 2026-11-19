@@ -813,7 +813,7 @@ only rules and nothing fetched; ADR-0013, design-r3 § App client and plan-r7 §
   store: it is read once at start, and a choice made before that read lands wins. Turning on counts once saved, and an
   "off" that lands while an "on" is saving stays off. `RulesFeedSwitchTest` turns it off with the store's write held
   back and shows the next exchange refused with no request at the server. This closes the #1565 consent window for
-  rules; the fuel switch's own window stays open until #1566.
+  rules; `FuelFeedSwitch` closes fuel's the same way.
 - **Taps.** "Check now" (Settings) and the notice's "Check for new rules" run `checkNow`: with the switch off, on a
   `OneShotGrant` minted in the tap's coroutine (the Settings screen's scope, or one application-scope coroutine per
   notice tap), so a tap allows one fetch and is its own consent; with it on, a plain refresh that skips the hourly
