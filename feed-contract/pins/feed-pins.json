@@ -1,4 +1,10 @@
 {
   "format_version": 1,
-  "feeds": {}
+  "feeds": {
+    "fuel": {
+      "epoch": 1,
+      "primary": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE7u7spnH1sEReqJGTJ0WwyBtxoVl7fm9YX27OgztOeU0BTlFlPdB+7vcwprdzgMAUIUjIHIT0P07tbvq5rhjKcw==",
+      "backup": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEHveegTUEP9SOCcV6Ng72l4S5p9J4CFo/KvKpJ37cF7pYkN2nZIVapyl8udifWtlpHQVAjjJBJITnDWA2G8CoGw=="
+    }
+  }
 }
