@@ -2,11 +2,11 @@ package cloud.trotter.log.gig.feature.bubble.hud
 
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.onRoot
-import androidx.compose.ui.test.printToString
-import androidx.compose.ui.test.performClick
 import cloud.trotter.log.gig.core.designsystem.theme.GigLogTheme
 import cloud.trotter.log.gig.core.designsystem.time.LocalNowProvider
 import cloud.trotter.log.gig.domain.fuel.FuelPriceStamp
@@ -60,23 +60,32 @@ class GasQuickEditAgeTest {
     }
 
     @Test fun `the auto caption reads the week and turns older with the clock`() {
-        show(GasRowModel(3.05f, auto = true, stamp = stamp))
-        compose.onNodeWithText("Auto").performClick()
+        var now by mutableLongStateOf(stamp.issuedAt + day)
+        compose.setContent {
+            GigLogTheme {
+                GasQuickEdit(3.05f, isGasPriceAuto = true, isRefreshing = false, showRefreshError = false, stamp = stamp,
+                    nowMillis = now, onSetGasPrice = {}, onRefreshGasPrice = {}, onResumeAutoGasPrice = {})
+            }
+        }
         settle()
-        // DIAGNOSTIC (remove before merge): the tree the assertion below searches.
-        println(compose.onRoot(useUnmergedTree = true).printToString())
         compose.onNodeWithText("EIA, week of Nov 16").assertExists()
 
-        ageThePrice()
+        now = stamp.issuedAt + 21 * day + 1
+        settle()
 
         compose.onNodeWithText("Older price: EIA, week of Nov 16").assertExists()
         compose.onNodeWithText("EIA, week of Nov 16").assertDoesNotExist()
     }
 
     @Test fun `with no stamp the auto caption stays Auto`() {
-        show(GasRowModel(3.05f, auto = true))
-        compose.onNodeWithText("Auto").performClick()
+        compose.setContent {
+            GigLogTheme {
+                GasQuickEdit(3.05f, isGasPriceAuto = true, isRefreshing = false, showRefreshError = false, stamp = null,
+                    nowMillis = clock.millis, onSetGasPrice = {}, onRefreshGasPrice = {}, onResumeAutoGasPrice = {})
+            }
+        }
         settle()
+        compose.onNodeWithText("Auto").assertExists()
         compose.onNodeWithText("EIA, week of", substring = true).assertDoesNotExist()
     }
 

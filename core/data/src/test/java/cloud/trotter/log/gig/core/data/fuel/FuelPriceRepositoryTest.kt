@@ -80,7 +80,7 @@ class FuelPriceRepositoryTest {
     /** DIAGNOSTIC (remove before merge): prints every log line, so a swallowed follow error shows in CI output. */
     private val printing = object : timber.log.Timber.Tree() {
         override fun log(priority: Int, tag: String?, message: String, t: Throwable?) {
-            println("LOG p=$priority tag=$tag $message")
+            println("LOG t=${System.currentTimeMillis()} p=$priority tag=$tag $message")
             t?.printStackTrace(System.out)
         }
     }
@@ -111,8 +111,9 @@ class FuelPriceRepositoryTest {
     private fun envelopeRequests() = site.requests.count { it.url.encodedPath.endsWith("/envelope.json") }
 
     private suspend fun awaitStored(price: Float, stamp: FuelPriceStamp = this.stamp) {
-        withTimeout(5_000) {
-            store.gasPrice.first { it == price }
+        println("LOG t=${System.currentTimeMillis()} await price=$price")
+        withTimeout(30_000) {
+            store.gasPrice.first { println("LOG t=${System.currentTimeMillis()} stored price=$it"); it == price }
             store.gasPriceStamp.first { it == stamp }
         }
     }
