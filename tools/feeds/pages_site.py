@@ -305,6 +305,7 @@ def carry(snapshot: Path | None, epochs: dict, out: Path, base_url: str, run_id:
     out.mkdir(parents=True, exist_ok=True)
     if snapshot is None:
         notice("no snapshot of a deployed site: starting from an empty site (bootstrap)")
+        (out / "carried.json").write_bytes(feedlib.canonical_json({"run_id": None, "feeds": []}))
         return {}
     record = read_record(snapshot)
     check_live_agrees(record, base_url, run_id, fetch)
@@ -321,6 +322,8 @@ def carry(snapshot: Path | None, epochs: dict, out: Path, base_url: str, run_id:
         write_feed(files, None, out)
         carried[feed] = files
         print(f"carried {feed}: sequence {files.current.sequence}")
+    (out / "carried.json").write_bytes(feedlib.canonical_json({"run_id": record.get("run_id"),
+                                                               "feeds": sorted(carried)}))
     return carried
 
 
@@ -373,8 +376,14 @@ def check_sequences(feeds: dict, base_url: str, run_id: int, fetch=fetch_live) -
 
 
 def site_index(site: Path) -> dict[str, str]:
-    return {p.relative_to(site).as_posix(): feedlib.sha256_hex(p.read_bytes())
-            for p in sorted(site.rglob("*")) if p.is_file()}
+    """Every file the site serves, by path. Dot files (.nojekyll) are left out: the Pages artifact may not carry
+    them, and a Pages site published from Actions does not run Jekyll either way."""
+    index = {}
+    for path in sorted(site.rglob("*")):
+        rel = path.relative_to(site).as_posix()
+        if path.is_file() and not any(part.startswith(".") for part in rel.split("/")):
+            index[rel] = feedlib.sha256_hex(path.read_bytes())
+    return index
 
 
 def assemble(site: Path, carried_dir: Path | None, fuel_dir: Path | None, epochs: dict, snapshot_out: Path,

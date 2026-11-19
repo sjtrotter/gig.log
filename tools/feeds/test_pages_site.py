@@ -91,7 +91,8 @@ class PagesSiteTest(unittest.TestCase):
         self.assertTrue((site / "feeds" / "README.md").is_file())
         self.assertEqual(["fuel"], list(deploys.record()["feeds"]))
         self.assertEqual(index, deploys.record()["site"])
-        self.assertIn(".nojekyll", index)
+        self.assertNotIn(".nojekyll", index)
+        self.assertIn("index.html", index)
         self.assertIn("feeds/fuel/envelope.json", index)
 
     def test_each_feed_keeps_its_current_and_previous_payloads(self):
