@@ -78,6 +78,7 @@ Five items the dev confirmed on 2026-10-07. Each full item appears once, with it
 - [The health report carries per-rule shortfall counts (#1571)](checklist/open/1571-health-report-parse-shortfall.md)
 - [Shadow mode runs the check candidate and reports it daily (#1630)](checklist/open/1630-shadow-mode-reports-daily.md)
 - [A rule in a parse-rot incident sends its screen's outline once a day (#1573)](checklist/open/1573-matched-skeleton-while-rule-broken.md)
+- [An unrecognized tap shows on the operator's tap view the next day (#1634)](checklist/open/1634-click-evidence.md)
 - [The bottom bar's three tabs and where each link lands (#1447)](checklist/open/1447-bottom-bar-routes.md)
 - [Permission and consent screens say only what each one does (#1457)](checklist/open/1457-permission-and-consent-screens.md)
 - [One offer story, no score or verdict (#1442)](checklist/open/1442-one-offer-story-no-score-or-verdict.md)

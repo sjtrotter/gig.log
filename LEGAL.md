@@ -186,7 +186,9 @@ hashing a guess and comparing, which is how the app's own labels are matched. Th
 withholds the names, addresses and codes it detects before anything is hashed, and today
 it withholds amounts and times too. A planned change (#1619) sends those as their format
 instead (`$##.##` for an amount, never the amount). While a recognition rule is failing to read a screen it still
-recognizes, the census also sends the same kind of layout of that screen, labelled with the rule's name (#1573). The census never sends a screen as the driver sees it. It also sends a daily
+recognizes, the census also sends the same kind of layout of that screen, labelled with the rule's name (#1573). When
+the driver taps a button gig.log does not recognize, the census can send the layout of that screen with the tapped
+button marked by its position, never its words, its time or the order of taps (#1634). The census never sends a screen as the driver sees it. It also sends a daily
 recognition health report: counts of recognized and unrecognized screens, per rule and
 per delivery-app version. A planned contributor tier lets a driver confirm that a word on
 a screen is the app's own wording (a button label, a heading), never a customer's
