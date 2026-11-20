@@ -574,6 +574,16 @@ class CensusApi(
             .digest(items.map { (fingerprint, ruleId) -> "$fingerprint\n$ruleId" }.sorted().joinToString("\n").toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(Locale.ROOT, it.toInt() and 0xff) }.take(32)
 
+        /**
+         * #1634: the batch id of a `uinode.clicked.v1` batch, initial or a split half, from each item's clicked identity
+         * (`ClickedIdentity.of`: `day|fingerprint|layout|ownerPath`), sorted. Two owners on one layout are two
+         * identities, so they never share a batch id, and the `c-` prefix keeps clicked batches apart from the UNKNOWN
+         * and matched batches of the same layouts.
+         */
+        fun clickedBatchId(identities: List<String>): String = "c-" + MessageDigest.getInstance("SHA-256")
+            .digest(identities.sorted().joinToString("\n").toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(Locale.ROOT, it.toInt() and 0xff) }.take(32)
+
         fun envelopeBatchId(itemsJson: List<String>): String = "env-" + MessageDigest.getInstance("SHA-256")
             .digest(itemsJson.joinToString("\n").toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(Locale.ROOT, it.toInt() and 0xff) }.take(32)

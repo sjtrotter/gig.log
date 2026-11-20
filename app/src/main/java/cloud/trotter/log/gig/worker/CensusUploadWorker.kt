@@ -5,6 +5,7 @@ import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import cloud.trotter.log.gig.BuildConfig
+import cloud.trotter.log.gig.core.data.census.CensusClickCandidates
 import cloud.trotter.log.gig.core.data.census.CensusCredentialStore
 import cloud.trotter.log.gig.core.data.census.CensusCredentialStore.Credential
 import cloud.trotter.log.gig.core.data.census.CensusDataDeletion
@@ -65,6 +66,8 @@ class CensusUploadWorker @AssistedInject constructor(
     @param:CensusEnvelopeSpool private val envelopeSpool: CensusSpool,
     private val envelopeSink: CensusEnvelopeSink,
     private val deletion: CensusDataDeletion,
+    /** #1634: the click evidence store; its frozen batches go before the spool's. */
+    private val clicks: CensusClickCandidates,
     /** #1626: told which skeleton items the server stored, so a review reads classes only for its own upload. */
     private val uploadedSkeletons: UploadedSkeletons = UploadedSkeletons.NONE,
 ) : CoroutineWorker(appContext, workerParams) {
@@ -444,6 +447,7 @@ class CensusUploadWorker @AssistedInject constructor(
             return Result.success()
         }
         val run = UploadRun()
+        uploadClicked(api, credential, run, record)?.let { return it }
         repeat(3) {
             if (!preferences.censusUploadEnabled.first()) {
                 record.set(CensusRunOutcome.DISABLED)
@@ -482,6 +486,89 @@ class CensusUploadWorker @AssistedInject constructor(
         // Three bounded selections exhausted without seeing an empty spool: never claim emptiness.
         summarize(record, spoolEmpty = false)
         return Result.success()
+    }
+
+    /**
+     * #1634: the click evidence. Days that have ended are frozen first, then each frozen batch is sent with its own
+     * frozen bytes and batch id. A retryable answer (network, 5xx, 429, 401) keeps it for the next run unchanged; any
+     * other answer is final and deletes it, and a 413 splits it in key order. Null when the run goes on to the spool.
+     */
+    private suspend fun uploadClicked(api: CensusTransport, credential: Credential, run: UploadRun, record: RunRecord): Result? {
+        if (!preferences.censusUploadEnabled.first()) {
+            record.set(CensusRunOutcome.DISABLED)
+            return Result.success()
+        }
+        clicks.closeEndedDays()
+        val covered = coveredPlatforms().toSet()
+        for (frozen in clicks.frozen()) {
+            val batch = clicks.restrict(frozen, covered)
+            if (batch == null || batch.items.size < frozen.items.size) {
+                stats.platformNotChosen.addAndGet((frozen.items.size - (batch?.items?.size ?: 0)).toLong())
+            }
+            if (batch != null) uploadClickedBatch(api, credential, batch, run, record)?.let { return it }
+        }
+        return null
+    }
+
+    /** One frozen clicked batch; null when it is resolved and the run goes on. */
+    private suspend fun uploadClickedBatch(
+        api: CensusTransport,
+        credential: Credential,
+        batch: CensusClickCandidates.Batch,
+        run: UploadRun,
+        record: RunRecord,
+    ): Result? {
+        if (!preferences.censusUploadEnabled.first()) {
+            record.set(CensusRunOutcome.DISABLED)
+            return Result.success()
+        }
+        when (val result = uploadWithResign(api, credential, batch.items, batch.batchId, run, envelopes = false, record)) {
+            is UploadResult.Accepted -> {
+                clicks.resolve(batch)
+                record.accepted += result.accepted
+                record.duplicate += result.duplicate
+                record.rejected += result.rejected.values.sum()
+                stats.uploaded.addAndGet(result.accepted.toLong())
+                stats.duplicate.addAndGet(result.duplicate.toLong())
+                stats.reject(result.rejected)
+                Timber.tag(TAG).i("census clicked uploaded=%d duplicate=%d rejected=%d", result.accepted, result.duplicate, result.rejected.values.sum())
+            }
+            UploadResult.Duplicate -> {
+                clicks.resolve(batch)
+                record.duplicate += batch.items.size
+                stats.duplicate.addAndGet(batch.items.size.toLong())
+            }
+            UploadResult.PayloadTooLarge -> {
+                val halves = clicks.split(batch)
+                if (halves == null) {
+                    clicks.resolve(batch)
+                    record.set(CensusRunOutcome.OVERSIZED)
+                    stats.oversized.incrementAndGet()
+                } else {
+                    for (half in halves) uploadClickedBatch(api, credential, half, run, record)?.let { return it }
+                }
+            }
+            UploadResult.BadRequest -> {
+                clicks.resolve(batch)
+                record.set(CensusRunOutcome.BAD_REQUEST)
+                stats.badRequest.incrementAndGet()
+            }
+            is UploadResult.BatchQuality -> {
+                clicks.resolve(batch)
+                record.rejected += result.rejected.values.sum()
+                stats.reject(result.rejected)
+                Timber.tag(TAG).w("census clicked batch rejected reasons=%s", result.rejected)
+            }
+            // A 4xx other than 413 and 429 is final.
+            UploadResult.NotTrusted -> clicks.resolve(batch)
+            is UploadResult.ServerUnavailable -> if (result.status in 500..599) return failure(record) else clicks.resolve(batch)
+            is UploadResult.BudgetExhausted -> return defer(record, result.retryAfterSeconds, DeferCause.BUDGET)
+            is UploadResult.RateLimited -> return defer(record, result.retryAfter, DeferCause.UPLOAD_RATE_LIMIT)
+            is UploadResult.Unauthorized -> return unauthorized(credential, run, record)
+            UploadResult.Revoked -> return revoke(record)
+            is UploadResult.TransportFailure -> return failure(record)
+        }
+        return null
     }
 
     private suspend fun uploadEnvelopes(api: CensusTransport, credential: Credential, record: RunRecord): Result {
@@ -549,7 +636,7 @@ class CensusUploadWorker @AssistedInject constructor(
                 return Result.success()
             }
         }
-        when (val result = uploadWithResign(api, credential, items, batchId, run, envelopes, record)) {
+        when (val result = uploadWithResign(api, credential, items.map { it.itemJson }, batchId, run, envelopes, record)) {
             is UploadResult.Accepted -> {
                 removeBatch(ids, spool)
                 if (envelopes) {
@@ -627,17 +714,7 @@ class CensusUploadWorker @AssistedInject constructor(
                     summarize(record, record.skeletonSpoolEmpty)
                     return Result.success()
                 }
-                record.set(when {
-                    run.clockSkew -> CensusRunOutcome.CLOCK_SKEW
-                    !run.resigned -> CensusRunOutcome.DISABLED
-                    else -> CensusRunOutcome.UNAUTHORIZED
-                })
-                if (credential.enrolled && run.resigned && !run.clockSkew) {
-                    stats.unauthorized.incrementAndGet()
-                    // #1622: run() enrols a fresh ID and sends again; this batch stays queued for it.
-                    if (!record.authorized) record.identityUnknown = true
-                }
-                return Result.success()
+                return unauthorized(credential, run, record)
             }
             UploadResult.NotTrusted -> {
                 preferences.setCensusShareCaptures(false)
@@ -667,6 +744,21 @@ class CensusUploadWorker @AssistedInject constructor(
         }
     }
 
+    /** A skeleton or clicked batch answered 401: the run stops and the batch stays queued. */
+    private fun unauthorized(credential: Credential, run: UploadRun, record: RunRecord): Result {
+        record.set(when {
+            run.clockSkew -> CensusRunOutcome.CLOCK_SKEW
+            !run.resigned -> CensusRunOutcome.DISABLED
+            else -> CensusRunOutcome.UNAUTHORIZED
+        })
+        if (credential.enrolled && run.resigned && !run.clockSkew) {
+            stats.unauthorized.incrementAndGet()
+            // #1622: run() enrols a fresh ID and sends again; this batch stays queued for it.
+            if (!record.authorized) record.identityUnknown = true
+        }
+        return Result.success()
+    }
+
     /** #1626: a review-candidate bookkeeping failure never changes the run. */
     private suspend fun reportUploaded(items: List<CensusSpool.Spooled>) {
         try {
@@ -686,13 +778,12 @@ class CensusUploadWorker @AssistedInject constructor(
     private suspend fun uploadWithResign(
         api: CensusTransport,
         credential: Credential,
-        items: List<CensusSpool.Spooled>,
+        json: List<String>,
         batchId: String,
         run: UploadRun,
         envelopes: Boolean,
         record: RunRecord,
     ): UploadResult {
-        val json = items.map { it.itemJson }
         suspend fun post(): UploadResult = if (envelopes) api.uploadEnvelopes(credential.bearer(), batchId, json)
             else api.uploadSkeletons(credential.bearer(), batchId, json)
         var result = post()

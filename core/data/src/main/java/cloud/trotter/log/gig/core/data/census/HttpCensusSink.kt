@@ -8,6 +8,7 @@ import cloud.trotter.log.gig.domain.capture.CensusSink
 import cloud.trotter.log.gig.domain.census.CensusSampleKey
 import cloud.trotter.log.gig.domain.census.CensusUploadPreferences
 import cloud.trotter.log.gig.domain.census.CensusUploadStats
+import cloud.trotter.log.gig.domain.census.ClickEvidence
 import cloud.trotter.log.gig.domain.census.MatchedSkeletons
 import cloud.trotter.log.gig.domain.census.contributor.ContributorReviewIntake
 import cloud.trotter.log.gig.domain.di.ApplicationScope
@@ -20,8 +21,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import timber.log.Timber
@@ -36,6 +38,11 @@ import javax.inject.Singleton
  * #1573: a matched skeleton also passes the daily matched limits ([CensusMatchedCap]), after the sample so a limit slot
  * is never spent on an item the sample drops. The matched schema is offered to the publisher only while the census
  * consent was given under a disclosure that names it ([MatchedSkeletons.MIN_DISCLOSURE_REVISION]).
+ *
+ * #1634: a clicked skeleton is offered only under the disclosure that names taps ([ClickEvidence.MIN_DISCLOSURE_REVISION])
+ * and never enters the daily sample, the matched limits or the spool: it goes to the click evidence store
+ * ([CensusClickCandidates]), whose selection does not depend on arrival order. A first-come sample would make the kept
+ * tap depend on which came first.
  */
 @Singleton
 class HttpCensusSink @Inject constructor(
@@ -47,20 +54,22 @@ class HttpCensusSink @Inject constructor(
     @IoDispatcher io: CoroutineDispatcher,
     @ReadsUnboundPlatforms readsUnboundPlatforms: Boolean,
     private val matchedCap: CensusMatchedCap,
+    /** #1634: the click evidence store; clicked skeletons go here instead of the spool. */
+    private val clicks: CensusClickCandidates,
     /** #1626: takes a spooled screen as a review candidate; it checks the contributor gate itself. */
     private val reviews: ContributorReviewIntake = ContributorReviewIntake.NONE,
 ) : CensusSink {
     private val readable = Platform.readable(readsUnboundPlatforms)
     private val enabled = preferences.enabled.stateIn(scope, SharingStarted.Eagerly, false)
     private val schemas = preferences.acceptedSchemaIds.stateIn(scope, SharingStarted.Eagerly, null)
-    private val matchedConsented = preferences.consentRevision
-        .map { (it ?: 0) >= MatchedSkeletons.MIN_DISCLOSURE_REVISION }
-        .stateIn(scope, SharingStarted.Eagerly, false)
+    private val revision = preferences.consentRevision.stateIn(scope, SharingStarted.Eagerly, null)
     // Wait for the persisted policy snapshot before enabling publication after process restart.
     override val isEnabled: Boolean get() = enabled.value && schemas.value != null
-    override val acceptedSchemaIds: Set<String> get() = schemas.value.orEmpty().let {
-        if (matchedConsented.value) it else it - SkeletonSchema.SCHEMA_ID_MATCHED
-    }
+    override val acceptedSchemaIds: Set<String> get() = consented(schemas.value.orEmpty(), revision.value)
+    override val clickEvidenceArmed: StateFlow<Boolean> =
+        combine(preferences.enabled, preferences.acceptedSchemaIds, preferences.consentRevision) { on, ids, revision ->
+            on && SkeletonSchema.SCHEMA_ID_CLICKED in consented(ids, revision)
+        }.stateIn(scope, SharingStarted.Eagerly, false)
     override val clearBoundary: Long get() = spool.generation
     override val collectsReviewWords: Boolean get() = isEnabled && reviews.wantsCandidates
     /** A record with the spool's clear boundary at the moment it was offered (#1622). */
@@ -93,6 +102,12 @@ class HttpCensusSink @Inject constructor(
                             continue
                         }
                         val item = CensusSkeletonSchema.deserialize(record.skeletonJson)
+                        // #1634: a clicked skeleton goes to its own store, which checks the boundary again under the
+                        // spool's lock; it never spends the sample or the matched limits.
+                        if ((item as? UiSkeletonDto)?.isClicked == true) {
+                            clicks.admit(item, record.skeletonJson, record.platform.wire, offered.generation)
+                            continue
+                        }
                         val key = requireNotNull(CensusSampleKey.of(item, record.presentFields))
                         if (!sample.admit(item.day, key)) {
                             stats.sampledRepeat.incrementAndGet()
@@ -122,6 +137,21 @@ class HttpCensusSink @Inject constructor(
     }
 
     override fun offer(record: CensusRecord): Boolean = channel.trySend(Offered(record, spool.generation)).isSuccess
+
+    internal companion object {
+        /**
+         * The schema ids [schemas] lists that the census consent given under disclosure [revision] covers: the matched
+         * schema from [MatchedSkeletons.MIN_DISCLOSURE_REVISION], the clicked schema from
+         * [ClickEvidence.MIN_DISCLOSURE_REVISION]. The ONE fold [acceptedSchemaIds] and [clickEvidenceArmed] share.
+         */
+        fun consented(schemas: Set<String>, revision: Int?): Set<String> {
+            val granted = revision ?: 0
+            var out = schemas
+            if (granted < MatchedSkeletons.MIN_DISCLOSURE_REVISION) out = out - SkeletonSchema.SCHEMA_ID_MATCHED
+            if (granted < ClickEvidence.MIN_DISCLOSURE_REVISION) out = out - SkeletonSchema.SCHEMA_ID_CLICKED
+            return out
+        }
+    }
 
     /** #1573: [boundary] is the [clearBoundary] the caller read when it took the frame; the spool drops a stale one. */
     override fun offer(record: CensusRecord, boundary: Long): Boolean = channel.trySend(Offered(record, boundary)).isSuccess
