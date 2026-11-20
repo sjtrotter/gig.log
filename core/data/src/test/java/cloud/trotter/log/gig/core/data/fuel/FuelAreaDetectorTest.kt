@@ -55,9 +55,21 @@ class FuelAreaDetectorTest {
 
     @Before fun plant() = Timber.plant(recorder)
 
-    @After fun uproot() = Timber.uproot(recorder)
+    /** The detector runs on the test scheduler, not `backgroundScope`, which `advanceUntilIdle` does not drain. */
+    private val detectorJob = Job()
 
-    private class Fixture(val preferences: AppPreferencesRepository, val detector: FuelAreaDetector)
+    @After fun uproot() {
+        detectorJob.cancel()
+        Timber.uproot(recorder)
+    }
+
+    private class Fixture(
+        val preferences: AppPreferencesRepository,
+        val detector: FuelAreaDetector,
+        val scope: CoroutineScope,
+    ) {
+        fun start() = detector.start(scope)
+    }
 
     private fun TestScope.fixture(
         locate: (Double, Double) -> FuelArea? = { lat, lon -> FuelAreaLocator.locate(lat, lon) },
@@ -72,7 +84,9 @@ class FuelAreaDetectorTest {
         val preferences = AppPreferencesRepository(
             store, GarageRepository(VehicleDataSource(MemoryPreferences())), FuelFeedSwitch(store, backgroundScope),
         )
-        return Fixture(preferences, FuelAreaDetector(preferences, odometer, dispatcher, locate))
+        return Fixture(
+            preferences, FuelAreaDetector(preferences, odometer, dispatcher, locate), CoroutineScope(dispatcher + detectorJob),
+        )
     }
 
     /** A fix at [minute] minutes of fix time on both clocks. */
@@ -92,7 +106,7 @@ class FuelAreaDetectorTest {
     @Test fun `on Automatic a fix picks the area, a second within ten minutes waits, and one after does not`() = runTest {
         val f = fixture()
         f.preferences.setGasPriceAuto(true)
-        f.detector.start(backgroundScope)
+        f.start()
         advanceUntilIdle()
 
         drive(fix(houston.first, houston.second, minute = 0))
@@ -109,7 +123,7 @@ class FuelAreaDetectorTest {
     @Test fun `a fix outside every state keeps the area`() = runTest {
         val f = fixture()
         f.preferences.setGasPriceAuto(true)
-        f.detector.start(backgroundScope)
+        f.start()
         advanceUntilIdle()
 
         drive(fix(houston.first, houston.second, minute = 0))
@@ -122,7 +136,7 @@ class FuelAreaDetectorTest {
         val f = fixture()
         f.preferences.setGasPriceAuto(true)
         f.preferences.setFuelPriceArea(FuelArea.OHIO)
-        f.detector.start(backgroundScope)
+        f.start()
         advanceUntilIdle()
 
         drive(fix(houston.first, houston.second, minute = 0))
@@ -137,7 +151,7 @@ class FuelAreaDetectorTest {
     @Test fun `with auto gas price off no fix is looked up`() = runTest {
         var lookups = 0
         val f = fixture { lat, lon -> lookups++; FuelAreaLocator.locate(lat, lon) }
-        f.detector.start(backgroundScope)
+        f.start()
         advanceUntilIdle()
 
         drive(fix(houston.first, houston.second, minute = 0))
@@ -149,7 +163,7 @@ class FuelAreaDetectorTest {
     @Test fun `turning Automatic back on looks up the next fix at once`() = runTest {
         val f = fixture()
         f.preferences.setGasPriceAuto(true)
-        f.detector.start(backgroundScope)
+        f.start()
         advanceUntilIdle()
         drive(fix(houston.first, houston.second, minute = 0))
 
@@ -166,7 +180,7 @@ class FuelAreaDetectorTest {
         var lookups = 0
         val f = fixture { _, _ -> lookups++; throw IllegalArgumentException("Bad outline magic") }
         f.preferences.setGasPriceAuto(true)
-        f.detector.start(backgroundScope)
+        f.start()
         advanceUntilIdle()
 
         drive(fix(houston.first, houston.second, minute = 0))
@@ -181,7 +195,7 @@ class FuelAreaDetectorTest {
     @Test fun `no log line carries a coordinate, and INFO names no area`() = runTest {
         val f = fixture()
         f.preferences.setGasPriceAuto(true)
-        f.detector.start(backgroundScope)
+        f.start()
         advanceUntilIdle()
 
         drive(fix(houston.first, houston.second, minute = 0))

@@ -127,8 +127,9 @@ checked against simplified U.S. state outlines bundled in the app (`FuelAreaLoca
 Bureau's 2024 1:20,000,000 cartographic boundaries, `tools/fuel-areas/`) and against the radius of each of the 10
 EIA cities, at most once every 10 minutes. This makes no location request of its own and calls no geocoder. The phone
 stores the resulting area code only (`fuel_price_area_detected`), never the coordinates; the fix is dropped after the
-check and never logged (the area's code is logged at DEBUG only). Nothing about the location or the area is sent: the
-fuel download is the same for every phone and carries neither (§6).
+check and never logged (the area's code is logged at DEBUG only). gig.log sends nothing about the location or the
+area: the fuel download is the same for every phone and carries neither (§6). Like the other app preferences, the
+area codes are included in Android backup and device transfer (§7).
 
 ### 2.5 What gig.log never processes
 

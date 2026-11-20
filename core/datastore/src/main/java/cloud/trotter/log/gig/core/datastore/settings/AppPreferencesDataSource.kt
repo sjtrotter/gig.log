@@ -78,13 +78,13 @@ class AppPreferencesDataSource @Inject constructor(
         // Written with the price in one edit; a typed price leaves them alone, since auto off marks it.
         val GAS_PRICE_PERIOD = longPreferencesKey("gas_price_period")
         val GAS_PRICE_ISSUED_AT = longPreferencesKey("gas_price_issued_at")
-        // The area whose fuel feed price the app uses, as the feed's area code. Never leaves the phone.
+        // The area whose fuel feed price the app uses, as the feed's area code. gig.log never sends it.
         val FUEL_PRICE_AREA = stringPreferencesKey("fuel_price_area")
         // Whether the area is worked out on the phone from the odometer's GPS fixes (#1687). Absent on installs from
-        // before Automatic existed; see fuelPriceAreaChoice. Never leaves the phone.
+        // before Automatic existed; see fuelPriceAreaChoice. gig.log never sends it.
         val FUEL_PRICE_AREA_AUTO = booleanPreferencesKey("fuel_price_area_auto")
         // The area the phone last worked out, as the feed's area code. The only location-derived value stored: no
-        // coordinates are kept. Never leaves the phone.
+        // coordinates are kept. gig.log never sends it; Android backup copies it with the other preferences.
         val FUEL_PRICE_AREA_DETECTED = stringPreferencesKey("fuel_price_area_detected")
         val VEHICLE_LOOKUP_ALLOWED = booleanPreferencesKey("vehicle_lookup_allowed")
         val FUEL_TYPE = stringPreferencesKey("fuel_type")
@@ -217,8 +217,9 @@ class AppPreferencesDataSource @Inject constructor(
      * build does not know reads as the U.S. (picked) or as nothing detected (automatic).
      */
     val fuelPriceAreaChoice: Flow<FuelAreaChoice> = ds.data.map { prefs ->
-        val picked = prefs[Keys.FUEL_PRICE_AREA]?.let { FuelArea.fromCode(it) }
-        val auto = prefs[Keys.FUEL_PRICE_AREA_AUTO] ?: (picked == null || picked == FuelArea.US)
+        val code = prefs[Keys.FUEL_PRICE_AREA]
+        val picked = code?.let { FuelArea.fromCode(it) }
+        val auto = prefs[Keys.FUEL_PRICE_AREA_AUTO] ?: (code == null || code == FuelArea.US.code)
         if (auto) {
             FuelAreaChoice.Automatic(prefs[Keys.FUEL_PRICE_AREA_DETECTED]?.let { FuelArea.fromCode(it) })
         } else {
