@@ -8,6 +8,7 @@ import cloud.trotter.log.gig.core.data.fuel.FuelPriceRepository
 import cloud.trotter.log.gig.core.datastore.settings.StoredPreference
 import cloud.trotter.log.gig.core.designsystem.time.LocalNowProvider
 import cloud.trotter.log.gig.domain.fuel.FuelArea
+import cloud.trotter.log.gig.domain.fuel.FuelAreaChoice
 import cloud.trotter.log.gig.domain.fuel.FuelPriceStamp
 import cloud.trotter.log.gig.domain.fuel.FuelPrices
 import cloud.trotter.log.gig.domain.fuel.ResolvedFuelPrice
@@ -156,12 +157,13 @@ class EconomySettingsScreenTest {
     /** 2026-11-16T00:00Z, a Monday, issued two days later. */
     private val stamp = FuelPriceStamp(1_794_787_200_000L, 1_794_787_200_000L + 2 * day)
 
-    private fun fuelPreferences(area: FuelArea = FuelArea.US): AppPreferencesRepository = mock<AppPreferencesRepository> {
-        on { userEconomy } doReturn flowOf(UserEconomy())
-        on { isGasPriceAuto } doReturn flowOf(true)
-    }.stubFuelPrice(area = flowOf(area), stamp = flowOf(stamp))
+    private fun fuelPreferences(choice: FuelAreaChoice = FuelAreaChoice.Automatic(null)): AppPreferencesRepository =
+        mock<AppPreferencesRepository> {
+            on { userEconomy } doReturn flowOf(UserEconomy())
+            on { isGasPriceAuto } doReturn flowOf(true)
+        }.stubFuelPrice(choice = flowOf(choice), stamp = flowOf(stamp))
 
-    @Test fun `the area list names all 29 areas and a pick reaches the fuel client`() {
+    @Test fun `the area list offers Automatic and names all 29 areas, and a pick reaches the fuel client`() {
         val fuelPrices = fuelPricesStub()
         show(null, fuelPreferences(), fuelPrices)
         compose.onNodeWithText("Fuel price area").performClick()
@@ -169,7 +171,8 @@ class EconomySettingsScreenTest {
         for (name in listOf("Gulf Coast", "West Coast except California", "Texas", "Houston", "New York City", "Seattle")) {
             compose.onNode(hasText(name) and hasClickAction()).assertExists()
         }
-        compose.onAllNodes(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton)).assertCountEquals(29)
+        compose.onNode(hasText("Automatic (from your location)") and hasClickAction()).assertExists()
+        compose.onAllNodes(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton)).assertCountEquals(30)
         compose.onNodeWithText("Houston").performScrollTo().performClick()
         compose.waitForIdle()
         runBlocking { verify(fuelPrices).setArea(FuelArea.HOUSTON) }
@@ -212,9 +215,35 @@ class EconomySettingsScreenTest {
     @Test fun `a price from an area above the chosen one names that area`() {
         clock.millis = stamp.issuedAt + day
         val resolved = flowOf(ResolvedFuelPrice(3.4, FuelArea.GULF_COAST, stamp.period))
-        show(null, fuelPreferences(FuelArea.TEXAS), fuelPricesStub(resolved = resolved), frozen = true)
+        show(null, fuelPreferences(FuelAreaChoice.Picked(FuelArea.TEXAS)), fuelPricesStub(resolved = resolved), frozen = true)
         compose.onNodeWithText("Using the Gulf Coast price").assertExists()
         compose.onNodeWithText("Texas").assertExists()
+    }
+
+    /** #1687: the area row's summary for each setting. */
+    @Test fun `the area row says Automatic and what it found, or the picked area`() {
+        show(null, fuelPreferences(FuelAreaChoice.Automatic(null)))
+        compose.onNodeWithText("Automatic: U.S. until your first shift").assertExists()
+    }
+
+    @Test fun `on Automatic with a detected area the row names it`() {
+        show(null, fuelPreferences(FuelAreaChoice.Automatic(FuelArea.TEXAS)))
+        compose.onNodeWithText("Automatic: Texas").assertExists()
+    }
+
+    @Test fun `a picked area reads as its name`() {
+        show(null, fuelPreferences(FuelAreaChoice.Picked(FuelArea.OHIO)))
+        compose.onNodeWithText("Ohio").assertExists()
+    }
+
+    @Test fun `picking Automatic reaches the fuel client`() {
+        val fuelPrices = fuelPricesStub()
+        show(null, fuelPreferences(FuelAreaChoice.Picked(FuelArea.OHIO)), fuelPrices)
+        compose.onNodeWithText("Fuel price area").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Automatic (from your location)").performClick()
+        compose.waitForIdle()
+        runBlocking { verify(fuelPrices).setAreaAutomatic() }
     }
 
     private class MutableClock(var millis: Long) : Clock() {

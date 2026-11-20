@@ -3,7 +3,7 @@ package cloud.trotter.log.gig.ui.main.settings
 import cloud.trotter.log.gig.core.data.feed.FeedState
 import cloud.trotter.log.gig.core.data.fuel.FuelPriceRepository
 import cloud.trotter.log.gig.core.data.settings.AppPreferencesRepository
-import cloud.trotter.log.gig.domain.fuel.FuelArea
+import cloud.trotter.log.gig.domain.fuel.FuelAreaChoice
 import cloud.trotter.log.gig.domain.fuel.FuelPriceStamp
 import cloud.trotter.log.gig.domain.fuel.FuelPrices
 import cloud.trotter.log.gig.domain.fuel.ResolvedFuelPrice
@@ -23,11 +23,11 @@ fun fuelPricesStub(
     whenever(it.feedState).thenReturn(feedState)
 }
 
-/** Stubs the stored fuel price area and stamp a preferences mock is read for. */
+/** Stubs the stored fuel price area setting and stamp a preferences mock is read for. */
 fun AppPreferencesRepository.stubFuelPrice(
-    area: Flow<FuelArea> = flowOf(FuelArea.US),
+    choice: Flow<FuelAreaChoice> = flowOf(FuelAreaChoice.Automatic(null)),
     stamp: Flow<FuelPriceStamp?> = flowOf(null),
 ): AppPreferencesRepository = also {
-    whenever(it.fuelPriceArea).thenReturn(area)
+    whenever(it.fuelPriceAreaChoice).thenReturn(choice)
     whenever(it.gasPriceStamp).thenReturn(stamp)
 }

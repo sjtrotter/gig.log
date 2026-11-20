@@ -6,6 +6,9 @@ import cloud.trotter.log.gig.core.data.settings.AppPreferencesRepository
 import cloud.trotter.log.gig.core.data.strategy.StrategyRepository
 import cloud.trotter.log.gig.core.data.vehicle.*
 import cloud.trotter.log.gig.domain.evaluation.UserEconomy
+import cloud.trotter.log.gig.domain.fuel.FuelArea
+import cloud.trotter.log.gig.domain.fuel.FuelAreaChoice
+import cloud.trotter.log.gig.domain.fuel.ResolvedFuelPrice
 import cloud.trotter.log.gig.domain.model.vehicle.*
 import cloud.trotter.log.gig.ui.main.settings.garage.*
 import kotlinx.coroutines.*
@@ -232,4 +235,13 @@ class EconomySettingsViewModelTest {
         assertEquals(GarageWriteFailure.NONE, vm.failure.value)
     }
 
+    /** #1687: the "Using the <region> price" line compares against the area the setting prices with. */
+    @Test fun `the used-area line compares against the detected area on Automatic`() = runTest {
+        preferences.stubFuelPrice(choice = flowOf(FuelAreaChoice.Automatic(FuelArea.TEXAS)))
+        val resolved = ResolvedFuelPrice(3.4, FuelArea.GULF_COAST, 1L)
+        val vm = EconomySettingsViewModel(preferences, strategy, garage, fuelPricesStub(resolved = flowOf(resolved)))
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.fuelPrice.collect {} }
+        runCurrent()
+        assertEquals(FuelArea.GULF_COAST, vm.fuelPrice.value.usedArea)
+    }
 }
