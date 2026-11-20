@@ -2,6 +2,7 @@ package cloud.trotter.log.gig.census
 
 import cloud.trotter.census.contract.SkeletonVersion
 import cloud.trotter.log.gig.core.data.census.CensusDailySample
+import cloud.trotter.log.gig.core.data.census.CensusMatchedCap
 import cloud.trotter.log.gig.core.data.census.CensusSpool
 import cloud.trotter.log.gig.core.data.census.HttpCensusSink
 import cloud.trotter.log.gig.core.pipeline.census.SkeletonBuilder
@@ -101,7 +102,8 @@ class CensusSamplingEndToEndTest {
             override val acceptedSchemaIds = MutableStateFlow(CensusSkeletonSchema.SUPPORTED_SCHEMA_IDS.toSet())
             override val choices = MutableStateFlow(CensusChoices(null, wifiOnly = true))
         }
-        val sink = HttpCensusSink(prefs, spool, CensusDailySample(context, io), stats, backgroundScope, io, readsUnboundPlatforms = false)
+        val sink = HttpCensusSink(prefs, spool, CensusDailySample(context, io), stats, backgroundScope, io, readsUnboundPlatforms = false,
+            matchedCap = CensusMatchedCap(context, io))
         runCurrent()
         records.forEach { sink.offer(it) }
         runCurrent()

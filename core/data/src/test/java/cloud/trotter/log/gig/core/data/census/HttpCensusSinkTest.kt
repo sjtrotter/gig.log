@@ -6,6 +6,7 @@ import cloud.trotter.log.gig.domain.capture.CensusRecord
 import cloud.trotter.log.gig.domain.census.CensusChoices
 import cloud.trotter.log.gig.domain.census.CensusUploadPreferences
 import cloud.trotter.log.gig.domain.census.CensusUploadStats
+import cloud.trotter.log.gig.domain.census.MatchedSkeletons
 import cloud.trotter.log.gig.domain.state.Platform
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -29,6 +30,7 @@ class HttpCensusSinkTest {
         override val baseUrl = flowOf("https://example.test")
         override val acceptedSchemaIds = MutableStateFlow(setOf(SkeletonSchema.SCHEMA_ID))
         override val choices = MutableStateFlow(CensusChoices(null, wifiOnly = true))
+        override val consentRevision = MutableStateFlow<Int?>(MatchedSkeletons.MIN_DISCLOSURE_REVISION)
     }
 
     private fun sample() = CensusDailySample(java.io.File(tmp.newFolder(), "sampled.json"), kotlinx.coroutines.Dispatchers.Unconfined)
@@ -38,7 +40,11 @@ class HttpCensusSinkTest {
         spool: CensusSpool,
         stats: CensusUploadStats,
         io: kotlinx.coroutines.CoroutineDispatcher,
-    ) = HttpCensusSink(prefs, spool, sample(), stats, backgroundScope, io, readsUnboundPlatforms = false)
+        matchedCap: CensusMatchedCap = newMatchedCap(),
+    ) = HttpCensusSink(prefs, spool, sample(), stats, backgroundScope, io, readsUnboundPlatforms = false, matchedCap = matchedCap)
+
+    private fun newMatchedCap(file: java.io.File = java.io.File(tmp.newFolder(), "matched.json")) =
+        CensusMatchedCap(file, kotlinx.coroutines.Dispatchers.Unconfined)
 
     @Test fun `publisher schema snapshot follows policy including an empty accepted set`() = runTest {
         val io = StandardTestDispatcher(testScheduler)
@@ -167,5 +173,71 @@ class HttpCensusSinkTest {
         assertTrue(sink.offer(censusRecord(2)))
         runCurrent()
         assertEquals("offered after it: kept", 1, spool.count())
+    }
+
+    // #1573 A6: the matched limits, after the daily sample; the UNKNOWN stream is untouched by them.
+    @Test fun `matched skeletons keep one a rule and ten a day, across a restart, and not over an UNKNOWN layout`() = runTest {
+        val io = StandardTestDispatcher(testScheduler)
+        val stats = CensusUploadStats()
+        val spool = CensusSpool(tmp.newFolder(), stats, io)
+        val capFile = java.io.File(tmp.newFolder(), "matched.json")
+        val rule = "doordash.screen.delivery_summary_expanded"
+        val sink = sink(Preferences(), spool, stats, io, newMatchedCap(capFile))
+        runCurrent()
+        sink.offer(matchedCensusRecord(1, rule)); runCurrent()
+        assertEquals("a matched record is spooled", 1, spool.count())
+        sink.offer(matchedCensusRecord(2, rule)); runCurrent()
+        assertEquals("a second layout of the same rule that day is refused", 1, spool.count())
+        assertEquals(1L, stats.matchedCapped.get())
+        (1..9).forEach { sink.offer(matchedCensusRecord(10 + it, "doordash.screen.rule_$it")) }; runCurrent()
+        assertEquals("ten rules in all", 10, spool.count())
+        sink.offer(matchedCensusRecord(30, "doordash.screen.rule_eleven")); runCurrent()
+        assertEquals("the eleventh rule that day is refused", 10, spool.count())
+        assertEquals(2L, stats.matchedCapped.get())
+        sink.offer(censusRecord(1)); runCurrent()
+        assertEquals("an UNKNOWN record of a matched layout is its own variant", 11, spool.count())
+
+        // A restart: a new sink and cap over the same file.
+        val restarted = sink(Preferences(), spool, stats, io, newMatchedCap(capFile))
+        runCurrent()
+        restarted.offer(matchedCensusRecord(3, rule))
+        restarted.offer(matchedCensusRecord(31, "doordash.screen.rule_twelve")); runCurrent()
+        assertEquals("the limits survive a restart", 11, spool.count())
+        assertEquals(4L, stats.matchedCapped.get())
+        restarted.offer(matchedCensusRecord(4, rule, day = "2026-10-03")); runCurrent()
+        assertEquals("the next UTC day admits the rule again", 12, spool.count())
+    }
+
+    @Test fun `a matched record offered with a boundary from before a clear is not written`() = runTest {
+        val io = StandardTestDispatcher(testScheduler)
+        val stats = CensusUploadStats()
+        val spool = CensusSpool(tmp.newFolder(), stats, io)
+        val sink = sink(Preferences(), spool, stats, io)
+        runCurrent()
+        val boundary = sink.clearBoundary
+        spool.clear()
+        assertTrue(sink.offer(matchedCensusRecord(1), boundary)); runCurrent()
+        assertEquals("read before the clear: dropped", 0, spool.count())
+        assertTrue(sink.offer(matchedCensusRecord(1), sink.clearBoundary)); runCurrent()
+        assertEquals("read after it: kept", 1, spool.count())
+    }
+
+    @Test fun `the matched schema is offered only under a consent that names it`() = runTest {
+        // #1573 A10, the sink half: the policy lists the matched schema, the consent revision decides.
+        val io = StandardTestDispatcher(testScheduler)
+        val stats = CensusUploadStats()
+        val prefs = Preferences().apply {
+            acceptedSchemaIds.value = setOf(SkeletonSchema.SCHEMA_ID_V2, SkeletonSchema.SCHEMA_ID_MATCHED)
+            consentRevision.value = MatchedSkeletons.MIN_DISCLOSURE_REVISION - 1
+        }
+        val sink = sink(prefs, CensusSpool(tmp.newFolder(), stats, io), stats, io)
+        runCurrent()
+        assertEquals(setOf(SkeletonSchema.SCHEMA_ID_V2), sink.acceptedSchemaIds)
+        prefs.consentRevision.value = MatchedSkeletons.MIN_DISCLOSURE_REVISION
+        runCurrent()
+        assertEquals(setOf(SkeletonSchema.SCHEMA_ID_V2, SkeletonSchema.SCHEMA_ID_MATCHED), sink.acceptedSchemaIds)
+        prefs.consentRevision.value = null
+        runCurrent()
+        assertEquals("no granted receipt sends none", setOf(SkeletonSchema.SCHEMA_ID_V2), sink.acceptedSchemaIds)
     }
 }

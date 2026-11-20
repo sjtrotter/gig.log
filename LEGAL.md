@@ -185,7 +185,8 @@ the server cannot read the words back from it, but it can recognize a common wor
 hashing a guess and comparing, which is how the app's own labels are matched. The phone
 withholds the names, addresses and codes it detects before anything is hashed, and today
 it withholds amounts and times too. A planned change (#1619) sends those as their format
-instead (`$##.##` for an amount, never the amount). The census never sends a screen as the driver sees it. It also sends a daily
+instead (`$##.##` for an amount, never the amount). While a recognition rule is failing to read a screen it still
+recognizes, the census also sends the same kind of layout of that screen, labelled with the rule's name (#1573). The census never sends a screen as the driver sees it. It also sends a daily
 recognition health report: counts of recognized and unrecognized screens, per rule and
 per delivery-app version. A planned contributor tier lets a driver confirm that a word on
 a screen is the app's own wording (a button label, a heading), never a customer's

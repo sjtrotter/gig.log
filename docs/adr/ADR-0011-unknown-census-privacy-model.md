@@ -1270,6 +1270,29 @@ the server can compare a matched layout with the rule's older clusters. `conform
 contract's and the server's verdicts. Contract only: nothing builds or sends a matched skeleton yet, and the trigger,
 withholding, caps, server storage and residual are recorded when the app half ships.
 
+**Amended 2026-11-20 (#1573, census#69): the matched-skeleton app half.** *Trigger:* a frame yields a matched skeleton
+for rule R only when it survived the content, platform and `FrameGate` gates, R is a rot rule of the frame
+(`ParseRotTracker.rotRuleIds`, the tracker's own definition: a winner whose own branch rotted, or an UNKNOWN frame
+carrying R's skipped-branch rot, which also goes out untagged as before), R is in an open parse-rot cause of the
+platform's incident, R's platform is the frame's, the census is on, the server lists `uinode.matched.v1`, and the
+census consent was given under PRIVACY.md revision 32 or later (the first that names matched skeletons; an older
+receipt sends none). Only shapes that declare required fields can trip, so today an offer, a delivery receipt or an
+end-of-shift summary. Incidents live in memory: after a restart a rule trips again before it is sampled, and the
+tripping visits are not held. *Hold:* the skeleton is built at frame time and held in memory
+(`MatchedSkeletonHold`, at most one per platform and rule, at most 16) until the tracker confirms that visit; a
+pre-render visit is never confirmed, so it never spends the rule's sample. No time-based expiry: confirmation comes on
+the platform's next admitted frame. The census clear boundary is read when the frame is admitted, before capture, and
+travels with the held record, so a deletion while it is held drops it at the spool. *Withholding:* the same builder
+and filters, built from the raw tree (a mask never seeds), plus every field the rule's own `redact` masks, withheld
+like a PII-id field and seeding its exact value frame-wide; a sensitive marker in the raw tree still refuses the
+frame; no review words, no capture id, no envelope. *Caps:* 1 per rule and 10 per UTC day over every platform
+(`CensusMatchedCap`, `filesDir/census/matched.json`, two days, never uploaded or backed up), after the daily sample,
+whose key gains a `rule=` line for a matched item only. *Upload:* the same window and budgets; a matched batch's id is
+`m-` plus a digest of each item's fingerprint and rule id, so it never collides with the UNKNOWN batch of the same
+layout. *Server:* separate tables (census#69), never the cluster tables, vocabulary or contributor release.
+*Residual:* the rule's id says which kind of screen the install saw that UTC day; PRIVACY.md r32 and the in-app
+census texts say so.
+
 ### §19 Click evidence as references into skeletons (#1634, census#87)
 
 This supersedes §10's "Clicks stay OUT". When a tap lands on a node no click rule recognizes, or a click rule is in an

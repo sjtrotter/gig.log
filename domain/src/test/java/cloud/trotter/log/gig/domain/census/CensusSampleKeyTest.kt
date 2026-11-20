@@ -7,6 +7,7 @@ import cloud.trotter.census.contract.KindClassifier
 import cloud.trotter.census.contract.NotifTextField
 import cloud.trotter.census.contract.NotificationSkeletonDto
 import cloud.trotter.census.contract.SkeletonKind
+import cloud.trotter.census.contract.SkeletonSchema
 import cloud.trotter.census.contract.ShapeTemplate
 import cloud.trotter.census.contract.SkeletonVersion
 import cloud.trotter.census.contract.TextSlot
@@ -77,6 +78,34 @@ class CensusSampleKeyTest {
         val hashes = CensusSkeletonSchema.slots(item).mapNotNull { it.h }
         assertEquals(2, hashes.size)
         hashes.forEach { assertFalse("no hash in the key input", it in canonical) }
+    }
+
+    @Test fun `an UNKNOWN key's input is pinned`() {
+        // #1573 A8: the matched rule line is added only for an item that has a rule, so this stays byte-identical.
+        val item = card(words("Ann"))
+        assertEquals(
+            "schema=uinode.skeleton.v2\nplatform=doordash\nplatformAppVersion=15.1\nfingerprint=${item.fingerprint}\ntitle=\n" +
+                "node=00010;;3\nnode=00010;text=text;0\nnode=00010;text=text;0\nnode=00010;text=shape:${ShapeTemplate.MONEY.wire};0\n",
+            CensusSampleKey.canonical(item),
+        )
+    }
+
+    @Test fun `a matched skeleton's rule is part of its variant`() {
+        val rule = "doordash.screen.delivery_summary_expanded"
+        val unknown = card(words("Ann"))
+        val matched = unknown.copy(schemaId = SkeletonSchema.SCHEMA_ID_MATCHED, ruleId = rule)
+        val canonical = CensusSampleKey.canonical(matched)
+        assertEquals(
+            CensusSampleKey.canonical(unknown).replace("schema=uinode.skeleton.v2\n", "schema=uinode.matched.v1\n")
+                .replace("platformAppVersion=15.1\n", "platformAppVersion=15.1\nrule=$rule\n"),
+            canonical,
+        )
+        assertNotEquals(CensusSampleKey.of(unknown), CensusSampleKey.of(matched))
+        assertNotEquals(
+            "two rules on one layout are two variants",
+            CensusSampleKey.of(matched),
+            CensusSampleKey.of(unknown.copy(schemaId = SkeletonSchema.SCHEMA_ID_MATCHED, ruleId = "doordash.screen.dash_summary")),
+        )
     }
 
     /** A push whose title is [title] and whose text carries a pay figure; the fingerprint covers the slots' words. */

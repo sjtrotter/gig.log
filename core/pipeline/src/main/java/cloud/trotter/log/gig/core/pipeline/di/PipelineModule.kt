@@ -7,6 +7,8 @@ import cloud.trotter.log.gig.core.pipeline.PipelineStats
 import cloud.trotter.log.gig.core.pipeline.PlatformAppVersions
 import cloud.trotter.log.gig.core.pipeline.RecognitionHealthMonitor
 import cloud.trotter.log.gig.core.pipeline.ReplayMetadataProviderImpl
+import cloud.trotter.log.gig.core.pipeline.RotVisitConfirmations
+import cloud.trotter.log.gig.core.pipeline.census.MatchedSkeletonHold
 import cloud.trotter.log.gig.domain.pipeline.RecognitionIncidents
 import dagger.Binds
 import dagger.Module
@@ -29,6 +31,10 @@ abstract class PipelineModule {
     // #1560: Home reads the open recognition incidents from their one owner.
     @Binds @Singleton
     abstract fun bindRecognitionIncidents(impl: RecognitionHealthMonitor): RecognitionIncidents
+
+    // #1573: the monitor tells the matched-skeleton hold of each confirmed rot visit.
+    @Binds @Singleton
+    abstract fun bindRotVisitConfirmations(impl: MatchedSkeletonHold): RotVisitConfirmations
 
     companion object {
 

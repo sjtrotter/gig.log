@@ -774,6 +774,18 @@ arrives with #1620's once-per-variant-per-UTC-day sampling, so #1620 owns it (an
 is not built yet; the bullets below describe what runs today, and each issue that builds a piece updates them.
 
 - *Publisher stage* — `census.SkeletonPublisher`, injected into `AccessibilityPipeline` and `NotificationPipeline`, runs post-admission/dedup after capture and before the UNKNOWN rejection on UNKNOWN platform screens and notifications when `CensusSink.isEnabled`; hands the sink `CensusRecord(platform, fingerprint, skeletonJson, itemBytes, captureId?)`; `PipelineStats` counts skeletons / hashed / withheld / sink refusals / failures / `refused{reason}` under `census{…}` (rendered only when non-zero); the day is the observation timestamp's UTC calendar date (ADR-0011 §21, #1619; it was the device-local date before).
+- *Matched skeletons (#1573, ADR-0011 §18)* — the publisher also builds, for every admitted screen carrying rot of a
+  rule in an open parse-rot incident (`ParseRotTracker.rotRuleIds` ∩ `RecognitionIncidents.open`), that rule's
+  `uinode.matched.v1` skeleton: the same builder and filters over the raw tree, plus the rule's own `redact` fields
+  withheld (`RuleRedactionFields`, from the generation that classified the frame; a generation without the rule refuses
+  `MATCHED_RULE_NOT_IN_GENERATION`). It is held (`MatchedSkeletonHold`, one per platform and rule, at most 16, no time
+  expiry) until `RecognitionHealthMonitor` reports the visit confirmed (`RotVisitConfirmations`), so a pre-render
+  frame is never sent. `AccessibilityPipeline` reads the census clear boundary once per admitted screen, before capture,
+  and the held record is offered with it (`CensusSink.offer(record, boundary)`). `HttpCensusSink` admits it through
+  the daily sample, then `CensusMatchedCap` (1 per rule, 10 a day), and lists the matched schema to the publisher only
+  under a consent receipt of revision 32 or later. The worker's one schema-aware batch id helper keys a matched batch,
+  and each 413 split half, on fingerprint and rule id (`CensusApi.matchedBatchId`). Counts under `matched{…}`.
+  **Invariant:** a matched frame never leaves without its `ruleId` and never under a v1/v2 id.
 - *Wire versions (#1619, ADR-0011 §13)* — `SkeletonVersion` (contract) names `V1` (`uinode.skeleton.v1` /
   `notification.skeleton.v1`) and `V2` (`uinode.skeleton.v2` / `notification.skeleton.v2`). The publisher builds each
   kind in the NEWEST version the cached server policy lists in `acceptedSchemaIds`

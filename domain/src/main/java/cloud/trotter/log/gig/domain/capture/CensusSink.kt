@@ -41,9 +41,23 @@ data class CensusRecord(
  */
 interface CensusSink {
     val isEnabled: Boolean
-    /** Non-blocking snapshot of the last server policy; no policy means screens only. */
+    /**
+     * Non-blocking snapshot of the schema ids this phone may send now: the last server policy's, less the matched schema
+     * while the census consent predates its disclosure (#1573). No policy means screens only.
+     */
     val acceptedSchemaIds: Set<String> get() = setOf(SkeletonSchema.SCHEMA_ID)
     /** #1626: non-blocking snapshot; true while a contributor review could take this frame, so the builder keeps its words. */
     val collectsReviewWords: Boolean get() = false
+
+    /**
+     * #1573: the census clear boundary now, a non-blocking read. A caller that holds a record past the frame it was built
+     * from reads it when the frame is admitted and offers with it ([offer]), so a census deletion in between drops the
+     * record instead of writing it behind the deletion.
+     */
+    val clearBoundary: Long get() = 0L
+
     fun offer(record: CensusRecord): Boolean
+
+    /** [offer], refused when a census deletion ran after [boundary] was read ([clearBoundary]). */
+    fun offer(record: CensusRecord, boundary: Long): Boolean = offer(record)
 }

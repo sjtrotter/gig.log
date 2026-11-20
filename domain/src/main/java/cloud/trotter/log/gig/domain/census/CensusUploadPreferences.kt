@@ -12,6 +12,11 @@ interface CensusUploadPreferences {
     val acceptedSchemaIds: Flow<Set<String>> get() = flowOf(setOf(SkeletonSchema.SCHEMA_ID))
     /** #1620: the dasher's census choices; only the delivery apps they cover are queued. */
     val choices: Flow<CensusChoices>
+    /**
+     * #1573: the disclosure revision the census consent was granted under, or null with no granted receipt. Matched
+     * skeletons go out only under [MatchedSkeletons.MIN_DISCLOSURE_REVISION] or later; null never sends them.
+     */
+    val consentRevision: Flow<Int?> get() = flowOf(null)
 }
 
 /** The app owns WorkManager; data and feature modules only request a run. */

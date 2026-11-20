@@ -52,6 +52,12 @@ internal class FrameFilter(
     private val canonicalize: (String) -> String? = CensusHash::canonical,
     /** The id-path PII judgement for id-shaped values; a seam so a test can count calls (review AK3). */
     private val idShapedPii: (String) -> Boolean = IdPathJudgement::namePartCarriesPii,
+    /**
+     * #1573: the fields a matched rule's own `redact` masks, withheld like a PII-id field on top of the filters; their
+     * exact canonical values join the frame's exact-value withhold set (never its letter runs). [RuleRedactionFields.NONE]
+     * for an UNKNOWN frame, which leaves every UNKNOWN build unchanged.
+     */
+    private val ruleWithheld: RuleRedactionFields = RuleRedactionFields.NONE,
 ) {
     /**
      * A cached verdict. Wrapped (review DD2): a bare `FilterStep?` map stores the common "passed"
@@ -126,8 +132,9 @@ internal class FrameFilter(
         val fields = ArrayList<Pair<String, Field>>()
         var textField: Field? = null
         var descField: Field? = null
+        val redacted = ruleWithheld.of(node)
         for ((field, value) in node.scrubbableStrings()) {
-            val f = field(value, idClass, idShaped = field == UiNodeTextField.UNIQUE_ID) ?: continue
+            val f = field(value, idClass, idShaped = field == UiNodeTextField.UNIQUE_ID, ruleRedacted = field in redacted) ?: continue
             fields += field.wire to f
             if (field == UiNodeTextField.TEXT) textField = f
             if (field == UiNodeTextField.CONTENT_DESCRIPTION) descField = f
@@ -155,9 +162,9 @@ internal class FrameFilter(
      * Pass 1 for one field: canonicalize (reviews EE2, NN5), filter both forms (FF1), and seed [caught]
      * with the field's exact canonical value when a VALUE-judging step (3, 4, 7, 8) caught it. A mask
      * NEVER seeds (review LL1). Not the length cap (a duplicate is itself over-length). The id-based
-     * seeds are [seedIdentity]'s.
+     * seeds are [seedIdentity]'s. A [ruleRedacted] field (#1573) is withheld and seeds its exact canonical value.
      */
-    fun field(value: String?, idClass: IdClass, idShaped: Boolean = false): Field? {
+    fun field(value: String?, idClass: IdClass, idShaped: Boolean = false, ruleRedacted: Boolean = false): Field? {
         if (value.isNullOrBlank()) return null
         val trimmed = value.trim()
         // Reviews AB8, OO1, AH4, AH7: the ONE pass-1 rule (`SkeletonBuilder.canonicalFormOf`, over the frame's
@@ -168,6 +175,12 @@ internal class FrameFilter(
         // AJ2: a value that canonicalizes to NOTHING (FORMAT-only, e.g. a lone ZWSP) is dropped — never a
         // phantom `mixed` slot that splits the text map on nothing visible.
         if (canonical.isEmpty()) return null
+        // #1573: the matched rule's own redact covers this field. Withheld like a PII-id field, and its exact value is
+        // withheld wherever else the frame repeats it; it seeds no letter runs (a redact is not an identity kind).
+        if (ruleRedacted) {
+            if (!PiiShapes.containsMask(canonical)) caught += canonical
+            return Field(trimmed, canonical, idWithholds = true)
+        }
         // AJ1 + AK1–AK3: an id-shaped value (the `uid` test tag) is judged by the ID path on its BOUNDED
         // CANONICAL form — after the over-cap pre-check (AK3: an over-cap tag never builds suffix strings)
         // and after the fold (AK1: `chip＿Riley＿S` with fullwidth low lines, or a zero-width char at a

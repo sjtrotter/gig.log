@@ -30,6 +30,7 @@ import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.onEach
 import timber.log.Timber
+import java.time.Clock
 import javax.inject.Inject
 import javax.inject.Singleton
 import cloud.trotter.log.gig.domain.pipeline.UNKNOWN_TARGET
@@ -55,6 +56,8 @@ class AccessibilityPipeline @Inject constructor(
     private val recognitionHealth: RecognitionHealthMonitor,
     private val skeletonPublisher: SkeletonPublisher,
     private val shadowWorker: ShadowWorker,
+    /** The event clock (#1573): production binds the system clock; a replay test drives frame times through it. */
+    private val clock: Clock = Clock.systemUTC(),
 ) {
     companion object {
         const val SCREEN_PIPELINE_ID = PipelineRegistry.SCREEN_PIPELINE_ID
@@ -72,7 +75,7 @@ class AccessibilityPipeline @Inject constructor(
         windowsChangedPipeline.output(),
     ).map { snapshot ->
         PipelineEvent.Screen(
-            timestamp = System.currentTimeMillis(),
+            timestamp = clock.millis(),
             tree = snapshot.tree,
             snapshot = snapshot,
             packageName = snapshot.packageName,
@@ -90,7 +93,7 @@ class AccessibilityPipeline @Inject constructor(
                 // #1164: the one mapping seam — an API-mismatch LinkageError costs this click, not the flow.
                 val node = source.mapNodeOrNull(sourceNode) ?: return@mapNotNull null
                 PipelineEvent.Click(
-                    timestamp = System.currentTimeMillis(),
+                    timestamp = clock.millis(),
                     node = node,
                     packageName = event.packageName,
                 )
@@ -167,6 +170,9 @@ class AccessibilityPipeline @Inject constructor(
                 Timber.v("Dedup: suppressed %s", obs.target)
                 return@mapNotNull null
             }
+            // #1573: the census clear boundary, read once per admitted screen before its capture and any build, so a
+            // matched skeleton held past this frame is dropped if a census deletion runs in between.
+            val censusBoundary = if (event is PipelineEvent.Screen) skeletonPublisher.clearBoundary() else 0L
             // #937 recognition-health sample, taken HERE — post-admission, pre-capture — so the
             // ratio is measured on the same deduped stream the field logs report (a dasher
             // parked on one unruled screen contributes a couple of samples, not a thousand).
@@ -208,10 +214,12 @@ class AccessibilityPipeline @Inject constructor(
                     captureWriter.captureClick(obs, event, obs.screenTarget, obs.screenRuleId, classified.redaction)
                 else -> obs
             }
-            // #1146 census publisher (ADR-0011): UNKNOWN screens only, post-admission, AFTER the capture
-            // so the stamped captureId is the trusted-install pairing key; fail-open, screens only.
+            // #1146 census publisher (ADR-0011): post-admission, AFTER the capture so the stamped captureId is
+            // the trusted-install pairing key; fail-open, screens only. UNKNOWN screens go out as skeletons; a
+            // screen carrying rot of a rule in an open incident is also held as that rule's matched skeleton
+            // (#1573), masked with the classifying generation's redact.
             if (captured is Observation.Screen && event is PipelineEvent.Screen) {
-                skeletonPublisher.publish(captured, event)
+                skeletonPublisher.publish(captured, event, classified.redaction, censusBoundary)
             }
             captured
         }

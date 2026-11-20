@@ -63,6 +63,19 @@ class CensusConsentTest {
         assertEquals(CensusChoices(setOf(Platform.DoorDash), wifiOnly = false), repo.censusChoices.first())
     }
 
+    @Test fun `the consent revision is the granted receipt's, and none without a grant`() = runTest {
+        // #1573 A10: matched skeletons follow this revision; a receipt from before their disclosure sends none.
+        val repo = repo()
+        assertNull(repo.consentRevision.first())
+        val endpoint = repo.baseUrl.first()
+        source.setCensusUploadEnabled(true, CensusConsentReceipt(ConsentReceipt(1L, "1.0.0", 31, granted = true), endpoint))
+        assertEquals(31, repo.consentRevision.first())
+        repo.setCensusUploadEnabled(true)
+        assertEquals(PrivacyDisclosure.REVISION, repo.consentRevision.first())
+        repo.declineCensus()
+        assertNull("a declined receipt grants nothing", repo.consentRevision.first())
+    }
+
     @Test fun `a receipt for another endpoint drops the consent until accepted again`() = runTest {
         val repo = repo()
         repo.setCensusUploadEnabled(true)
