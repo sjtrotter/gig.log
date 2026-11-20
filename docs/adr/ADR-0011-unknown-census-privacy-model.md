@@ -1259,6 +1259,17 @@ PRIVACY.md: each metric's own denominator, `evaluated` as recorded evaluation co
 unavailable, and no recorded visits never read as never matched. A counter overflow or a stored map that fails
 validation leaves `shadowDaily` off that day's report; the base counts still go.
 
+**Amended 2026-11-20 (#1573, census#69): the matched-skeleton contract.** A matched skeleton travels under its own
+schema id, `uinode.matched.v1`: a v2 body plus a required top-level `ruleId`, the id of the rule that matched the frame.
+It is not a step of the version ladder, so unrecognized screens keep `uinode.skeleton.v2`, their sample keys and the
+conformance golden. `ruleId` is present exactly when the schema is the matched one; a v1 or v2 item carrying the key,
+`null` included, is refused, so a matched frame cannot travel without its rule id or under a v1 or v2 id. The id is a
+rule of the item's own platform, at most 96 characters (`WireTokenGrammars.isRuleIdFor`, shared with the health
+report's shadow entries); the server refuses anything else as `bad_rule_id`. The fingerprint covers the tree only, so
+the server can compare a matched layout with the rule's older clusters. `conformance/matched-vectors.jsonl` pins the
+contract's and the server's verdicts. Contract only: nothing builds or sends a matched skeleton yet, and the trigger,
+withholding, caps, server storage and residual are recorded when the app half ships.
+
 ### §19 Click evidence as references into skeletons (#1634, census#87)
 
 This supersedes §10's "Clicks stay OUT". When a tap lands on a node no click rule recognizes, or a click rule is in an
