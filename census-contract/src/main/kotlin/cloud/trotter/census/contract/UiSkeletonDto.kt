@@ -128,11 +128,13 @@ data class UiSkeletonNodeDto(
 }
 
 /**
- * One census item — a `uinode.skeleton.v1` or `.v2` skeleton with its envelope (ADR-0011 §1, §13; [version]).
+ * One census item — a `uinode.skeleton.v1` or `.v2` skeleton with its envelope (ADR-0011 §1, §13; [version]), or a
+ * `uinode.matched.v1` skeleton ([isMatched], #1573): a v2 body plus the [ruleId] of the rule that matched the frame.
  *
  * The envelope is exactly the §7(a) allowlist: the window title as a [TextSlot]; the strings
  * [schemaId], [fingerprint], [platform], [platformAppVersion], [appVersion], [rulesetReleaseTag],
- * [day]; the integers [filterRev], [hashDomain], [engineVersion], [rulesetFormatVersion]. Five of
+ * [day]; the integers [filterRev], [hashDomain], [engineVersion], [rulesetFormatVersion]; and, on a matched item
+ * only, [ruleId]. Five of
  * those are `ReplayMetadata`'s own names; the rest are census-own. [root] carries the tree. There is
  * NO install id (the M3 uploader adds it at the transport), NO device fingerprint, NO millisecond
  * timestamp.
@@ -150,18 +152,28 @@ data class UiSkeletonDto(
     override val engineVersion: Int,
     override val rulesetFormatVersion: Int? = null,
     override val day: String,
+    /**
+     * Present IFF [schemaId] is [SkeletonSchema.SCHEMA_ID_MATCHED]: a rule id of [platform]
+     * ([WireTokenGrammars.isRuleIdFor]). Null is omitted on the wire, so a v1 or v2 item encodes as before.
+     */
+    val ruleId: String? = null,
     val windowTitle: TextSlot? = null,
     val root: UiSkeletonNodeDto,
 ) : CensusSkeletonDto {
     override val kind: SkeletonKind get() = SkeletonKind.SCREEN
 
-    /** The wire version [schemaId] names. */
-    val version: SkeletonVersion get() = requireNotNull(SkeletonVersion.ofScreenSchema(schemaId))
+    /** True for a `uinode.matched.v1` item. */
+    val isMatched: Boolean get() = schemaId == SkeletonSchema.SCHEMA_ID_MATCHED
+
+    /** The body version: the one [schemaId] names, or [SkeletonVersion.V2] for a matched item. */
+    val version: SkeletonVersion get() = requireNotNull(bodyVersion(schemaId))
 
     init {
-        val version = SkeletonVersion.ofScreenSchema(schemaId)
+        val version = bodyVersion(schemaId)
         require(version != null) { "not a uinode skeleton item" }
         validateEnvelope(this)
+        require((ruleId != null) == isMatched) { "a rule id is present iff the schema is the matched schema" }
+        if (ruleId != null) require(WireTokenGrammars.isRuleIdFor(platform, ruleId)) { "a rule id must be a rule of the item's platform" }
         if (version == SkeletonVersion.V1) {
             require(windowTitle?.isV2Only != true && !root.usesV2Fields()) { "a v1 skeleton carries no v2 field" }
         }
@@ -170,15 +182,22 @@ data class UiSkeletonDto(
     /**
      * This item as `uinode.skeleton.v1`: every shape reads `mixed` and the v2 node flags drop, which is exactly
      * what v1 emitted for the same frame. The fingerprint is unchanged (it covers class, id and structure only).
+     * A matched item never projects down: it throws [IllegalStateException].
      */
-    fun toV1(): UiSkeletonDto = if (version == SkeletonVersion.V1) this else copy(
-        schemaId = SkeletonSchema.SCHEMA_ID,
-        windowTitle = windowTitle?.toV1(),
-        root = root.toV1(),
-    )
+    fun toV1(): UiSkeletonDto {
+        check(!isMatched) { "a matched skeleton never projects to v1" }
+        return if (version == SkeletonVersion.V1) this else copy(
+            schemaId = SkeletonSchema.SCHEMA_ID,
+            windowTitle = windowTitle?.toV1(),
+            root = root.toV1(),
+        )
+    }
 
     companion object {
         /** A version stamp is a short release fact, never free text. */
         const val MAX_VERSION_LENGTH: Int = 64
+
+        private fun bodyVersion(schemaId: String): SkeletonVersion? =
+            if (schemaId == SkeletonSchema.SCHEMA_ID_MATCHED) SkeletonVersion.V2 else SkeletonVersion.ofScreenSchema(schemaId)
     }
 }

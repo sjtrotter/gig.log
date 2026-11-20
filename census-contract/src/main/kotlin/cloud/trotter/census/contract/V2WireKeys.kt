@@ -33,6 +33,9 @@ import kotlinx.serialization.json.JsonPrimitive
  * alone cannot tell a v1 item that SENDS `"hasClickAction":false` from one that omits it. The old v1 decoder refused
  * any key it did not know; [requireV1Keys] restores that: a v1 item carrying a v2 key is refused whatever the key's
  * value (`false`, `true`, `null`, `[]`). It runs on the parsed JSON before the typed decode.
+ *
+ * The same holds for [RULE_ID] (#1573): only a `uinode.matched.v1` item carries it, so a v1 or v2 screen item that
+ * sends the key at all, `null` included, is refused (the typed decode would read a `null` as absent).
  */
 internal object V2WireKeys {
     /** v2 node flags. */
@@ -44,10 +47,19 @@ internal object V2WireKeys {
     /** v2 notification key. */
     const val ACTIONS: String = "actions"
 
-    /** Throws when [item] names a v1 schema and carries any v2 key anywhere. A non-v1 item passes untouched. */
+    /** The matched-only top-level key ([SkeletonSchema.SCHEMA_ID_MATCHED]). */
+    const val RULE_ID: String = "ruleId"
+
+    /**
+     * Throws when [item] names a v1 schema and carries any v2 key anywhere, or names a v1 or v2 screen schema and
+     * carries a [RULE_ID] key. Any other item passes untouched.
+     */
     fun requireV1Keys(item: JsonElement) {
         val obj = item as? JsonObject ?: return
         val schema = (obj["schemaId"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return
+        if (RULE_ID in obj && SkeletonVersion.ofScreenSchema(schema) != null) {
+            throw SerializationException("a v1 or v2 screen item carries a rule id")
+        }
         val carries = when (schema) {
             SkeletonSchema.SCHEMA_ID -> screenCarriesV2Key(obj)
             NotificationSkeletonSchema.SCHEMA_ID -> notificationCarriesV2Key(obj)

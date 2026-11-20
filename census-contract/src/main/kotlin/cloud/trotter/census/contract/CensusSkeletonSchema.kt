@@ -26,9 +26,12 @@ import kotlinx.serialization.json.JsonPrimitive
 
 /** Explicit dispatch: no polymorphic discriminator is injected into legacy screens. */
 object CensusSkeletonSchema {
-    /** Every schema this contract builds and decodes, oldest version first (enrolment declares them in this order). */
+    /**
+     * Every schema this contract builds and decodes, oldest version first, then the matched schema (enrolment
+     * declares them in this order).
+     */
     val SUPPORTED_SCHEMA_IDS: List<String> =
-        SkeletonVersion.entries.flatMap { listOf(it.screenSchemaId, it.notificationSchemaId) }
+        SkeletonVersion.entries.flatMap { listOf(it.screenSchemaId, it.notificationSchemaId) } + SkeletonSchema.SCHEMA_ID_MATCHED
 
     fun serialize(item: CensusSkeletonDto): String = when (item) {
         is UiSkeletonDto -> SkeletonSchema.serialize(item)
@@ -41,7 +44,8 @@ object CensusSkeletonSchema {
         val schema = (obj["schemaId"] as? JsonPrimitive)?.takeIf { it.isString }?.content
         return when {
             schema == null -> throw SerializationException("unsupported census schema")
-            SkeletonVersion.ofScreenSchema(schema) != null -> SkeletonSchema.deserialize(text)
+            SkeletonVersion.ofScreenSchema(schema) != null || schema == SkeletonSchema.SCHEMA_ID_MATCHED ->
+                SkeletonSchema.deserialize(text)
             SkeletonVersion.ofNotificationSchema(schema) != null -> NotificationSkeletonSchema.deserialize(text)
             else -> throw SerializationException("unsupported census schema")
         }

@@ -21,8 +21,8 @@
 package cloud.trotter.census.contract
 
 /**
- * The grammars of the short tokens the server keeps from a report: version stamps and rule ids
- * (census#64). The phone and the server both read them from here.
+ * The grammars of the short tokens the server keeps from a report or a matched skeleton: version stamps and rule
+ * ids (census#64, #1573). The phone and the server both read them from here.
  */
 object WireTokenGrammars {
     /** A platform app's numeric version, such as `8.99.20`. */
@@ -36,4 +36,15 @@ object WireTokenGrammars {
 
     /** A recognition rule id: two to five lowercase dotted segments, such as `doordash.screen.offer`. */
     val ruleId = Regex("^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*){1,4}$")
+
+    /** The longest rule id a health report's per-rule entries or a matched skeleton may carry. */
+    const val MAX_RULE_ID_LENGTH: Int = 96
+
+    /**
+     * True when [ruleId] is a rule id of [platform]: at most [MAX_RULE_ID_LENGTH] characters, the [ruleId] grammar,
+     * and the `"<platform>."` prefix. The one owner of that check for the health report's shadow entries and the
+     * matched skeleton's `ruleId` (#1573).
+     */
+    fun isRuleIdFor(platform: String, ruleId: String): Boolean =
+        ruleId.length <= MAX_RULE_ID_LENGTH && this.ruleId.matches(ruleId) && ruleId.startsWith("$platform.")
 }

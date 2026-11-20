@@ -49,7 +49,7 @@ object HealthReportSchema {
     const val MAX_PARSE_SHORTFALL_RULES = 128
 
     /** A [HealthReportDto.parseShortfall] rule id is at most this long; `ruleCounts` keeps its legacy bound. */
-    const val MAX_PARSE_RULE_ID_LENGTH = 96
+    const val MAX_PARSE_RULE_ID_LENGTH = WireTokenGrammars.MAX_RULE_ID_LENGTH
 
     /** Every daily count is an integer in `0..MAX_COUNT`. */
     const val MAX_COUNT = 1_000_000
@@ -208,9 +208,7 @@ object HealthReportSchema {
     private fun List<JsonObject>.refs(platform: String): List<ShadowRefDto>? {
         val refs = map { entry ->
             val generation = entry.string("generation")?.takeIf { HEX16.matches(it) } ?: return null
-            val rule = entry.string("rule")?.takeIf {
-                it.length <= MAX_PARSE_RULE_ID_LENGTH && WireTokenGrammars.ruleId.matches(it) && it.startsWith("$platform.")
-            } ?: return null
+            val rule = entry.string("rule")?.takeIf { WireTokenGrammars.isRuleIdFor(platform, it) } ?: return null
             val digest = entry.string("digest")?.takeIf { HEX16.matches(it) } ?: return null
             ShadowRefDto(generation, rule, digest)
         }
