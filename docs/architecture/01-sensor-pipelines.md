@@ -794,11 +794,15 @@ is not built yet; the bullets below describe what runs today, and each issue tha
   `getWindow().getRoot()` (never a parent climb: a failed `getParent()` would make a container the root and hide the
   screen above it), window id, root window id and package checked, mapped by the marking mapper
   (`toMarkedUiNode`), which compares each live node with the source BEFORE it is recycled and records its path over
-  the MAPPED children. Not found → `SOURCE_GONE`; found twice, a cap hit or a failed check → `NO_WINDOW`; a throw →
+  the MAPPED children. Not found → `SOURCE_GONE`; found twice, a cap hit (depth, node budget or the child-index
+  limit: every breadth cut sets `TreeBudget.truncated`, so the screen path's truncation WARN now also names them) or a
+  failed check → `NO_WINDOW`; a throw →
   `ACQUIRE_FAILED` in its own catch, so the click goes on. The window rides `PipelineEvent.Click.window`.
   **Classification:** `classifyClick` reads `interpreter.generation` once and returns it as
   `Classified.clickGeneration` (the click capture still masks with the cached screen's generation). The publisher
-  (`publishClick`, after the click capture) matches the window with that generation's screens directly
+  (`publishClick`, after the content and platform gates and BEFORE `FrameGate`, whose UNKNOWN suppressor keys a tap
+  on its detached node and cached screen target and would keep only the first of two taps on different windows or
+  owners) matches the window with that generation's screens directly
   (`Ruleset.matchFirst`; no `lastScreenContexts`, `FrameGate`, health or shadow write); sensitive or noise
   (`passesContentGates(parsed)`) → `BLOCKED`; a recognized window is masked with that rule's `redact` from the same
   generation; an UNKNOWN window builds as an UNKNOWN frame. The owner is `actionOwner(node, UiOwnerShape)` on the

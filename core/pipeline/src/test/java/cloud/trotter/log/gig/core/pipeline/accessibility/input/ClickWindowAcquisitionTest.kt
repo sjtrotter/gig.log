@@ -10,6 +10,7 @@ import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.mockito.kotlin.any
 import org.mockito.kotlin.doReturn
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
@@ -120,6 +121,35 @@ class ClickWindowAcquisitionTest {
         repeat(TreeLimits.MAX_TREE_DEPTH + 1) { root = node(null, 7, pkg, root) }
         deep.inWindow(window(7, root))
         assertEquals(ClickEvidenceRefusal.NO_WINDOW, refused(source.clickWindow(deep, pkg, 0L)))
+    }
+
+    @Test fun `a window cut by the node budget is no evidence, whatever lies past the cut`() {
+        // The source maps first; a fan spends the whole node budget; the blocked screen's text sits after it, unread.
+        val tapped = node("Continue")
+        val leaf = node("Row")
+        val fan = mock<AccessibilityNodeInfo> {
+            on { packageName } doReturn pkg
+            on { windowId } doReturn 7
+            on { childCount } doReturn TreeLimits.MAX_TREE_NODES
+            on { getChild(any()) } doReturn leaf
+        }
+        val root = node(null, 7, pkg, tapped, fan, node("Available Balance"))
+        tapped.inWindow(window(7, root))
+        assertEquals(ClickEvidenceRefusal.NO_WINDOW, refused(source.clickWindow(tapped, pkg, 0L)))
+    }
+
+    @Test fun `a window cut by the child-index cap is no evidence, whatever lies past the cut`() {
+        // A fan of unreadable children spends no budget, so only the index cap stops it; its last child goes unread.
+        val tapped = node("Continue")
+        val fan = mock<AccessibilityNodeInfo> {
+            on { packageName } doReturn pkg
+            on { windowId } doReturn 7
+            on { childCount } doReturn TreeLimits.MAX_TREE_NODES + 1
+            on { getChild(TreeLimits.MAX_TREE_NODES) } doReturn node("Available Balance")
+        }
+        val root = node(null, 7, pkg, tapped, fan)
+        tapped.inWindow(window(7, root))
+        assertEquals(ClickEvidenceRefusal.NO_WINDOW, refused(source.clickWindow(tapped, pkg, 0L)))
     }
 
     @Test fun `the mapped tree keeps the source's node identity in the window tree`() {

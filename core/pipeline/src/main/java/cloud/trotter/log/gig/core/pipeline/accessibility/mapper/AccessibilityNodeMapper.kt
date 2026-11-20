@@ -44,6 +44,15 @@ internal class TreeBudget(
     val nodesExhausted: Boolean
         get() = nodes >= maxNodes
 
+    /**
+     * #1634: a breadth short-circuit stopped reading a node's remaining children (the node budget spent, or the
+     * child-index cap) without calling [admit] for them: the tree is cut there too, so it is flagged. Every cap-induced
+     * cut now sets [truncated]; the converted tree itself is unchanged.
+     */
+    fun cutBreadth() {
+        truncated = true
+    }
+
     /** True if a node at [depth] may be ingested; flags truncation otherwise. */
     fun admit(depth: Int): Boolean {
         if (depth > maxDepth || nodes >= maxNodes) {
@@ -158,7 +167,11 @@ private fun convert(
         //    issues at most MAX_TREE_NODES binder calls (#590 review F1).
         // nodesExhausted stays keyed on node budget (not truncated) so a deep branch
         // hitting the depth cap does NOT suppress this node's shallower siblings.
-        if (budget.nodesExhausted || i >= TreeBudget.MAX_TREE_NODES) break
+        if (budget.nodesExhausted || i >= TreeBudget.MAX_TREE_NODES) {
+            // #1634: children left unread are a cut tree, never a whole one (a click window refuses it as NO_WINDOW).
+            budget.cutBreadth()
+            break
+        }
 
         val childAccNode = node.getChild(i)
         if (childAccNode != null) {
