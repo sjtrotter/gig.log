@@ -55,7 +55,7 @@ class MatchedSkeletonPublisherTest : SkeletonBuilderTestBase() {
     }
 
     private class Incidents(vararg rules: String) : RecognitionIncidents {
-        override val open = MutableStateFlow(
+        override val open = MutableStateFlow<List<RecognitionIncident>>(
             if (rules.isEmpty()) emptyList() else listOf(
                 RecognitionIncident("doordash", openedAt = 0L, parseRot = rules.map { ParseRotCause(it, "post_task", listOf("totalPay"), 0L) }),
             ),

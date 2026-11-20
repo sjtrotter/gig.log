@@ -40,10 +40,10 @@ class HttpCensusSinkTest {
         spool: CensusSpool,
         stats: CensusUploadStats,
         io: kotlinx.coroutines.CoroutineDispatcher,
-        matchedCap: CensusMatchedCap = matchedCap(),
+        matchedCap: CensusMatchedCap = newMatchedCap(),
     ) = HttpCensusSink(prefs, spool, sample(), stats, backgroundScope, io, readsUnboundPlatforms = false, matchedCap = matchedCap)
 
-    private fun matchedCap(file: java.io.File = java.io.File(tmp.newFolder(), "matched.json")) =
+    private fun newMatchedCap(file: java.io.File = java.io.File(tmp.newFolder(), "matched.json")) =
         CensusMatchedCap(file, kotlinx.coroutines.Dispatchers.Unconfined)
 
     @Test fun `publisher schema snapshot follows policy including an empty accepted set`() = runTest {
@@ -182,7 +182,7 @@ class HttpCensusSinkTest {
         val spool = CensusSpool(tmp.newFolder(), stats, io)
         val capFile = java.io.File(tmp.newFolder(), "matched.json")
         val rule = "doordash.screen.delivery_summary_expanded"
-        val sink = sink(Preferences(), spool, stats, io, matchedCap(capFile))
+        val sink = sink(Preferences(), spool, stats, io, newMatchedCap(capFile))
         runCurrent()
         sink.offer(matchedCensusRecord(1, rule)); runCurrent()
         assertEquals("a matched record is spooled", 1, spool.count())
@@ -198,7 +198,7 @@ class HttpCensusSinkTest {
         assertEquals("an UNKNOWN record of a matched layout is its own variant", 11, spool.count())
 
         // A restart: a new sink and cap over the same file.
-        val restarted = sink(Preferences(), spool, stats, io, matchedCap(capFile))
+        val restarted = sink(Preferences(), spool, stats, io, newMatchedCap(capFile))
         runCurrent()
         restarted.offer(matchedCensusRecord(3, rule))
         restarted.offer(matchedCensusRecord(31, "doordash.screen.rule_twelve")); runCurrent()
