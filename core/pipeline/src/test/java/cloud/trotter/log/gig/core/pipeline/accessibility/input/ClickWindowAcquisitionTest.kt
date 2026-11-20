@@ -141,11 +141,12 @@ class ClickWindowAcquisitionTest {
     @Test fun `a window cut by the child-index cap is no evidence, whatever lies past the cut`() {
         // A fan of unreadable children spends no budget, so only the index cap stops it; its last child goes unread.
         val tapped = node("Continue")
+        val beyondCut = node("Available Balance")
         val fan = mock<AccessibilityNodeInfo> {
             on { packageName } doReturn pkg
             on { windowId } doReturn 7
             on { childCount } doReturn TreeLimits.MAX_TREE_NODES + 1
-            on { getChild(TreeLimits.MAX_TREE_NODES) } doReturn node("Available Balance")
+            on { getChild(TreeLimits.MAX_TREE_NODES) } doReturn beyondCut
         }
         val root = node(null, 7, pkg, tapped, fan)
         tapped.inWindow(window(7, root))
