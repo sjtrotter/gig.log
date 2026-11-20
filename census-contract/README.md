@@ -71,8 +71,8 @@ The rules both sides apply:
   server's reason for a bad one is `bad_rule_id`.
 - The body follows the v2 rules, and a matched item never projects to v1 (`toV1()` throws).
 - The fingerprint covers the tree only, so a matched skeleton and the same layout sent as unrecognized share it.
-- `CensusSkeletonSchema.SUPPORTED_SCHEMA_IDS` lists the matched id last; the phone builds one only when the server's
-  policy lists it.
+- `CensusSkeletonSchema.SUPPORTED_SCHEMA_IDS` lists the matched id after the version ladder and before the clicked id;
+  the phone builds one only when the server's policy lists it.
 
 `conformance/matched-vectors.jsonl` holds one vector per line, `{"name", "item", "contract", "server"}`: the contract
 verdict (`accept` or `refuse`, checked by `MatchedSkeletonContractTest`) and the server's (`accepted` or its rejection
