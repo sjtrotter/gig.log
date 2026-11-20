@@ -158,7 +158,7 @@
          truth: a change to a claim there updates the matching privacy_* string in the same PR. -->
     <string name="privacy_title">Privacy</string>
     <string name="privacy_reads_title">What gig.log reads</string>
-    <string name="privacy_reads_body">Screens of the delivery apps you turn on, through Android Accessibility. Those apps\' notifications; other apps\' are skipped unread. GPS during a shift. Screen reading and calculations happen on your phone. Recognized banking, payment and ID screens, the ID camera and the signature pad are dropped unsaved. The filters work in English and can miss a screen.</string>
+    <string name="privacy_reads_body">Screens of the delivery apps you turn on, through Android Accessibility. Those apps\' notifications; other apps\' are skipped unread. GPS during a shift. With Auto gas price on, the same GPS fixes pick your gas price area on the phone. Screen reading and calculations happen on your phone. Recognized banking, payment and ID screens, the ID camera and the signature pad are dropped unsaved. The filters work in English and can miss a screen.</string>
     <!-- #170: shown under privacy_reads_body only in a build that offers Screen events. -->
     <string name="privacy_reads_screen_events">With Screen events on, also the name of the app in front.</string>
     <string name="privacy_customers_title">Customers</string>
