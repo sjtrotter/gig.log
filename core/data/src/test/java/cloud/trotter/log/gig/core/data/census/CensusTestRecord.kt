@@ -24,3 +24,12 @@ internal fun notificationCensusRecord(): CensusRecord {
     val measured = cloud.trotter.census.contract.NotificationSkeletonSchema.measure(item)
     return CensusRecord(Platform.DoorDash, fingerprint, measured.json, measured.bytes, null)
 }
+
+/** #1573: a synthetic `uinode.matched.v1` item of rule [ruleId]; [number] picks the layout, as in [censusRecord]. */
+internal fun matchedCensusRecord(number: Int = 0, ruleId: String = "doordash.screen.delivery_summary_expanded", day: String = "2026-10-02"): CensusRecord {
+    val fingerprint = number.toString(16).padStart(64, '0')
+    val json = "{\"schemaId\":\"uinode.matched.v1\",\"hashDomain\":1,\"filterRev\":1," +
+        "\"fingerprint\":\"$fingerprint\",\"platform\":\"doordash\",\"engineVersion\":1," +
+        "\"day\":\"$day\",\"ruleId\":\"$ruleId\",\"root\":{\"class\":\"android.widget.TextView\"}}"
+    return CensusRecord(Platform.DoorDash, fingerprint, json, json.toByteArray().size, null)
+}

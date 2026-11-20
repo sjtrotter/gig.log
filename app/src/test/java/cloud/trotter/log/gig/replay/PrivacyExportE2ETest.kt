@@ -272,6 +272,68 @@ class PrivacyExportE2ETest {
         }
     }
 
+    @Test fun `a rule in a parse-rot incident sends its confirmed screen as a matched skeleton and never screen text`() = runTest(timeout = 30.seconds) {
+        // #1573 A-E2E: the release graph's components; the server lists the matched schema and the consent names it.
+        replay(captures = false, debug = false).use { h ->
+            h.start()
+            h.acceptedSchemaIds = listOf(SkeletonSchema.SCHEMA_ID, SkeletonSchema.SCHEMA_ID_V2, SkeletonSchema.SCHEMA_ID_MATCHED)
+            enroll(h)
+            val receipt = Inputs.rottedReceipt()
+            val benign = Inputs.screen(Inputs.Screen.BENIGN)
+            val preflight = h.frame(receipt, "delivery_summary_expanded", at = 0L)
+            assertEquals(Inputs.MATCHED_RULE, preflight.ruleId)
+            assertEquals("the receipt's own branch lost its total", listOf(listOf("totalPay")),
+                preflight.parseShortfalls.filter { it.ruleId == Inputs.MATCHED_RULE && !it.branchSkipped }.map { it.nullRequiredFields })
+            h.frame(benign, "waiting_for_offer", at = 4_000L)
+            // Visits 0-4 trip the rule (5 confirmed visits); none of them is held. Visit 5 is held, and the benign
+            // frame after it confirms the visit and releases it.
+            for (visit in 1..5) {
+                h.frame(receipt, "delivery_summary_expanded", at = visit * 10_000L)
+                assertEquals("held after visit $visit", if (visit == 5) 1L else 0L, h.stats.matchedHeldCount())
+                h.frame(benign, "waiting_for_offer", at = visit * 10_000L + 4_000L)
+            }
+            assertEquals(1L, h.stats.matchedReleasedCount())
+            assertEquals(0L, h.stats.matchedDroppedCount())
+            val queued = h.records(h.skeletonRoot)
+            assertEquals("the one matched skeleton is queued, nothing else", 1, queued.size)
+            val credential = requireNotNull(h.credentials.current())
+            h.worker()
+            uploads(h, queued, emptyList(), credential)
+            assertTrue(h.requests.none { it.path == "/v1/envelopes" })
+            val bodies = h.requests.filter { it.path == "/v1/skeletons" }.map { it.body.toByteArray() }
+            val items = bodies.flatMap { json("request/v1/skeletons", it).getValue("items").jsonArray }
+            assertEquals(1, items.size)
+            val item = privacyExportDecode("matched item") { CensusSkeletonSchema.deserialize(items.single().toString()) } as UiSkeletonDto
+            assertEquals(SkeletonSchema.SCHEMA_ID_MATCHED, item.schemaId)
+            assertEquals(Inputs.MATCHED_RULE, item.ruleId)
+            // Every slot is a kind, a hashed word kind or a format template: TextSlot's own invariants, checked on decode.
+            assertTrue("the receipt's chrome is hashed", CensusSkeletonSchema.slots(item).any { it.h != null })
+            assertEquals("the value the rule's redact covers is withheld", TextSlot.WITHHELD, item.root.children.last().text["text"])
+            bodies.forEach { body ->
+                noFrameText("request/v1/skeletons", body, receipt)
+                safe("request/v1/skeletons", body, Inputs.forbidden + listOf(Inputs.MATCHED_NAME, "Tobias", "Wren"))
+            }
+            safeSurfaces(h, credential.secret)
+        }
+    }
+
+    /**
+     * #1573 §3.3: no scrubbable string of [frame] (trimmed, 3 characters or more) is in any string of [body], apart from
+     * one equal to a node's class or view id. Hex strings (hashes, fingerprints, batch ids) are left out of the search.
+     */
+    private fun noFrameText(surface: String, body: ByteArray, frame: cloud.trotter.log.gig.domain.model.accessibility.UiNode) {
+        val nodes = Inputs.nodes(frame)
+        val names = nodes.flatMap { listOfNotNull(it.className, it.viewIdResourceName) }.toSet()
+        val texts = nodes.flatMap { node -> node.scrubbableStrings().mapNotNull { it.second?.trim() } }
+            .filter { it.length >= 3 && it !in names }.toSet()
+        assertTrue("the frame has text to look for", texts.size > 5)
+        val hex = Regex("(m-)?[0-9a-f-]+")
+        val decoded = strings(json(surface, body)).filterNot { it in names || hex.matches(it) }
+        texts.forEachIndexed { index, text ->
+            assertFalse("$surface carries frame text #$index", decoded.any { text in it })
+        }
+    }
+
     /** Each configuration gets fresh directories beneath Robolectric's actual internal/external roots. */
     private fun TestScope.replay(captures: Boolean = true, census: Boolean = true, debug: Boolean = true): PrivacyExportReplay {
         val app = RuntimeEnvironment.getApplication() as ReplayApplication

@@ -109,6 +109,23 @@ object PrivacyExportInputs {
         return copy(root)
     }
 
+    /** #1573: the matched rule, its receipt fixture and the synthetic customer name planted where its redact covers. */
+    const val MATCHED_RULE = "doordash.screen.delivery_summary_expanded"
+    const val MATCHED_NAME = "Tobias Wren"
+    private const val RECEIPT = "delivery_summary_expanded/20260128_163017_537_DELIVERY_SUMMARY_EXPANDED.json"
+
+    /**
+     * #1573: a delivery receipt whose total no longer reads (its `final_value` blanked), plus an id-less "Building Name"
+     * row holding [MATCHED_NAME]: the rule's own redact covers that value, the census filters alone would hash it.
+     */
+    fun rottedReceipt(): UiNode {
+        var root = TestResourceLoader.loadNode(file(RECEIPT))
+        root = replace(root, "") { it.viewIdResourceName?.endsWith("final_value") == true }
+        root = append(root, listOf(leaf("Building Name"), leaf(MATCHED_NAME)))
+        assertTrue("receipt anchor survives", nodes(root).any { it.text == "This offer" })
+        return root.restoreParents()
+    }
+
     /** A new structural leaf ensures a post-withdrawal frame cannot disappear into admission dedup. */
     fun distinctUnknown(): UiNode = append(screen(Screen.UNKNOWN), listOf(leaf(AFTER, "privacy_after")))
         .restoreParents().also { assertEquals(1, nodes(it).count { n -> n.text == AFTER }) }

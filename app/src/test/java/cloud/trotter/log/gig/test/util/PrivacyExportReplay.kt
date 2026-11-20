@@ -35,6 +35,7 @@ import cloud.trotter.log.gig.core.pipeline.accessibility.event.type.window.state
 import cloud.trotter.log.gig.core.pipeline.accessibility.event.type.window.windows_changed.WindowsChangedPipeline
 import cloud.trotter.log.gig.core.pipeline.accessibility.input.AccessibilitySource
 import cloud.trotter.log.gig.core.pipeline.accessibility.mapper.toUiNode
+import cloud.trotter.log.gig.core.pipeline.census.MatchedSkeletonHold
 import cloud.trotter.log.gig.core.pipeline.census.SkeletonPublisher
 import cloud.trotter.log.gig.core.pipeline.notification.NotificationFilter
 import cloud.trotter.log.gig.core.pipeline.notification.NotificationPipeline
@@ -77,6 +78,9 @@ import timber.log.Timber
 import java.io.File
 import java.io.IOException
 import java.time.Clock
+import java.time.Instant
+import java.time.ZoneId
+import java.time.ZoneOffset
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import javax.inject.Provider
@@ -99,6 +103,11 @@ class PrivacyExportReplay(
     private val io = OwnedDispatcher(StandardTestDispatcher(test.testScheduler))
     private val backgroundScope = CoroutineScope(test.backgroundScope.coroutineContext +
         SupervisorJob(test.backgroundScope.coroutineContext[Job]) + io)
+    /**
+     * #1573: the frame clock, read by the classifier and the accessibility event stamp. It follows the system clock until
+     * [frame]'s `at` fixes it at an offset from the harness's start, so frames fall on the upload's own UTC day.
+     */
+    val clock = ReplayClock(System.currentTimeMillis())
     val uploadStats = CensusUploadStats()
     val stats = PipelineStats("privacy-e2e", uploadStats)
     val preferences = DevSettingsRepository(DevSettingsDataSource(ReplayEdges.MemoryPreferences()), debug, io, "test")
@@ -123,7 +132,7 @@ class PrivacyExportReplay(
         else NoOpCensusEnvelopeSink
     private val sink: CensusSink = if (census)
         HttpCensusSink(preferences, skeletonSpool, CensusDailySample(context, io), uploadStats, backgroundScope, io,
-            readsUnboundPlatforms = true) else object : CensusSink {
+            readsUnboundPlatforms = true, matchedCap = CensusMatchedCap(context, io)) else object : CensusSink {
             override val isEnabled = false
             override fun offer(record: CensusRecord) = false
         }
@@ -135,7 +144,7 @@ class PrivacyExportReplay(
     }
     private val interpreter = JsonRuleInterpreter(generatedAssets(context), RuleCapabilityRepository(
         RuleCapabilityDataSource(ReplayEdges.MemoryPreferences()), backgroundScope, "privacy-e2e", Clock.systemUTC()))
-    private val classifier = ObservationClassifier(interpreter, metadata, PlatformAppVersions.NONE, Clock.systemUTC())
+    private val classifier = ObservationClassifier(interpreter, metadata, PlatformAppVersions.NONE, clock)
     private val platforms = object : PlatformPreferences {
         override val enabledPlatforms = MutableStateFlow(setOf(Platform.DoorDash))
         override val enabledPackages = MutableStateFlow(setOf(PrivacyExportInputs.PACKAGE))
@@ -145,13 +154,16 @@ class PrivacyExportReplay(
     private val service = mock<AccessibilityService>()
     private val notifications = NotificationSource()
     private val writer = CaptureWriter(bus, stats)
-    private val publisher = SkeletonPublisher(sink, stats, envelopeSink)
+    // #1573: as wired: the monitor owns the incidents and tells the one hold of each confirmed rot visit.
+    private val hold = MatchedSkeletonHold(sink, stats)
+    private val monitor = RecognitionHealthMonitor(RecognitionHealthReporter.NoOp, health, RecognitionNoticeStore.NoOp,
+        backgroundScope, io, hold)
+    private val publisher = SkeletonPublisher(sink, stats, envelopeSink, monitor, hold)
     private val accessibility = AccessibilityPipeline(ContentChangedPipeline(source, platforms, stats),
         StateChangedPipeline(source, platforms, stats), WindowsChangedPipeline(source, platforms, stats),
-        source, classifier, writer, platforms, stats, RecognitionHealthMonitor(RecognitionHealthReporter.NoOp, health,
-            RecognitionNoticeStore.NoOp, backgroundScope, io), publisher,
+        source, classifier, writer, platforms, stats, monitor, publisher,
         // #1630: shadow outcomes stay out of this harness's health rows, which the worker thread would make timing-bound.
-        ShadowWorker(HealthSink.NoOp, stats))
+        ShadowWorker(HealthSink.NoOp, stats), clock)
     private val notificationPipeline = NotificationPipeline(notifications, NotificationFilter(platforms), classifier, writer, platforms, stats, publisher)
     val forwarded = mutableListOf<Observation>()
     val requests = CopyOnWriteArrayList<RequestBytes>()
@@ -224,24 +236,34 @@ class PrivacyExportReplay(
     fun settle() = test.testScheduler.runCurrent()
 
     /** Preflight classification checks the splice; only emit(event) drives persistence and forwarding. */
-    @Suppress("DEPRECATION") // obtain/recycle match the framework callback lifetime on SDK 35.
     fun screen(kind: PrivacyExportInputs.Screen, node: UiNode = PrivacyExportInputs.screen(kind)) {
         val before = fileCounts()
+        frame(node, kind.target, at = null) { "mutated input classification: $kind" }
+        if (kind in setOf(PrivacyExportInputs.Screen.BANKING, PrivacyExportInputs.Screen.BANKING_UNKNOWN)) {
+            assertEquals("sensitive screen creates no capture or census record", before, fileCounts())
+        }
+    }
+
+    /**
+     * #1573: one screen frame [node], which must classify as [target], at frame time [at] ms after the harness started
+     * (null keeps the clock where it is). Returns the preflight classification.
+     */
+    @Suppress("DEPRECATION") // obtain/recycle match the framework callback lifetime on SDK 35.
+    fun frame(node: UiNode, target: String, at: Long?, label: () -> String = { "input classification" }): Observation.Screen {
+        at?.let { clock.at(it) }
         val native = PrivacyExportInputs.mirror(node)
         val mapped = requireNotNull(native.toUiNode())
         assertTrue("native adapter preserves the input tree", PrivacyExportInputs.nodes(node) == PrivacyExportInputs.nodes(mapped))
-        val preflight = classifier.classify(PipelineEvent.Screen(System.currentTimeMillis(), mapped,
+        val preflight = classifier.classify(PipelineEvent.Screen(clock.millis(), mapped,
             TreeSnapshot(mapped, PrivacyExportInputs.PACKAGE), PrivacyExportInputs.PACKAGE))
-        assertEquals("mutated input classification: $kind", kind.target, preflight.target)
+        assertEquals(label(), target, preflight.target)
         whenever(service.rootInActiveWindow).thenReturn(native)
         val event = AccessibilityEvent.obtain(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED).apply {
             packageName = PrivacyExportInputs.PACKAGE
             className = "android.widget.FrameLayout"
         }
         try { source.emit(event); settle() } finally { event.recycle() }
-        if (kind in setOf(PrivacyExportInputs.Screen.BANKING, PrivacyExportInputs.Screen.BANKING_UNKNOWN)) {
-            assertEquals("sensitive screen creates no capture or census record", before, fileCounts())
-        }
+        return preflight
     }
 
     fun notification(kind: PrivacyExportInputs.Push) {
@@ -311,6 +333,16 @@ class PrivacyExportReplay(
     /** The replay's network is Wi-Fi: the census's Wi-Fi only check passes. */
     private val unmetered = object : CensusNetwork(context) {
         override fun isMetered() = false
+    }
+
+    /** #1573: the system clock until [at] fixes it at [start] plus an offset. */
+    class ReplayClock(private val start: Long) : Clock() {
+        @Volatile private var fixed: Long? = null
+        fun at(offset: Long) { fixed = start + offset }
+        override fun millis(): Long = fixed ?: System.currentTimeMillis()
+        override fun instant(): Instant = Instant.ofEpochMilli(millis())
+        override fun getZone(): ZoneId = ZoneOffset.UTC
+        override fun withZone(zone: ZoneId?): Clock = this
     }
 
     class RecordingScheduler : CensusUploadScheduler {
