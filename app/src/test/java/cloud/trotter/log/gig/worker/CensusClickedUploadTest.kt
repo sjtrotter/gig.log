@@ -8,6 +8,7 @@ import cloud.trotter.census.contract.UiSkeletonDto
 import cloud.trotter.census.contract.UiSkeletonNodeDto
 import cloud.trotter.log.gig.core.network.census.CensusApi
 import cloud.trotter.log.gig.core.network.census.CensusBudget
+import cloud.trotter.log.gig.core.network.census.EnrolResult
 import cloud.trotter.log.gig.core.network.census.UploadResult
 import cloud.trotter.log.gig.core.pipeline.census.SkeletonBuilder
 import cloud.trotter.log.gig.domain.capture.ReplayMetadata
@@ -19,6 +20,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.mockito.kotlin.whenever
 import org.robolectric.RobolectricTestRunner
 import java.time.LocalDate
 import java.time.ZoneOffset
@@ -132,5 +134,40 @@ class CensusClickedUploadTest {
         assertEquals("only the unsent half goes again", second, h.api.bodies.last())
         assertEquals(h.api.batches[2], h.api.batches[3])
         assertTrue(h.clicks.frozen().isEmpty())
+    }
+
+    /** Click evidence from 9 days ago, written as the store writes it: a frozen batch and a closed-day marker. */
+    private fun staleEvidence(): List<java.io.File> {
+        val root = java.io.File(org.robolectric.RuntimeEnvironment.getApplication().filesDir, "census")
+        val old = LocalDate.now(ZoneOffset.UTC).minusDays(9).toString()
+        val batchId = "c-" + "0".repeat(32)
+        val frozen = java.io.File(root, "clicks-frozen/$old.$batchId.json").apply { parentFile!!.mkdirs() }
+        frozen.writeText("""{"day":"$old","batchId":"$batchId","keys":["k"],"identities":["i"],"platforms":["doordash"],"items":["{}"]}""")
+        val candidates = java.io.File(root, "clicks.json").apply { writeText("""{"closed":["$old"]}""") }
+        return listOf(frozen, candidates)
+    }
+
+    /** Runs one worker run set up by [setup] over stale evidence; the evidence must be gone and nothing sent. */
+    private suspend fun kotlinx.coroutines.test.TestScope.expiresIn(name: String, setup: suspend (CensusWorkerHarness) -> Unit) {
+        val h = harness()
+        setup(h)
+        val files = staleEvidence()
+        h.worker().doWork()
+        assertTrue("$name: expired evidence is gone", files.none { it.exists() })
+        assertTrue("$name: nothing was sent", h.api.bodies.isEmpty())
+    }
+
+    @Test fun `expiry runs at the start of every run, before any check can end it`() = runTest {
+        expiresIn("census off") { h -> h.initialize(enabled = false) }
+        expiresIn("not enrolled") { h ->
+            h.initialize()
+            whenever(h.credentials.current()).thenReturn(null)
+            whenever(h.credentials.pending()).thenReturn(h.credential.copy(enrolled = false))
+            h.api.enrollments += EnrolResult.ServerUnavailable(503)
+        }
+        expiresIn("deferred") { h ->
+            h.initialize()
+            h.preferences.setNextAllowedAtMillis(Long.MAX_VALUE)
+        }
     }
 }

@@ -116,6 +116,14 @@ class CensusUploadWorker @AssistedInject constructor(
     }
 
     override suspend fun doWork(): Result {
+        // #1634: click evidence expires in every run, whatever the run then does (off, unenrolled, deferred, deleting).
+        try {
+            clicks.prune()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            Timber.tag(TAG).w("census click evidence expiry failed")
+        }
         // #1620: the daily run draws the next day's time first, whatever this run then does; a manual run never does.
         // A daily run that starts more than an hour after its target, before it, or with none, sends nothing.
         val onSchedule = CensusWorkScheduler.DAILY_TAG !in tags || planner.beginDailyRun()

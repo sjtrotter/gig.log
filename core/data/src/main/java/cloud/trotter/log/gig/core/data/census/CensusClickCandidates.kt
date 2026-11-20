@@ -154,6 +154,19 @@ class CensusClickCandidates(
         frozen
     }
 
+    /**
+     * Deletes candidates, closed-day markers and frozen batches older than the kept days, and nothing else. The worker
+     * calls it first in every run, before any check that can end the run, so expiry never waits on an upload.
+     */
+    suspend fun prune() {
+        spool.underClearLock {
+            val root = spool.censusRoot
+            val today = today()
+            sweepFrozen(root, today)
+            save(root, sweep(load(root), today))
+        }
+    }
+
     /** The frozen batches waiting to be sent, by day and then by their first key. */
     suspend fun frozen(): List<Batch> = spool.underClearLock {
         val root = spool.censusRoot
