@@ -157,7 +157,9 @@ class CensusClickCandidates(
     /** The frozen batches waiting to be sent, by day and then by their first key. */
     suspend fun frozen(): List<Batch> = spool.underClearLock {
         val root = spool.censusRoot
-        sweepFrozen(root, today())
+        val today = today()
+        sweepFrozen(root, today)
+        save(root, sweep(load(root), today))
         frozenFiles(root).mapNotNull { read(root, it) }.sortedWith(compareBy<Batch>({ it.day }, { it.keys.first() }, { it.file }))
     }
 
