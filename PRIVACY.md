@@ -119,8 +119,17 @@ what is forwarded). Only the platforms the service is bound to (§2.1) can be en
   limits) before it can move the mileage. A location is never written to a log line — a rejected fix is logged as
   numbers and a reason, never as a coordinate (`domain/.../OdometerFixPolicy`).
 
-The gas-price refresh reads no location. The dasher picks a fuel price area in Settings > Costs (`FuelPriceRepository`,
-the `fuel_price_area` preference); the area never leaves the phone (§6).
+The gas-price refresh reads no location. The fuel price area (Settings > Costs, `FuelPriceRepository`) is either one
+the dasher picks (the `fuel_price_area` preference) or **Automatic**, the default (`fuel_price_area_auto`). With Auto
+gas price on and the area on Automatic, the GPS fixes the odometer already takes during a shift, the ones its fix
+policy accepts, also pick the area, on the phone (`FuelAreaDetector`, `OdometerRepository.acceptedFixes`): a fix is
+checked against simplified U.S. state outlines bundled in the app (`FuelAreaLocator`, `StateOutlines`; the Census
+Bureau's 2024 1:20,000,000 cartographic boundaries, `tools/fuel-areas/`) and against the radius of each of the 10
+EIA cities, at most once every 10 minutes. This makes no location request of its own and calls no geocoder. The phone
+stores the resulting area code only (`fuel_price_area_detected`), never the coordinates; the fix is dropped after the
+check and never logged (the area's code is logged at DEBUG only). gig.log sends nothing about the location or the
+area: the fuel download is the same for every phone and carries neither (§6). Like the other app preferences, the
+area codes are included in Android backup and device transfer (§6).
 
 ### 2.5 What gig.log never processes
 
@@ -681,6 +690,12 @@ under `core/pipeline/`, the consent model under `docs/design/rule-capability-con
 
 ## Revision history
 
+- **r31 (2026-11-20)** — §2.4: with Auto gas price on and the fuel price area on Automatic (#1687), the GPS fixes the
+  odometer already takes during a shift also pick the gas price area, on the phone, against state outlines bundled in
+  the app; the phone stores the area code only, never the coordinates, and nothing about the location or the area is
+  sent. Automatic is the default; a dasher who picked an area by hand keeps it. The Privacy page's "What gig.log reads"
+  (`privacy_reads_body`), the location permission card (`perm_body_location`) and setup's gas-price card
+  (`wizard_gas_price_auto_update_desc`) say so. Receipts created under r30 retain that revision.
 - **r30 (2026-11-19)** — §2.4, §6 and §7: the gas price comes from gig.log's signed fuel feed (#1566), for an area
   the dasher picks in Settings > Costs, in place of a request to the EIA's API after Android's `Geocoder` resolved
   the state from a rounded location. The gas-price refresh reads no location, and nothing location-derived leaves

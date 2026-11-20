@@ -489,4 +489,24 @@ class OdometerRepositoryPerSessionTest {
         assertTrue("nothing was rejected", recorder.warns().isEmpty())
     }
 
+    /**
+     * #1687: the reference and each accepted fix reach [OdometerRepository.acceptedFixes]; a rejected fix and an
+     * ignored one (jitter under the floor) never do, so the fuel area reads only fixes the gate already trusts.
+     */
+    @Test
+    fun `accepted fixes are emitted, rejected and ignored ones are not`() = runTest {
+        val dispatcher = UnconfinedTestDispatcher(testScheduler)
+        val repo = repo(dispatcher)
+        val seen = mutableListOf<Coordinates>()
+        backgroundScope.launch(dispatcher) { repo.acceptedFixes.collect { seen += it } }
+        repo.startTracking()
+
+        emitFix(0.0, accuracyMeters = 80.0, timestampMs = 0L)        // rejected: poor accuracy
+        emitFix(0.0, accuracyMeters = 6.0, timestampMs = 5_000L)     // reference
+        emitFix(2.0, accuracyMeters = 6.0, timestampMs = 8_000L)     // ignored: under the floor
+        emitFix(150.0, accuracyMeters = 6.0, timestampMs = 13_000L)  // accepted: +150 m
+        emitFix(1_457_000.0, accuracyMeters = 6.0, timestampMs = 18_000L) // rejected: a teleport
+
+        assertEquals(listOf(5_000L, 13_000L), seen.map { it.timestampMs })
+    }
 }

@@ -105,7 +105,7 @@ fun EconomySettingsScreen(
                     Text(stringResource(R.string.economy_shared_auto_gas_price), Modifier.weight(1f))
                     Switch(checked = gasAuto, onCheckedChange = null, enabled = enabled)
                 }
-                FuelAreaRow(fuelPrice.area, enabled, viewModel::setFuelArea)
+                FuelAreaRow(fuelPrice.choice, enabled, viewModel::setFuelAreaAutomatic, viewModel::setFuelArea)
                 DecimalInput(stringResource(R.string.economy_shared_gas_price), eco.gasPricePerGallon, viewModel::setGasPrice,
                     enabled = enabled, fieldKey = "GAS_PRICE")
                 if (gasAuto) FuelPriceLines(fuelPrice)

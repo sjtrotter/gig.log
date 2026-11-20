@@ -28,3 +28,6 @@ runs and stops when the shift ends. The store listing promotes this under "SHIFT
   `FusedLocationDataSource`), only while a shift is active (`OdometerEffectHandler`). `OdometerFixPolicy` judges each
   fix before it can move the mileage, and a rejected fix is logged as numbers and a reason, never as a coordinate.
 - The gas-price refresh reads no location: the driver picks a fuel price area in Settings > Costs.
+- On Automatic, the default fuel price area (#1687), the same shift fixes also pick the gas price area on the phone,
+  against state outlines bundled in the app (`FuelAreaDetector`, `FuelAreaLocator`); the phone keeps the area code
+  only, and nothing about the location or the area is collected or shared.

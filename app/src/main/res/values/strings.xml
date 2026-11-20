@@ -48,7 +48,7 @@
 
     <string name="perm_title_location">Location</string>
     <string name="perm_pitch_location">Counts your miles during a shift.</string>
-    <string name="perm_body_location">gig.log counts miles with GPS only while a shift is on. Choose Precise; approximate location counts no miles.</string>
+    <string name="perm_body_location">gig.log counts miles with GPS only while a shift is on. With Auto gas price on, the same GPS fixes pick your gas price area on the phone. Choose Precise; approximate location counts no miles.</string>
     <string name="perm_without_location">gig.log can\'t track your driven miles.</string>
     <string name="perm_action_location">Allow location</string>
 
@@ -852,6 +852,9 @@
     <string name="economy_fuel_area_group_states">States</string>
     <string name="economy_fuel_area_group_cities">Cities</string>
     <string name="economy_fuel_area_using">Using the %1$s price</string>
+    <string name="economy_fuel_area_automatic">Automatic (from your location)</string>
+    <string name="economy_fuel_area_automatic_summary">Automatic: %1$s</string>
+    <string name="economy_fuel_area_automatic_pending">Automatic: U.S. until your first shift</string>
     <string name="economy_fuel_clock_behind">Phone clock is behind. New gas prices load once the date and time are right.</string>
     <!-- Fuel price area names, one per FuelArea entry. -->
     <string name="fuel_area_us">U.S.</string>

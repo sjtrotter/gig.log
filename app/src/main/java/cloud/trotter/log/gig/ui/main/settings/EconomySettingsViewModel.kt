@@ -71,18 +71,23 @@ class EconomySettingsViewModel @Inject constructor(
     val gasAuto = repo.isGasPriceAuto.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     val fuelPrice: StateFlow<FuelPriceUiState> =
-        combine(repo.fuelPriceArea, repo.gasPriceStamp, fuelPrices.resolved, fuelPrices.feedState) { area, stamp, resolved, feed ->
+        combine(repo.fuelPriceAreaChoice, repo.gasPriceStamp, fuelPrices.resolved, fuelPrices.feedState) { choice, stamp, resolved, feed ->
             FuelPriceUiState(
-                area = area,
+                choice = choice,
                 stamp = stamp,
-                usedArea = resolved?.area?.takeIf { it != area },
+                usedArea = resolved?.area?.takeIf { it != choice.effective },
                 clockBehind = feed.lastError == FeedError.Refused(FeedRefusal.ClockBehind),
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), FuelPriceUiState())
 
-    /** Saves the chosen area; with auto on, the fuel client applies its price from the cached feed. */
+    /** Saves an area picked by hand (Automatic turns off); with auto on, the fuel client applies its price from the cached feed. */
     fun setFuelArea(area: FuelArea) {
         viewModelScope.launch { fuelPrices.setArea(area) }
+    }
+
+    /** Turns the automatic area on: the GPS fixes of the next shift pick it on the phone. */
+    fun setFuelAreaAutomatic() {
+        viewModelScope.launch { fuelPrices.setAreaAutomatic() }
     }
 
     val timeConstants = strategyRepository.evaluationConfig.filterNotNull().map { config ->
