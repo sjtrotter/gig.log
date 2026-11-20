@@ -47,6 +47,9 @@ enum class SkeletonRejectionReason(val wire: String) {
 
     /** A v2 slot's shape is not a [ShapeTemplate] of the closed list (ADR-0011 §13). */
     BAD_SHAPE("bad_shape"),
+
+    /** A matched item's `ruleId` is not a rule id of the item's platform ([WireTokenGrammars.isRuleIdFor], #1573). */
+    BAD_RULE_ID("bad_rule_id"),
     ;
 
     companion object {

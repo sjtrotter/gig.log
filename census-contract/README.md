@@ -56,6 +56,29 @@ under the report's own platform. A report too large to send drops `shadowDaily` 
 `probeRefused`, then `parseShortfall` (`HealthReportSchema.encodeFitting`). `conformance/health-report-vectors.jsonl`
 pins the verdicts both sides must reach.
 
+## Matched skeletons
+
+`uinode.matched.v1` (#1573, census#69) is the skeleton of a screen a recognition rule still matches while that rule
+fails to read a required value on it. It is a `uinode.skeleton.v2` body plus a required top-level `ruleId`
+(`UiSkeletonDto.ruleId`, `SkeletonSchema.SCHEMA_ID_MATCHED`), under its own schema id rather than a step of the
+`SkeletonVersion` ladder, so the unrecognized-screen stream keeps its schema, sample keys and this directory's golden.
+The rules both sides apply:
+
+- `ruleId` is present exactly when the schema is `uinode.matched.v1`. A v1 or v2 screen item carrying the key at all,
+  `null` included, is refused before the typed decode (`V2WireKeys`).
+- `ruleId` is a rule of the item's own platform: at most 96 characters, the `WireTokenGrammars.ruleId` grammar and the
+  `"<platform>."` prefix (`WireTokenGrammars.isRuleIdFor`, which the health report's shadow entries also use). The
+  server's reason for a bad one is `bad_rule_id`.
+- The body follows the v2 rules, and a matched item never projects to v1 (`toV1()` throws).
+- The fingerprint covers the tree only, so a matched skeleton and the same layout sent as unrecognized share it.
+- `CensusSkeletonSchema.SUPPORTED_SCHEMA_IDS` lists the matched id last; the phone builds one only when the server's
+  policy lists it.
+
+`conformance/matched-vectors.jsonl` holds one vector per line, `{"name", "item", "contract", "server"}`: the contract
+verdict (`accept` or `refuse`, checked by `MatchedSkeletonContractTest`) and the server's (`accepted` or its rejection
+reason, checked by the server's validator test). Nothing builds or sends a matched skeleton until the app half of #1573
+ships.
+
 ## Consuming from another build
 
 `census-contract/settings.gradle.kts` reads the version catalog at `../gradle/libs.versions.toml`, so the build must be included from a COMPLETE gig.log checkout (`includeBuild("<path>/DashBuddy/census-contract")`), never vendored as a bare directory. The `dashbuddy-census` server pins that checkout to a SHA in CI.

@@ -36,6 +36,8 @@ class UiSkeletonDtoTypeTest {
         "platformAppVersion", "appVersion", "rulesetReleaseTag",
         // census-own
         "schemaId", "fingerprint", "platform", "day",
+        // census-own, `uinode.matched.v1` only: our own rule id, held to the rule-id grammar under the item's platform (#1573)
+        "ruleId",
     )
     private val envelopeInts = setOf(
         "engineVersion", "rulesetFormatVersion", // ReplayMetadata's own names

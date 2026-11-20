@@ -46,7 +46,10 @@ class CensusSkeletonSchemaTest {
         assertEquals(notification, CensusSkeletonSchema.deserialize(wire))
         assertEquals(NotificationSkeletonSchema.measure(notification), CensusSkeletonSchema.measure(notification))
         assertEquals(
-            listOf(SkeletonSchema.SCHEMA_ID, NotificationSkeletonSchema.SCHEMA_ID, SkeletonSchema.SCHEMA_ID_V2, NotificationSkeletonSchema.SCHEMA_ID_V2),
+            listOf(
+                SkeletonSchema.SCHEMA_ID, NotificationSkeletonSchema.SCHEMA_ID, SkeletonSchema.SCHEMA_ID_V2,
+                NotificationSkeletonSchema.SCHEMA_ID_V2, SkeletonSchema.SCHEMA_ID_MATCHED,
+            ),
             CensusSkeletonSchema.SUPPORTED_SCHEMA_IDS,
         )
         listOf("{}", "[]", "null", "{\"schemaId\":1}", wire.replace("notification.skeleton.v1", "unknown"),

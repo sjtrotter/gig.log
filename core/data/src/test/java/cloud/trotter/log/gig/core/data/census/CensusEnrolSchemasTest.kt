@@ -27,7 +27,7 @@ class CensusEnrolSchemasTest {
             CensusEnrolSchemas.declared(policy("""{"acceptedSchemaIds":["notification.skeleton.v1","uinode.skeleton.v1"]}""")))
     }
 
-    @Test fun `a v2 policy declares all four in the supported order, never an id it does not list`() {
+    @Test fun `a v2 policy declares the four it lists in the supported order, never an id it does not list`() {
         assertEquals(
             listOf(SkeletonSchema.SCHEMA_ID, NotificationSkeletonSchema.SCHEMA_ID, SkeletonSchema.SCHEMA_ID_V2, NotificationSkeletonSchema.SCHEMA_ID_V2),
             CensusEnrolSchemas.declared(policy(
@@ -39,6 +39,18 @@ class CensusEnrolSchemasTest {
         )))
         assertEquals(listOf(SkeletonSchema.SCHEMA_ID, SkeletonSchema.SCHEMA_ID_V2),
             CensusEnrolSchemas.declared(policy("""{"acceptedSchemaIds":["uinode.skeleton.v2","uinode.skeleton.v1"]}""")))
+    }
+
+    @Test fun `a policy listing the matched id declares all five, matched last, and a v1 and v2 policy never declares it`() {
+        val all = listOf(
+            SkeletonSchema.SCHEMA_ID, NotificationSkeletonSchema.SCHEMA_ID, SkeletonSchema.SCHEMA_ID_V2,
+            NotificationSkeletonSchema.SCHEMA_ID_V2, SkeletonSchema.SCHEMA_ID_MATCHED,
+        )
+        assertEquals(all, CensusEnrolSchemas.declared(policy(
+            """{"acceptedSchemaIds":["uinode.matched.v1","notification.skeleton.v2","uinode.skeleton.v2","notification.skeleton.v1","uinode.skeleton.v1"]}""",
+        )))
+        assertEquals(listOf(SkeletonSchema.SCHEMA_ID, SkeletonSchema.SCHEMA_ID_V2),
+            CensusEnrolSchemas.declared(policy("""{"acceptedSchemaIds":["uinode.skeleton.v1","uinode.skeleton.v2"]}""")))
     }
 
     @Test fun `an empty policy declares nothing`() {
