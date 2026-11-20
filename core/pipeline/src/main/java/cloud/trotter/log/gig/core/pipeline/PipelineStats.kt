@@ -107,6 +107,15 @@ class PipelineStats @Inject constructor(
             SkeletonBuilder.Refusal.entries.forEach { put(it, AtomicLong()) }
         }
 
+    /** #1573: matched skeletons held, released to the sink and dropped by the hold, and matched builds refused. */
+    private val matchedHeld = AtomicLong()
+    private val matchedReleased = AtomicLong()
+    private val matchedDropped = AtomicLong()
+    private val matchedRefusals: Map<SkeletonBuilder.Refusal, AtomicLong> =
+        EnumMap<SkeletonBuilder.Refusal, AtomicLong>(SkeletonBuilder.Refusal::class.java).apply {
+            SkeletonBuilder.Refusal.entries.forEach { put(it, AtomicLong()) }
+        }
+
     /** #1152: frames read from a platform offer overlay (a11y `TYPE_SYSTEM`), on any window path. */
     private val overlaySnapshots = AtomicLong()
 
@@ -500,6 +509,31 @@ class PipelineStats @Inject constructor(
     fun censusTokensWithheldCount(): Long = censusTokensWithheld.get()
     fun censusRefusedCount(reason: SkeletonBuilder.Refusal): Long = censusRefusals.getValue(reason).get()
     fun censusSinkRefusedCount(): Long = censusSinkRefused.get()
+
+    /** #1573: a matched skeleton was built and held until its visit is confirmed. */
+    fun onMatchedHeld() {
+        matchedHeld.incrementAndGet()
+    }
+
+    /** #1573: a held matched skeleton's visit was confirmed and the sink took it. */
+    fun onMatchedReleased() {
+        matchedReleased.incrementAndGet()
+    }
+
+    /** #1573: a held matched skeleton was dropped (a pre-render visit, its rule left the incident, or evicted). */
+    fun onMatchedDropped() {
+        matchedDropped.incrementAndGet()
+    }
+
+    /** #1573: a matched build was refused; the frame is unaffected. */
+    fun onMatchedRefused(reason: SkeletonBuilder.Refusal) {
+        matchedRefusals.getValue(reason).incrementAndGet()
+    }
+
+    fun matchedHeldCount(): Long = matchedHeld.get()
+    fun matchedReleasedCount(): Long = matchedReleased.get()
+    fun matchedDroppedCount(): Long = matchedDropped.get()
+    fun matchedRefusedCount(reason: SkeletonBuilder.Refusal): Long = matchedRefusals.getValue(reason).get()
     fun censusPublishFailureCount(): Long = censusPublishFailures.get()
 
     /** An observation was forwarded to the state machine. */
@@ -541,6 +575,7 @@ class PipelineStats @Inject constructor(
             topologySkipSuffix() +
             overlayRejectedSuffix() +
             censusSuffix() +
+            matchedSuffix() +
             shadow.suffix()
 
     private fun mapperLinkageRefusalsSuffix(): String =
@@ -566,6 +601,13 @@ class PipelineStats @Inject constructor(
         ) return ""
         return " census{skeletons=$skeletons,hashed=$hashed,withheld=$withheld," +
             "sinkRefused=$sinkRefused,failures=$failures,unattributed=$unattributed$refused$envelopes$uploads$notifications$notificationRefused}"
+    }
+
+    /** `" matched{held=1,released=1,dropped=0,refused{…}}"` (#1573), counts only; absent while every counter is zero. */
+    private fun matchedSuffix(): String {
+        val refused = reasonSuffix(",refused", matchedRefusals)
+        if (matchedHeld.get() == 0L && matchedReleased.get() == 0L && matchedDropped.get() == 0L && refused.isEmpty()) return ""
+        return " matched{held=${matchedHeld.get()},released=${matchedReleased.get()},dropped=${matchedDropped.get()}$refused}"
     }
 
     /**

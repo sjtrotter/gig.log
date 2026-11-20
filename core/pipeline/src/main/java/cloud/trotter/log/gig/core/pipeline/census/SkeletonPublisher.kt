@@ -1,13 +1,17 @@
 package cloud.trotter.log.gig.core.pipeline.census
 
+import cloud.trotter.log.gig.core.pipeline.ParseRotTracker
 import cloud.trotter.log.gig.core.pipeline.PipelineEvent
 import cloud.trotter.log.gig.core.pipeline.PipelineStats
+import cloud.trotter.log.gig.core.pipeline.rules.RuleGeneration
+import cloud.trotter.log.gig.core.pipeline.rules.ScreenRedactionSource
 import cloud.trotter.log.gig.core.pipeline.census.SkeletonBuilder.Outcome
 import cloud.trotter.log.gig.domain.capture.CensusEnvelopeSink
 import cloud.trotter.log.gig.domain.capture.CensusRecord
 import cloud.trotter.log.gig.domain.capture.CensusSink
 import cloud.trotter.census.contract.CensusSkeletonSchema
 import cloud.trotter.census.contract.NotificationSkeletonDto
+import cloud.trotter.census.contract.SkeletonSchema
 import cloud.trotter.census.contract.SkeletonVersion
 import cloud.trotter.log.gig.domain.model.notification.RawNotificationData
 import cloud.trotter.census.contract.KindClassifier
@@ -15,8 +19,12 @@ import cloud.trotter.census.contract.TextSlot
 import cloud.trotter.census.contract.UiSkeletonDto
 import cloud.trotter.census.contract.UiSkeletonNodeDto
 import cloud.trotter.log.gig.domain.pipeline.Observation
+import cloud.trotter.log.gig.domain.pipeline.RecognitionIncident
+import cloud.trotter.log.gig.domain.pipeline.RecognitionIncidents
 import cloud.trotter.log.gig.domain.pipeline.UNKNOWN_TARGET
 import cloud.trotter.log.gig.domain.state.Platform
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
@@ -37,19 +45,53 @@ import timber.log.Timber
  * ([SkeletonVersion.newestScreen] / [SkeletonVersion.newestNotification]; ADR-0011 §13): a server that does not
  * accept `uinode.skeleton.v2` yet keeps receiving v1, and the v2 fields leave the phone only once it does. The
  * skeleton `day` is the observation's UTC day (ADR-0011 §21), never the phone's zone.
+ *
+ * Matched skeletons (#1573): a screen a rule still recognizes while that rule is in an open parse-rot incident goes out
+ * as `uinode.matched.v1`, tagged with the rule's id, only once the server lists that schema and the census consent was
+ * given under the disclosure that names it (the sink folds both into [CensusSink.acceptedSchemaIds]). A matched frame
+ * never leaves without its `ruleId` and never under a v1 or v2 schema id.
  */
 @Singleton
 class SkeletonPublisher @Inject constructor(
     private val sink: CensusSink,
     private val stats: PipelineStats,
     private val envelopeSink: CensusEnvelopeSink,
+    /** #1573: the open recognition incidents; a matched skeleton is built only for a rule in one. */
+    private val incidents: RecognitionIncidents = NO_INCIDENTS,
+    /** #1573: holds a matched skeleton until its visit is confirmed. */
+    private val hold: MatchedSkeletonHold = MatchedSkeletonHold(sink, stats),
 ) {
 
     /** One WARN per publisher; the publisher is a Hilt @Singleton, so per process in the app (#1171 review: an instance field, not a JVM static, keeps tests isolated). */
     private val warned = AtomicBoolean()
 
-    /** Post-admission, UNKNOWN screens only; fail-OPEN — nothing here may ever cost a frame (#1146). */
-    fun publish(obs: Observation.Screen, event: PipelineEvent.Screen) {
+    /** #1573: the census clear boundary, read once per admitted frame before its capture and any build. */
+    fun clearBoundary(): Long = try {
+        sink.clearBoundary
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Throwable) {
+        // Fail open for the frame, closed for the census: a boundary no spool ever has drops whatever is offered with it.
+        Long.MIN_VALUE
+    }
+
+    /**
+     * Post-admission; fail-OPEN — nothing here may ever cost a frame (#1146). An UNKNOWN screen goes out as its skeleton
+     * ([publishUnknown], unchanged); any admitted screen that carries rot of a rule in an open parse-rot incident is also
+     * built as that rule's matched skeleton and held ([publishMatched], #1573). [redaction] is the generation that
+     * classified the frame; [boundary] is [clearBoundary] read at the frame's admission.
+     */
+    fun publish(
+        obs: Observation.Screen,
+        event: PipelineEvent.Screen,
+        redaction: ScreenRedactionSource = RuleGeneration.EMPTY,
+        boundary: Long = clearBoundary(),
+    ) {
+        publishUnknown(obs, event)
+        publishMatched(obs, event, redaction, boundary)
+    }
+
+    private fun publishUnknown(obs: Observation.Screen, event: PipelineEvent.Screen) {
         if (obs.target != UNKNOWN_TARGET) return
 
         try {
@@ -110,6 +152,80 @@ class SkeletonPublisher @Inject constructor(
         }
     }
 
+    /**
+     * #1573: the matched skeletons of [obs], one per rot rule of the frame ([ParseRotTracker.rotRuleIds]) that is in an
+     * open parse-rot incident of the frame's platform. Cheap checks first: the platform's incident, the rule set, the
+     * sink and the server policy. A built skeleton is held, never offered here; it carries no capture id, so no
+     * envelope is ever paired with it, and no review words.
+     */
+    private fun publishMatched(
+        obs: Observation.Screen,
+        event: PipelineEvent.Screen,
+        redaction: ScreenRedactionSource,
+        boundary: Long,
+    ) {
+        try {
+            val platform = Platform.fromPackage(event.packageName)
+            if (platform == Platform.Unknown) return
+            val open = openRotRules(platform.wire)
+            if (open.isEmpty()) return
+            val winner = obs.ruleId.takeUnless { obs.target == UNKNOWN_TARGET }
+            val rules = ParseRotTracker.rotRuleIds(winner, obs.parseShortfalls).filter { it in open }
+            if (rules.isEmpty()) return
+            if (!sink.isEnabled) return
+            if (SkeletonSchema.SCHEMA_ID_MATCHED !in sink.acceptedSchemaIds) {
+                stats.onMatchedRefused(SkeletonBuilder.Refusal.POLICY_UNSUPPORTED_SCHEMA)
+                return
+            }
+            for (ruleId in rules) {
+                if (Platform.fromRuleId(ruleId) != platform) {
+                    stats.onMatchedRefused(SkeletonBuilder.Refusal.MATCHED_PLATFORM_MISMATCH)
+                    continue
+                }
+                if (redaction is RuleGeneration && redaction.screens.ruleById(ruleId) == null) {
+                    stats.onMatchedRefused(SkeletonBuilder.Refusal.MATCHED_RULE_NOT_IN_GENERATION)
+                    continue
+                }
+                when (val outcome = SkeletonBuilder.matchedOutcome(
+                    event.tree,
+                    event.snapshot.windowContext?.windowTitle,
+                    obs.metadata,
+                    platform,
+                    utcDay(obs.timestamp),
+                    ruleId,
+                    redaction.redactFor(ruleId),
+                )) {
+                    is Outcome.Built -> hold.hold(
+                        platform.wire,
+                        ruleId,
+                        obs.timestamp,
+                        CensusRecord(
+                            platform = platform,
+                            fingerprint = outcome.skeleton.fingerprint,
+                            skeletonJson = outcome.json,
+                            itemBytes = outcome.itemBytes,
+                            captureId = null,
+                        ),
+                        boundary,
+                        open,
+                    )
+                    is Outcome.Refused -> stats.onMatchedRefused(outcome.reason)
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            stats.onCensusPublishFailure()
+            if (warned.compareAndSet(false, true)) {
+                Timber.tag("Census").w("census publisher failed (%s); frame unaffected", t.javaClass.simpleName)
+            }
+        }
+    }
+
+    /** The platform's rules in an open parse-rot incident; empty when there is none. */
+    private fun openRotRules(platformWire: String): Set<String> =
+        incidents.open.value.firstOrNull { it.platformWire == platformWire }?.parseRot?.mapTo(HashSet()) { it.ruleId }.orEmpty()
+
     /** Post-admission/capture, before UNKNOWN rejection. Trusted envelope routing stays screen-only. */
     fun publish(obs: Observation.Notification, raw: RawNotificationData) {
         if (obs.target != UNKNOWN_TARGET) return
@@ -151,6 +267,13 @@ class SkeletonPublisher @Inject constructor(
     }
 
     private fun utcDay(timestamp: Long): LocalDate = Instant.ofEpochMilli(timestamp).atZone(ZoneOffset.UTC).toLocalDate()
+
+    private companion object {
+        /** No incidents: a publisher built without the monitor builds no matched skeleton. */
+        val NO_INCIDENTS = object : RecognitionIncidents {
+            override val open: StateFlow<List<RecognitionIncident>> = MutableStateFlow(emptyList())
+        }
+    }
 }
 
 /** Counts every node text slot and the window title, without retaining token content (#1146). */

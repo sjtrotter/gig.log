@@ -33,6 +33,9 @@ object CensusSampleKey {
         line("schema", item.schemaId)
         line("platform", item.platform)
         line("platformAppVersion", item.platformAppVersion ?: "")
+        // #1573: a matched skeleton is its rule's sample, so its rule is part of the variant. Only an item that has one
+        // adds the line, so every UNKNOWN key is unchanged (the schema line already tells the two apart).
+        (item as? UiSkeletonDto)?.ruleId?.let { line("rule", it) }
         when (item) {
             is UiSkeletonDto -> {
                 // A screen's fingerprint is class, id and nesting only, never text (ADR-0011 §8).

@@ -71,6 +71,8 @@ class RecognitionHealthMonitor @Inject constructor(
     private val store: RecognitionNoticeStore,
     @ApplicationScope scope: CoroutineScope,
     @IoDispatcher io: CoroutineDispatcher,
+    /** #1573: told of every confirmed rot visit with the platform's open rules, so a held matched skeleton can go. */
+    private val confirmations: RotVisitConfirmations = RotVisitConfirmations.NONE,
 ) : RecognitionIncidents {
 
     /** One reporter action, performed in enqueue order by the IO consumer. Events are rare: one per incident edge. */
@@ -167,6 +169,17 @@ class RecognitionHealthMonitor @Inject constructor(
                 } catch (t: Throwable) {
                     Timber.tag(TAG).w("Health ledger record failed — sensing unaffected")
                 }
+                // #1573: a confirmed rot visit may release the matched skeleton held from it. The open rules are read
+                // after this frame's decision, so a visit that tripped the rule (never held) finds nothing to release.
+                if (attempt.shortfall) {
+                    try {
+                        confirmations.onConfirmed(attempt.platformWire, attempt.ruleId, attempt.timestamp, openRotRules(attempt.platformWire))
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (t: Throwable) {
+                        Timber.tag(TAG).w("Matched skeleton release failed — sensing unaffected (#1573)")
+                    }
+                }
             }
 
             frame.alarm?.let { alarm ->
@@ -199,6 +212,10 @@ class RecognitionHealthMonitor @Inject constructor(
             Timber.tag(TAG).e(t, "Recognition health check failed — sensing unaffected (#937)")
         }
     }
+
+    /** The platform's rules in an open parse-rot incident. */
+    private fun openRotRules(platformWire: String): Set<String> =
+        _open.value.firstOrNull { it.platformWire == platformWire }?.parseRot?.mapTo(HashSet()) { it.ruleId }.orEmpty()
 
     /** Called under [lock]. Applies the frame's edges to the book and enqueues what they decided. */
     private fun decide(

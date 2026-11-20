@@ -170,9 +170,7 @@ class ParseRotTracker {
         val edges = sweepState(platformWire, state, timestamp, attempts)
 
         // 2. A healthy winner: its own branch read every required field.
-        val healthy = winnerRuleId != null && shortfalls.none {
-            it.ruleId == winnerRuleId && !it.branchSkipped && it.hasParseTrigger
-        }
+        val healthy = isHealthyWinner(winnerRuleId, shortfalls)
         val healthyWinner = if (healthy) winnerRuleId else null
         if (healthyWinner != null && requiresFields(winnerShape)) {
             val lastStart = state.healthyVisitStart[healthyWinner]
@@ -206,7 +204,7 @@ class ParseRotTracker {
         }
 
         // 3. Rot on this frame.
-        val eligibleRot = shortfalls.filter(::eligible).filterNot { healthy && it.ruleId == winnerRuleId }
+        val eligibleRot = eligibleRot(winnerRuleId, shortfalls)
         val rotNow = LinkedHashSet<String>()
         for (shortfall in eligibleRot) {
             val ruleId = shortfall.ruleId
@@ -289,14 +287,34 @@ class ParseRotTracker {
     private fun ordered(edges: List<RotEdge>): List<RotEdge> =
         edges.filterIsInstance<RotEdge.Tripped>() + edges.filterIsInstance<RotEdge.Cleared>()
 
-    /** Required-field rot of a shape that declares required fields; nothing else counts. */
-    private fun eligible(shortfall: ParseShortfall): Boolean =
-        shortfall.hasParseTrigger && requiresFields(shortfall.shape) && shortfall.nullRequiredFields.isNotEmpty()
-
-    private fun requiresFields(shape: String?): Boolean =
-        shape != null && ParsedFieldsFactory.REQUIRED_FIELDS_BY_SHAPE[shape].orEmpty().isNotEmpty()
-
     companion object {
+        /**
+         * The rules a frame carries eligible rot of (#1573), in shortfall order: the frame's required-field shortfalls
+         * minus a healthy winner's own. This is [step]'s own definition, so a recognized frame whose winning branch
+         * rotted and an UNKNOWN frame carrying a skipped branch's rot (offer rot) both name the rule, and a healthy
+         * frame names none of its own.
+         *
+         * @param winnerRuleId the rule that classified the frame; null for an UNKNOWN frame.
+         */
+        fun rotRuleIds(winnerRuleId: String?, shortfalls: List<ParseShortfall>): Set<String> =
+            eligibleRot(winnerRuleId, shortfalls).mapTo(LinkedHashSet()) { it.ruleId }
+
+        /** The winner's own branch read every required field. */
+        private fun isHealthyWinner(winnerRuleId: String?, shortfalls: List<ParseShortfall>): Boolean =
+            winnerRuleId != null && shortfalls.none { it.ruleId == winnerRuleId && !it.branchSkipped && it.hasParseTrigger }
+
+        private fun eligibleRot(winnerRuleId: String?, shortfalls: List<ParseShortfall>): List<ParseShortfall> {
+            val healthy = isHealthyWinner(winnerRuleId, shortfalls)
+            return shortfalls.filter(::eligible).filterNot { healthy && it.ruleId == winnerRuleId }
+        }
+
+        /** Required-field rot of a shape that declares required fields; nothing else counts. */
+        private fun eligible(shortfall: ParseShortfall): Boolean =
+            shortfall.hasParseTrigger && requiresFields(shortfall.shape) && shortfall.nullRequiredFields.isNotEmpty()
+
+        private fun requiresFields(shape: String?): Boolean =
+            shape != null && ParsedFieldsFactory.REQUIRED_FIELDS_BY_SHAPE[shape].orEmpty().isNotEmpty()
+
         /** Confirmed rot occurrences of one rule, with no healthy parse between, that trip it. */
         const val TRIP_OCCURRENCES = 5
 

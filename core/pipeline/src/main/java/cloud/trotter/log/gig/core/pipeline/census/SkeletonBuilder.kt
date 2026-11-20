@@ -15,6 +15,7 @@ import cloud.trotter.census.contract.UiSkeletonDto
 import cloud.trotter.census.contract.WireStrings
 import cloud.trotter.census.contract.contributor.ContributorSlots
 import cloud.trotter.log.gig.core.pipeline.UnknownAddressBackstop
+import cloud.trotter.log.gig.core.pipeline.rules.CompiledRedact
 import cloud.trotter.log.gig.domain.census.contributor.ReviewWords
 import cloud.trotter.log.gig.domain.model.accessibility.UiNode
 import cloud.trotter.log.gig.domain.pipeline.UiTextBounds
@@ -94,6 +95,15 @@ object SkeletonBuilder {
          * (review AD5).
          */
         INVALID_TREE,
+
+        /**
+         * #1573: a matched build whose redaction source is a rule generation that has no screen rule of that id, so the
+         * rule's own `redact` cannot be read (fail closed).
+         */
+        MATCHED_RULE_NOT_IN_GENERATION,
+
+        /** #1573: a matched build whose rule belongs to another platform than the frame's. */
+        MATCHED_PLATFORM_MISMATCH,
 
         /**
          * Anything else went wrong building the item — e.g. a `StackOverflowError` on a pathological
@@ -235,6 +245,25 @@ object SkeletonBuilder {
         }
     }
 
+    /**
+     * #1573: the `uinode.matched.v1` skeleton of a frame rule [ruleId] matched while it is in a parse-rot incident: the
+     * v2 build of the same raw tree through the same filters, with every field [redact] (the rule's own `redact`, from
+     * the generation that classified the frame; null when it declares none) masks withheld as well
+     * ([RuleRedactionFields]), tagged with [ruleId]. No review words, never projected to v1. Never throws.
+     */
+    fun matchedOutcome(
+        tree: UiNode,
+        windowTitle: String?,
+        meta: ReplayMetadata,
+        platform: Platform,
+        day: LocalDate,
+        ruleId: String,
+        redact: CompiledRedact?,
+    ): Outcome = guarded {
+        val frame = FrameFilter(::withholdingStep, ruleWithheld = RuleRedactionFields.of(tree, redact))
+        buildOutcome(tree, windowTitle, meta, platform, day, frame, null, SkeletonVersion.V2, collectWords = false, ruleId = ruleId)
+    }
+
     /** [outcome] over an explicit [frame] — internal so a test can inject a defect (review II5). */
     internal fun outcome(
         tree: UiNode,
@@ -246,8 +275,11 @@ object SkeletonBuilder {
         sensitive: SensitiveVerdict? = null,
         version: SkeletonVersion = SkeletonVersion.V1,
         collectWords: Boolean = false,
-    ): Outcome = try {
-        buildOutcome(tree, windowTitle, meta, platform, day, frame, sensitive, version, collectWords)
+    ): Outcome = guarded { buildOutcome(tree, windowTitle, meta, platform, day, frame, sensitive, version, collectWords) }
+
+    /** The builder's one failure mapping: only coroutine cancellation escapes. */
+    private inline fun guarded(build: () -> Outcome): Outcome = try {
+        build()
     } catch (e: CancellationException) {
         throw e
     } catch (_: InvalidTree) {
@@ -271,6 +303,7 @@ object SkeletonBuilder {
         sensitive: SensitiveVerdict?,
         version: SkeletonVersion,
         collectWords: Boolean,
+        ruleId: String? = null,
     ): Outcome {
         // The whole-frame drop runs on the RAW tree and the RAW title, before anything is built. A scan
         // that FAILED (the marker scan's own fail-closed sentinel) is a build failure, not a banking
@@ -296,7 +329,7 @@ object SkeletonBuilder {
         val fingerprint = CensusFingerprint.of(root) ?: return Outcome.Refused(Refusal.FINGERPRINT_FAILED)
         val item = try {
             UiSkeletonDto(
-                schemaId = SkeletonSchema.SCHEMA_ID_V2,
+                schemaId = if (ruleId != null) SkeletonSchema.SCHEMA_ID_MATCHED else SkeletonSchema.SCHEMA_ID_V2,
                 hashDomain = CensusHash.HASH_DOMAIN,
                 filterRev = FILTER_REV,
                 fingerprint = fingerprint,
@@ -307,15 +340,16 @@ object SkeletonBuilder {
                 engineVersion = meta.engineVersion,
                 rulesetFormatVersion = meta.rulesetFormatVersion,
                 day = DAY_FORMAT.format(day),
+                ruleId = ruleId,
                 windowTitle = title?.let { frame.slot(it) },
                 root = root,
-            ).let { if (version == SkeletonVersion.V1) it.toV1() else it }
+            ).let { if (version == SkeletonVersion.V1 && ruleId == null) it.toV1() else it }
         } catch (_: IllegalArgumentException) {
             return Outcome.Refused(Refusal.INVALID_ENVELOPE)
         }
         val measured = SkeletonSchema.measure(item)
         if (measured.bytes > SkeletonSchema.MAX_ITEM_BYTES) return Outcome.Refused(Refusal.OVERSIZE)
-        val words = if (collectWords && version == SkeletonVersion.V2) reviewWords(tree, pending, title, frame) else null
+        val words = if (collectWords && version == SkeletonVersion.V2 && ruleId == null) reviewWords(tree, pending, title, frame) else null
         return Outcome.Built(item, measured.json, measured.bytes, frame.malformedClass, words)
     }
 
