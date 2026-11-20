@@ -112,7 +112,9 @@ class StateOutlines private constructor(private val states: List<State>) {
                     for (p in 0 until points) {
                         lon += reader.zigzag()
                         lat += reader.zigzag()
-                        require(lon in minLon..maxLon && lat in minLat..maxLat) { "Outline point outside bounds for $postal" }
+                        require(lon in minLon.toLong()..maxLon.toLong() && lat in minLat.toLong()..maxLat.toLong()) {
+                            "Outline point outside bounds for $postal"
+                        }
                         ring[2 * p] = lon.toInt()
                         ring[2 * p + 1] = lat.toInt()
                     }
