@@ -128,13 +128,14 @@ data class UiSkeletonNodeDto(
 }
 
 /**
- * One census item — a `uinode.skeleton.v1` or `.v2` skeleton with its envelope (ADR-0011 §1, §13; [version]), or a
- * `uinode.matched.v1` skeleton ([isMatched], #1573): a v2 body plus the [ruleId] of the rule that matched the frame.
+ * One census item — a `uinode.skeleton.v1` or `.v2` skeleton with its envelope (ADR-0011 §1, §13; [version]), a
+ * `uinode.matched.v1` skeleton ([isMatched], #1573): a v2 body plus the [ruleId] of the rule that matched the frame,
+ * or a `uinode.clicked.v1` skeleton ([isClicked], #1634): a v2 body of the tapped window plus the [tap] into it.
  *
  * The envelope is exactly the §7(a) allowlist: the window title as a [TextSlot]; the strings
  * [schemaId], [fingerprint], [platform], [platformAppVersion], [appVersion], [rulesetReleaseTag],
- * [day]; the integers [filterRev], [hashDomain], [engineVersion], [rulesetFormatVersion]; and, on a matched item
- * only, [ruleId]. Five of
+ * [day]; the integers [filterRev], [hashDomain], [engineVersion], [rulesetFormatVersion]; on a matched item
+ * only, [ruleId]; and on a clicked item only, [tap]. Five of
  * those are `ReplayMetadata`'s own names; the rest are census-own. [root] carries the tree. There is
  * NO install id (the M3 uploader adds it at the transport), NO device fingerprint, NO millisecond
  * timestamp.
@@ -157,6 +158,11 @@ data class UiSkeletonDto(
      * ([WireTokenGrammars.isRuleIdFor]). Null is omitted on the wire, so a v1 or v2 item encodes as before.
      */
     val ruleId: String? = null,
+    /**
+     * Present IFF [schemaId] is [SkeletonSchema.SCHEMA_ID_CLICKED]: the tapped node as paths into [root] that
+     * [TapRef.holdsIn] this tree. Null is omitted on the wire, so every other item encodes as before.
+     */
+    val tap: TapRef? = null,
     val windowTitle: TextSlot? = null,
     val root: UiSkeletonNodeDto,
 ) : CensusSkeletonDto {
@@ -165,15 +171,20 @@ data class UiSkeletonDto(
     /** True for a `uinode.matched.v1` item. */
     val isMatched: Boolean get() = schemaId == SkeletonSchema.SCHEMA_ID_MATCHED
 
-    /** The body version: the one [schemaId] names, or [SkeletonVersion.V2] for a matched item. */
-    val version: SkeletonVersion get() = requireNotNull(bodyVersion(schemaId))
+    /** True for a `uinode.clicked.v1` item. */
+    val isClicked: Boolean get() = schemaId == SkeletonSchema.SCHEMA_ID_CLICKED
+
+    /** The body version: the one [schemaId] names, or [SkeletonVersion.V2] for a matched or clicked item. */
+    val version: SkeletonVersion get() = requireNotNull(SkeletonSchema.bodyVersion(schemaId))
 
     init {
-        val version = bodyVersion(schemaId)
+        val version = SkeletonSchema.bodyVersion(schemaId)
         require(version != null) { "not a uinode skeleton item" }
         validateEnvelope(this)
         require((ruleId != null) == isMatched) { "a rule id is present iff the schema is the matched schema" }
         if (ruleId != null) require(WireTokenGrammars.isRuleIdFor(platform, ruleId)) { "a rule id must be a rule of the item's platform" }
+        require((tap != null) == isClicked) { "a tap is present iff the schema is the clicked schema" }
+        if (tap != null) require(tap.holdsIn(root)) { "a tap must name the nearest clickable owner in this item's tree" }
         if (version == SkeletonVersion.V1) {
             require(windowTitle?.isV2Only != true && !root.usesV2Fields()) { "a v1 skeleton carries no v2 field" }
         }
@@ -182,10 +193,10 @@ data class UiSkeletonDto(
     /**
      * This item as `uinode.skeleton.v1`: every shape reads `mixed` and the v2 node flags drop, which is exactly
      * what v1 emitted for the same frame. The fingerprint is unchanged (it covers class, id and structure only).
-     * A matched item never projects down: it throws [IllegalStateException].
+     * A matched or clicked item never projects down: it throws [IllegalStateException].
      */
     fun toV1(): UiSkeletonDto {
-        check(!isMatched) { "a matched skeleton never projects to v1" }
+        check(!isMatched && !isClicked) { "a matched or clicked skeleton never projects to v1" }
         return if (version == SkeletonVersion.V1) this else copy(
             schemaId = SkeletonSchema.SCHEMA_ID,
             windowTitle = windowTitle?.toV1(),
@@ -196,8 +207,5 @@ data class UiSkeletonDto(
     companion object {
         /** A version stamp is a short release fact, never free text. */
         const val MAX_VERSION_LENGTH: Int = 64
-
-        private fun bodyVersion(schemaId: String): SkeletonVersion? =
-            if (schemaId == SkeletonSchema.SCHEMA_ID_MATCHED) SkeletonVersion.V2 else SkeletonVersion.ofScreenSchema(schemaId)
     }
 }

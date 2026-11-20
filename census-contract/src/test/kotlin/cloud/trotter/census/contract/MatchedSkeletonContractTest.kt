@@ -144,10 +144,10 @@ class MatchedSkeletonContractTest {
     }
 
     @Test
-    fun `C5 the matched id is supported last and leaves the version ladder alone`() {
+    fun `C5 the matched id follows the version ladder and leaves it alone`() {
         assertEquals(
             listOf("uinode.skeleton.v1", "notification.skeleton.v1", "uinode.skeleton.v2", "notification.skeleton.v2", "uinode.matched.v1"),
-            CensusSkeletonSchema.SUPPORTED_SCHEMA_IDS,
+            CensusSkeletonSchema.SUPPORTED_SCHEMA_IDS.take(5),
         )
         assertNull(SkeletonVersion.ofScreenSchema(SkeletonSchema.SCHEMA_ID_MATCHED))
         assertEquals(SkeletonVersion.V2, SkeletonVersion.newestScreen(CensusSkeletonSchema.SUPPORTED_SCHEMA_IDS))

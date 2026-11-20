@@ -21,8 +21,8 @@
 package cloud.trotter.census.contract
 
 /**
- * The grammars of the short tokens the server keeps from a report or a matched skeleton: version stamps and rule
- * ids (census#64, #1573). The phone and the server both read them from here.
+ * The grammars of the short tokens the server keeps from a report, a matched skeleton or a clicked skeleton: version
+ * stamps, rule ids and short digests (census#64, #1573, #1634). The phone and the server both read them from here.
  */
 object WireTokenGrammars {
     /** A platform app's numeric version, such as `8.99.20`. */
@@ -47,4 +47,10 @@ object WireTokenGrammars {
      */
     fun isRuleIdFor(platform: String, ruleId: String): Boolean =
         ruleId.length <= MAX_RULE_ID_LENGTH && this.ruleId.matches(ruleId) && ruleId.startsWith("$platform.")
+
+    /**
+     * The first 16 lowercase hex of a sha256: a rules generation's wire id (`RuleIdentifiers.wire`), which a health
+     * report's shadow entries and a clicked skeleton's `tap.generation` carry, and a shadow candidate's `digest`.
+     */
+    val shortDigest = Regex("^[0-9a-f]{16}$")
 }

@@ -792,7 +792,7 @@ is not built yet; the bullets below describe what runs today, and each issue tha
   (`SkeletonVersion.newestScreen` / `newestNotification`); none listed counts `POLICY_UNSUPPORTED_SCHEMA` as before.
   So the debug build keeps sending v1 to a server that does not accept v2 yet (census#78 ships the server half first),
   and enrolment declares the v2 ids only when the policy lists them (`CensusEnrolSchemas.declared` filters
-  `SUPPORTED_SCHEMA_IDS`: the four ladder ids, v1 first, then `uinode.matched.v1`, #1573). Both builders always build v2 and project to v1 with
+  `SUPPORTED_SCHEMA_IDS`: the four ladder ids, v1 first, then `uinode.matched.v1`, #1573, and `uinode.clicked.v1`, #1634). Both builders always build v2 and project to v1 with
   the DTO's `toV1()`: a shape reads `mixed`, the node flags take their defaults, notification actions drop. That is
   byte-for-byte what v1 emitted before #1619 (checked against the pre-#1619 golden when the golden moved to v2).
   The builders' `version` parameter defaults to `V1`, the one every server accepts; the publisher always passes it.
