@@ -1302,6 +1302,28 @@ clickable owner are resolved the way `UiInteractionHandler` resolves them, so th
 bind. It travels with that screen's skeleton under the same caps, sampling, upload window and consent, and carries no
 text, no sequence of taps and no time finer than the day. A tap on a blocked screen sends nothing.
 
+**Amended 2026-11-20 (#1634, census#87): the clicked-skeleton contract.** *Wire form:* a click travels under its own
+schema id, `uinode.clicked.v1`: a v2 skeleton body of the tapped window's own tree (snapshotted at click time, never a
+cached earlier screen) plus a required top-level `tap` object. `tap.ownerPath` names the node that takes the click
+(`isClickable` or `hasClickAction`), the node `UiInteractionHandler` would bind; `tap.tapPath` names the tapped node
+only when it is not the owner and survived the filter; `tap.generation` is the 16-hex wire id of the rules generation
+the click was classified with (`WireTokenGrammars.shortDigest`, the health report's shadow `generation`), never the
+raw 64-hex id. Both paths are canonical node paths into the item's own `root` (`root`, then at most 64 child indices of
+`0`..`9999` with no leading zero, the contributor slot walk without a text key). The owner's class, id, flags and word
+hash or shape are read from the body at its path and never repeated. `UiSkeletonDto` refuses a tap whose owner takes
+no click, whose tapped node is not strictly below the owner by whole steps (`root/1` is not an ancestor of `root/10`),
+or that has the tapped node or any node between the two taking clicks (the owner is the nearest one); the server's
+reason is `bad_tap_ref`. A v1, v2 or matched item carrying a `tap` key, `null` included, and a clicked item carrying a
+`ruleId` key are refused. The fingerprint covers the tree only; the item's byte cap counts the `tap`.
+*Scope:* only a tap no click rule recognized (UNKNOWN) yields one. "A click rule in an incident" above is cut: nothing
+tracks click-rule health yet, and a follow-up owns that trigger. *Ordering:* the phone keys each candidate on
+`day|fingerprint|layout|ownerPath` (`ClickedIdentity`, layout = `ContributorSlots.layout`) and selects by the sha256 of
+that key, never by arrival: per key it keeps the body with the smallest digest, per day the smallest keys, and after the
+UTC day ends it freezes at most ten, ordered by key, and resends those bytes unchanged until the server answers. The
+server counts duplicates by the same identity. *Residual:* the server can see which buttons one phone tapped on one
+day, not when or in what order. Contract only: nothing builds or sends a clicked skeleton yet, so PRIVACY.md is
+unchanged; the app half (#1634) brings the disclosure revision that names taps.
+
 ### §20 No region data
 
 The census collects no location, region or metro cell. "Installs on platform version V landing in cluster C" stands

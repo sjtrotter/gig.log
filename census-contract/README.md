@@ -79,6 +79,31 @@ verdict (`accept` or `refuse`, checked by `MatchedSkeletonContractTest`) and the
 reason, checked by the server's validator test). Nothing builds or sends a matched skeleton until the app half of #1573
 ships.
 
+## Clicked skeletons
+
+`uinode.clicked.v1` (#1634, census#87) is the skeleton of the window a dasher tapped in, when no click rule recognized
+the tap. It is a `uinode.skeleton.v2` body plus a required top-level `tap` (`UiSkeletonDto.tap`, `TapRef`,
+`SkeletonSchema.SCHEMA_ID_CLICKED`), again under its own schema id. The rules both sides apply:
+
+- `tap` is `{"ownerPath", "tapPath"?, "generation"}`. `ownerPath` names the node that takes the click
+  (`isClickable` or `hasClickAction`); `tapPath`, present only when the tapped node is not its owner, names the tapped
+  node; `generation` is the rules generation's 16-hex wire id (`WireTokenGrammars.shortDigest`, the health report's
+  shadow `generation` grammar).
+- A path is `NodePath`: `root`, then at most 64 child indices over the tree as sent, each `0` or `1`..`9999` with no
+  leading zero, and no text key: `root/2/1`. The owner's class, id, flags and words are read from the body there.
+- `UiSkeletonDto` checks the tap against its own `root`: both paths resolve, the owner takes clicks, the owner is a
+  proper ancestor of the tapped node by whole steps (never a string prefix: `root/1` is not above `root/10`), and
+  neither the tapped node nor any node between them takes clicks. The server's reason for a bad tap is `bad_tap_ref`.
+- `tap` is present exactly when the schema is `uinode.clicked.v1`; a v1, v2 or matched item carrying the key, `null`
+  included, is refused, as is a clicked item carrying a `ruleId` or an explicit `null` inside `tap` (`V2WireKeys`).
+- The fingerprint covers the tree only; `MAX_ITEM_BYTES` counts the `tap`. A clicked item never projects to v1.
+- `ClickedIdentity.of` is the item's identity, `day|fingerprint|layout|ownerPath` with the `ContributorSlots.layout`
+  layout id: the phone selects and batches by it and the server counts duplicates by it.
+- `CensusSkeletonSchema.SUPPORTED_SCHEMA_IDS` lists the clicked id last.
+
+`conformance/clicked-vectors.jsonl` holds vectors in the matched file's shape, checked by `ClickedSkeletonContractTest`
+and the server's validator test. Nothing builds or sends a clicked skeleton until the app half of #1634 ships.
+
 ## Consuming from another build
 
 `census-contract/settings.gradle.kts` reads the version catalog at `../gradle/libs.versions.toml`, so the build must be included from a COMPLETE gig.log checkout (`includeBuild("<path>/DashBuddy/census-contract")`), never vendored as a bare directory. The `dashbuddy-census` server pins that checkout to a SHA in CI.
