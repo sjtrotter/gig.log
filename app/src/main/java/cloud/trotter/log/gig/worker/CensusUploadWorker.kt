@@ -39,6 +39,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import timber.log.Timber
@@ -474,7 +475,7 @@ class CensusUploadWorker @AssistedInject constructor(
             for (group in groups.values) {
                 val inFlight = spool.inFlight()
                 val batchId = inFlight?.takeIf { it.ids == group.map { item -> item.id } }?.batchId
-                    ?: CensusApi.batchId(group.map { it.fingerprint })
+                    ?: skeletonBatchId(group)
                 uploadBatch(api, credential, group, batchId, run, record, depth = 0)?.let { return it }
             }
         }
@@ -595,7 +596,7 @@ class CensusUploadWorker @AssistedInject constructor(
                     val middle = items.size / 2
                     for (half in listOf(items.take(middle), items.drop(middle))) {
                         val halfId = if (envelopes) CensusApi.envelopeBatchId(half.map { it.itemJson })
-                            else CensusApi.batchId(half.map { it.fingerprint })
+                            else skeletonBatchId(half)
                         uploadBatch(api, credential, half, halfId, run, record, depth + 1, envelopes)?.let { return it }
                     }
                 }
@@ -650,6 +651,20 @@ class CensusUploadWorker @AssistedInject constructor(
             is UploadResult.ServerUnavailable, is UploadResult.TransportFailure -> return failure(record)
         }
         return null
+    }
+
+    /**
+     * #1573: the ONE batch id of a skeleton batch, initial or a split half. A batch holds one schema: a matched batch is
+     * keyed on each item's fingerprint and rule id ([CensusApi.matchedBatchId]), any other on its fingerprints alone
+     * ([CensusApi.batchId], unchanged).
+     */
+    private fun skeletonBatchId(items: List<CensusSpool.Spooled>): String {
+        val ruleIds = items.map { Json.parseToJsonElement(it.itemJson).jsonObject["ruleId"]?.jsonPrimitive?.contentOrNull }
+        return if (ruleIds.all { it == null }) {
+            CensusApi.batchId(items.map { it.fingerprint })
+        } else {
+            CensusApi.matchedBatchId(items.zip(ruleIds) { item, ruleId -> item.fingerprint to ruleId.orEmpty() })
+        }
     }
 
     /** #1626: a review-candidate bookkeeping failure never changes the run. */

@@ -82,6 +82,11 @@ class DevSettingsRepository @Inject constructor(
     }
     override val choices: Flow<CensusChoices> = censusChoices
 
+    /** #1573: the disclosure revision of the granted census receipt, or null with none. */
+    override val consentRevision: Flow<Int?> = dataSource.censusConsent.map { raw ->
+        raw.receipt?.receipt?.takeIf { it.granted }?.disclosureRevision
+    }
+
     /** #1620: when the daily census run is due, drawn by [cloud.trotter.log.gig.core.data.census.CensusUploadPlanner]. */
     val censusNextRunAtMillis: Flow<Long?> = dataSource.censusNextRunAtMillis
     suspend fun setCensusNextRunAtMillis(value: Long) = dataSource.setCensusNextRunAtMillis(value)

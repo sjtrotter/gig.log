@@ -564,6 +564,16 @@ class CensusApi(
             .digest(fingerprints.sorted().joinToString("\n").toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(Locale.ROOT, it.toInt() and 0xff) }.take(32)
 
+        /**
+         * #1573: the batch id of a `uinode.matched.v1` batch, from each item's fingerprint and rule id. The server keeps a
+         * day's batch ids per install and answers a repeat `duplicate`, so a matched batch must never share an id with
+         * the UNKNOWN batch of the same layouts (offer rot sends one frame both ways). The `m-` prefix keeps the two
+         * spaces apart; [items] are (fingerprint, ruleId) pairs.
+         */
+        fun matchedBatchId(items: List<Pair<String, String>>): String = "m-" + MessageDigest.getInstance("SHA-256")
+            .digest(items.map { (fingerprint, ruleId) -> "$fingerprint\n$ruleId" }.sorted().joinToString("\n").toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(Locale.ROOT, it.toInt() and 0xff) }.take(32)
+
         fun envelopeBatchId(itemsJson: List<String>): String = "env-" + MessageDigest.getInstance("SHA-256")
             .digest(itemsJson.joinToString("\n").toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(Locale.ROOT, it.toInt() and 0xff) }.take(32)

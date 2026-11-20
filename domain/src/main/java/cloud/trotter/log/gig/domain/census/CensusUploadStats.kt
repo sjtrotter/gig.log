@@ -45,6 +45,8 @@ class CensusUploadStats @Inject constructor() {
     val sampledRepeat = AtomicLong()
     /** #1620: a skeleton from a delivery app the dasher's census choices leave out. */
     val platformNotChosen = AtomicLong()
+    /** #1573: a matched skeleton over its rule's or the day's limit ([MatchedSkeletons]), counted and not queued. */
+    val matchedCapped = AtomicLong()
     private val rejected = ConcurrentHashMap<String, AtomicLong>()
 
     fun reject(reasons: Map<String, Int>) {
@@ -74,7 +76,7 @@ class CensusUploadStats @Inject constructor() {
             "envelopesRejected" to envelopesRejected,
             "envelopesNotTrusted" to envelopesNotTrusted,
         ).mapValues { it.value.get() }.filterValues { it != 0L }
-        val sampling = linkedMapOf("sampledRepeat" to sampledRepeat, "platformNotChosen" to platformNotChosen)
+        val sampling = linkedMapOf("sampledRepeat" to sampledRepeat, "platformNotChosen" to platformNotChosen, "matchedCapped" to matchedCapped)
             .mapValues { it.value.get() }.filterValues { it != 0L }
         val reasons = rejectedCounts()
         if (sampling.isEmpty() && envelopes.isEmpty() && health.isEmpty() && values.all { it == 0L } && reasons.isEmpty() &&
