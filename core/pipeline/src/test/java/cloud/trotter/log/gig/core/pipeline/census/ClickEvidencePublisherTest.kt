@@ -193,7 +193,7 @@ class ClickEvidencePublisherTest : SkeletonBuilderTestBase() {
 
     @Test fun `a window a screen rule recognized is masked with that rule's redact`() {
         val s = setup()
-        val store = UiNode(className = "android.widget.TextView", viewIdResourceName = "$pkg:id/store_line", text = "Corner Bakery")
+        val store = UiNode(className = "android.widget.TextView", viewIdResourceName = "$pkg:id/store_line", text = "bakery corner")
         s.publisher.publishClick(click(), event(window(extra = store)), generation(offerRule))
         val item = CensusSkeletonSchema.deserialize(s.sink.records.single().first.skeletonJson) as UiSkeletonDto
         assertEquals("withheld", item.root.children[2].text.getValue("text").kind)

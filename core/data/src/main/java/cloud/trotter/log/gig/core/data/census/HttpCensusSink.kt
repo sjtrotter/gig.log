@@ -67,8 +67,8 @@ class HttpCensusSink @Inject constructor(
     override val isEnabled: Boolean get() = enabled.value && schemas.value != null
     override val acceptedSchemaIds: Set<String> get() = consented(schemas.value.orEmpty(), revision.value)
     override val clickEvidenceArmed: StateFlow<Boolean> =
-        combine(preferences.enabled, preferences.acceptedSchemaIds, preferences.consentRevision) { on, ids, revision ->
-            on && SkeletonSchema.SCHEMA_ID_CLICKED in consented(ids, revision)
+        combine(preferences.enabled, preferences.acceptedSchemaIds, preferences.consentRevision) { on, ids, granted ->
+            on && SkeletonSchema.SCHEMA_ID_CLICKED in consented(ids, granted)
         }.stateIn(scope, SharingStarted.Eagerly, false)
     override val clearBoundary: Long get() = spool.generation
     override val collectsReviewWords: Boolean get() = isEnabled && reviews.wantsCandidates
@@ -104,8 +104,9 @@ class HttpCensusSink @Inject constructor(
                         val item = CensusSkeletonSchema.deserialize(record.skeletonJson)
                         // #1634: a clicked skeleton goes to its own store, which checks the boundary again under the
                         // spool's lock; it never spends the sample or the matched limits.
-                        if ((item as? UiSkeletonDto)?.isClicked == true) {
-                            clicks.admit(item, record.skeletonJson, record.platform.wire, offered.generation)
+                        val screen = item as? UiSkeletonDto
+                        if (screen != null && screen.isClicked) {
+                            clicks.admit(screen, record.skeletonJson, record.platform.wire, offered.generation)
                             continue
                         }
                         val key = requireNotNull(CensusSampleKey.of(item, record.presentFields))
