@@ -136,6 +136,9 @@
     <string name="economy_fuel_area_group_states">Estados</string>
     <string name="economy_fuel_area_group_cities">Ciudades</string>
     <string name="economy_fuel_area_using">Se usa el precio de %1$s</string>
+    <string name="economy_fuel_area_automatic">Automática (según tu ubicación)</string>
+    <string name="economy_fuel_area_automatic_summary">Automática: %1$s</string>
+    <string name="economy_fuel_area_automatic_pending">Automática: EE. UU. hasta tu primer turno</string>
     <string name="economy_fuel_clock_behind">El reloj del teléfono está atrasado. Los precios nuevos se cargan cuando la fecha y la hora sean correctas.</string>
     <string name="fuel_area_us">EE. UU.</string>
     <string name="fuel_area_east_coast">Costa Este</string>

@@ -86,6 +86,9 @@ class GigLogApplication : Application(), Configuration.Provider {
     lateinit var fuelPriceRepository: cloud.trotter.log.gig.core.data.fuel.FuelPriceRepository
 
     @Inject
+    lateinit var fuelAreaDetector: cloud.trotter.log.gig.core.data.fuel.FuelAreaDetector
+
+    @Inject
     lateinit var platformForegrounds: cloud.trotter.log.gig.core.pipeline.accessibility.input.PlatformForegrounds
 
     @Inject
@@ -252,6 +255,8 @@ class GigLogApplication : Application(), Configuration.Provider {
                 Timber.tag("FuelPrice").e(t, "fuel feed start failed; the stored gas price stays")
             }
         }
+        // The automatic fuel price area (#1687): the odometer's accepted GPS fixes pick the area on the phone.
+        fuelAreaDetector.start(applicationScope)
 
         // 3. Initialize State
         stateManagerV2.initialize()

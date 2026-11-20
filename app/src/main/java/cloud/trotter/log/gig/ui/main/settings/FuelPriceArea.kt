@@ -27,20 +27,34 @@ import cloud.trotter.log.gig.core.designsystem.text.fuelPriceSourceText
 import cloud.trotter.log.gig.core.designsystem.time.rememberNow
 import cloud.trotter.log.gig.domain.format.formatMonthDay
 import cloud.trotter.log.gig.domain.fuel.FuelArea
+import cloud.trotter.log.gig.domain.fuel.FuelAreaChoice
 import cloud.trotter.log.gig.domain.fuel.FuelPriceAge
 import cloud.trotter.log.gig.domain.fuel.FuelPriceStamp
 
 /**
- * The Costs screen's fuel price state, anchors only: the chosen [area], the stored price's [stamp], the area whose
- * price is used when it is not the chosen one ([usedArea]), and whether the feed refused a generation because the
- * phone's clock is behind. The labels derive from these and the ticking clock.
+ * The Costs screen's fuel price state, anchors only: the area setting ([choice]; [area] is the one it prices with), the
+ * stored price's [stamp], the area whose price is used when it is not that one ([usedArea]), and whether the feed
+ * refused a generation because the phone's clock is behind. The labels derive from these and the ticking clock.
  */
 data class FuelPriceUiState(
-    val area: FuelArea = FuelArea.US,
+    val choice: FuelAreaChoice = FuelAreaChoice.Automatic(null),
     val stamp: FuelPriceStamp? = null,
     val usedArea: FuelArea? = null,
     val clockBehind: Boolean = false,
-)
+) {
+    val area: FuelArea get() = choice.effective
+}
+
+/** The area row's summary: [text], with [area]'s name as its argument when there is one. */
+data class FuelAreaSummary(@param:StringRes val text: Int, val area: FuelArea? = null)
+
+/** "Automatic: Texas", "Automatic: U.S. until your first shift", or the picked area's name. */
+fun FuelAreaChoice.summary(): FuelAreaSummary = when (this) {
+    is FuelAreaChoice.Automatic ->
+        detected?.let { FuelAreaSummary(R.string.economy_fuel_area_automatic_summary, it) }
+            ?: FuelAreaSummary(R.string.economy_fuel_area_automatic_pending)
+    is FuelAreaChoice.Picked -> FuelAreaSummary(area.nameRes())
+}
 
 /** Each area's display name. */
 @StringRes
@@ -78,21 +92,32 @@ fun FuelArea.nameRes(): Int = when (this) {
 
 /** The "Fuel price area" row; a tap opens the single-choice list. */
 @Composable
-fun FuelAreaRow(area: FuelArea, enabled: Boolean, onPick: (FuelArea) -> Unit) {
+fun FuelAreaRow(choice: FuelAreaChoice, enabled: Boolean, onPickAutomatic: () -> Unit, onPick: (FuelArea) -> Unit) {
     var picking by rememberSaveable { mutableStateOf(false) }
+    val summary = choice.summary()
     ListItem(
         headlineContent = { Text(stringResource(R.string.economy_fuel_area_title)) },
-        supportingContent = { Text(stringResource(area.nameRes())) },
+        supportingContent = {
+            Text(summary.area?.let { stringResource(summary.text, stringResource(it.nameRes())) } ?: stringResource(summary.text))
+        },
         modifier = Modifier.clickable(enabled = enabled) { picking = true },
     )
     if (picking) {
-        FuelAreaDialog(area, onPick = { picking = false; onPick(it) }, onDismiss = { picking = false })
+        FuelAreaDialog(
+            selected = (choice as? FuelAreaChoice.Picked)?.area,
+            onPickAutomatic = { picking = false; onPickAutomatic() },
+            onPick = { picking = false; onPick(it) },
+            onDismiss = { picking = false },
+        )
     }
 }
 
-/** U.S. first, then regions (with their states), states and cities, each group alphabetical by its shown name. */
+/**
+ * Automatic first ([selected] null), then the U.S., regions (with their states), states and cities, each group
+ * alphabetical by its shown name.
+ */
 @Composable
-private fun FuelAreaDialog(selected: FuelArea, onPick: (FuelArea) -> Unit, onDismiss: () -> Unit) {
+private fun FuelAreaDialog(selected: FuelArea?, onPickAutomatic: () -> Unit, onPick: (FuelArea) -> Unit, onDismiss: () -> Unit) {
     val groups = listOf(
         null to listOf(FuelArea.US),
         R.string.economy_fuel_area_group_regions to FuelArea.entries.filter { it.kind == FuelArea.Kind.REGION },
@@ -104,6 +129,12 @@ private fun FuelAreaDialog(selected: FuelArea, onPick: (FuelArea) -> Unit, onDis
         title = { Text(stringResource(R.string.economy_fuel_area_title)) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
+                ListItem(
+                    headlineContent = { Text(stringResource(R.string.economy_fuel_area_automatic)) },
+                    leadingContent = { RadioButton(selected = selected == null, onClick = null) },
+                    modifier = Modifier.fillMaxWidth()
+                        .selectable(selected = selected == null, role = Role.RadioButton) { onPickAutomatic() },
+                )
                 for ((header, areas) in groups) {
                     if (header != null) {
                         Text(

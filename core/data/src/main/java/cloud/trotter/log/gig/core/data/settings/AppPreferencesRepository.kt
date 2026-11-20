@@ -16,6 +16,7 @@ import cloud.trotter.log.gig.domain.evaluation.UserEconomy
 import cloud.trotter.log.gig.domain.evaluation.VehicleEconomyInputs
 import cloud.trotter.log.gig.domain.evaluation.SharedEconomy
 import cloud.trotter.log.gig.domain.fuel.FuelArea
+import cloud.trotter.log.gig.domain.fuel.FuelAreaChoice
 import cloud.trotter.log.gig.domain.fuel.FuelPriceStamp
 import cloud.trotter.log.gig.domain.model.vehicle.FuelType
 import cloud.trotter.log.gig.domain.model.vehicle.VehicleClass
@@ -53,8 +54,10 @@ class AppPreferencesRepository @Inject constructor(
     val gasPrice = dataSource.gasPrice
     /** The fuel feed stamp of the stored [gasPrice]; null when the price did not come from the feed. */
     val gasPriceStamp: Flow<FuelPriceStamp?> = dataSource.gasPriceStamp
-    /** The area whose fuel feed price the app uses; the U.S. until the dasher picks one. */
+    /** The area whose fuel feed price the app uses: the one detected on Automatic (the U.S. until then), or the picked one. */
     val fuelPriceArea: Flow<FuelArea> = dataSource.fuelPriceArea
+    /** The fuel price area setting: Automatic with what the phone detected, or an area picked by hand. */
+    val fuelPriceAreaChoice: Flow<FuelAreaChoice> = dataSource.fuelPriceAreaChoice
     val odometerPrompts = dataSource.read(SimplePrefs.odometerPrompts)
     val dailyGoalDollars = dataSource.read(SimplePrefs.dailyGoalDollars)
     val analyticsShowMore = dataSource.read(SimplePrefs.analyticsShowMore)
@@ -263,6 +266,11 @@ class AppPreferencesRepository @Inject constructor(
     suspend fun updateGasPrice(price: Float, stamp: FuelPriceStamp): Boolean = dataSource.updateGasPrice(price, stamp)
 
     suspend fun setFuelPriceArea(area: FuelArea) = dataSource.setFuelPriceArea(area)
+
+    suspend fun setFuelPriceAreaAutomatic() = dataSource.setFuelPriceAreaAutomatic()
+
+    /** The area the phone worked out from a GPS fix; only the code is stored. */
+    suspend fun setDetectedFuelArea(area: FuelArea) = dataSource.setDetectedFuelArea(area)
 
     /**
      * Manual pump-price override that also turns auto off (#693) — the bubble's

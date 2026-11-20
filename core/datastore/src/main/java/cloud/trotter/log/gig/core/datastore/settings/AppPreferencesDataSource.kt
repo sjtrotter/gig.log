@@ -14,11 +14,13 @@ import androidx.datastore.preferences.core.stringSetPreferencesKey
 import cloud.trotter.log.gig.core.datastore.di.AppPreferences
 import cloud.trotter.log.gig.domain.evaluation.EconomyField
 import cloud.trotter.log.gig.domain.fuel.FuelArea
+import cloud.trotter.log.gig.domain.fuel.FuelAreaChoice
 import cloud.trotter.log.gig.domain.fuel.FuelPriceStamp
 import cloud.trotter.log.gig.domain.model.vehicle.FuelType
 import cloud.trotter.log.gig.domain.model.vehicle.VehicleClass
 import cloud.trotter.log.gig.domain.model.vehicle.*
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -78,6 +80,12 @@ class AppPreferencesDataSource @Inject constructor(
         val GAS_PRICE_ISSUED_AT = longPreferencesKey("gas_price_issued_at")
         // The area whose fuel feed price the app uses, as the feed's area code. Never leaves the phone.
         val FUEL_PRICE_AREA = stringPreferencesKey("fuel_price_area")
+        // Whether the area is worked out on the phone from the odometer's GPS fixes (#1687). Absent on installs from
+        // before Automatic existed; see fuelPriceAreaChoice. Never leaves the phone.
+        val FUEL_PRICE_AREA_AUTO = booleanPreferencesKey("fuel_price_area_auto")
+        // The area the phone last worked out, as the feed's area code. The only location-derived value stored: no
+        // coordinates are kept. Never leaves the phone.
+        val FUEL_PRICE_AREA_DETECTED = stringPreferencesKey("fuel_price_area_detected")
         val VEHICLE_LOOKUP_ALLOWED = booleanPreferencesKey("vehicle_lookup_allowed")
         val FUEL_TYPE = stringPreferencesKey("fuel_type")
         // Legacy key (pre-v2 schema, "CAR"/"E_BIKE"). VEHICLE_CLASS supersedes it.
@@ -203,8 +211,23 @@ class AppPreferencesDataSource @Inject constructor(
         if (period != null && issuedAt != null) FuelPriceStamp(period, issuedAt) else null
     }
 
-    /** The chosen fuel price area; the U.S. until the dasher picks one, or for a code this build does not know. */
-    val fuelPriceArea: Flow<FuelArea> = ds.data.map { prefs -> prefs[Keys.FUEL_PRICE_AREA]?.let { FuelArea.fromCode(it) } ?: FuelArea.US }
+    /**
+     * The fuel price area setting. Without the automatic flag (an install from before Automatic existed), a stored
+     * area other than the U.S. counts as picked by hand, and the U.S. default (or none) becomes Automatic. A code this
+     * build does not know reads as the U.S. (picked) or as nothing detected (automatic).
+     */
+    val fuelPriceAreaChoice: Flow<FuelAreaChoice> = ds.data.map { prefs ->
+        val picked = prefs[Keys.FUEL_PRICE_AREA]?.let { FuelArea.fromCode(it) }
+        val auto = prefs[Keys.FUEL_PRICE_AREA_AUTO] ?: (picked == null || picked == FuelArea.US)
+        if (auto) {
+            FuelAreaChoice.Automatic(prefs[Keys.FUEL_PRICE_AREA_DETECTED]?.let { FuelArea.fromCode(it) })
+        } else {
+            FuelAreaChoice.Picked(picked ?: FuelArea.US)
+        }
+    }.distinctUntilChanged()
+
+    /** The area the gas price reads: the detected one on Automatic (the U.S. until a fix places), else the picked one. */
+    val fuelPriceArea: Flow<FuelArea> = fuelPriceAreaChoice.map { it.effective }.distinctUntilChanged()
 
     val vehicleLookupAllowed: Flow<Boolean> = ds.data.map { it[Keys.VEHICLE_LOOKUP_ALLOWED] ?: false }
     val fuelType: Flow<String?> = ds.data.map { it[Keys.FUEL_TYPE] }
@@ -336,9 +359,22 @@ class AppPreferencesDataSource @Inject constructor(
         return written
     }
 
-    /** Saves the chosen fuel price area; the price that follows it is written separately. */
+    /** Saves an area picked by hand, which turns Automatic off; the price that follows it is written separately. */
     suspend fun setFuelPriceArea(area: FuelArea) {
-        ds.edit { it[Keys.FUEL_PRICE_AREA] = area.code }
+        ds.edit {
+            it[Keys.FUEL_PRICE_AREA] = area.code
+            it[Keys.FUEL_PRICE_AREA_AUTO] = false
+        }
+    }
+
+    /** Turns Automatic on. The picked area stays stored for the next time the dasher picks by hand. */
+    suspend fun setFuelPriceAreaAutomatic() {
+        ds.edit { it[Keys.FUEL_PRICE_AREA_AUTO] = true }
+    }
+
+    /** Saves the area the phone worked out from a fix (the code only, no coordinates); a repeat writes nothing. */
+    suspend fun setDetectedFuelArea(area: FuelArea) {
+        ds.edit { if (it[Keys.FUEL_PRICE_AREA_DETECTED] != area.code) it[Keys.FUEL_PRICE_AREA_DETECTED] = area.code }
     }
 
     /**
@@ -595,7 +631,7 @@ class AppPreferencesDataSource @Inject constructor(
         return restoreIfUnchanged(key, field, previous, expected, current)
     }
 
-    /** Shared settings only; legacy vehicle keys and their markers, and the fuel price area, stay intact. */
+    /** Shared settings only; legacy vehicle keys and their markers, and the fuel price area setting, stay intact. */
     suspend fun resetSharedEconomyDefaults() {
         val shared = setOf(EconomyField.ELECTRICITY_PRICE, EconomyField.PHONE_PLAN_TOTAL,
             EconomyField.PHONE_PLAN_LINES, EconomyField.PHONE_BUSINESS_PERCENT,

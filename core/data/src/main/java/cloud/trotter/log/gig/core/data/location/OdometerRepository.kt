@@ -6,9 +6,13 @@ import cloud.trotter.log.gig.domain.location.OdometerFixPolicy
 import cloud.trotter.log.gig.domain.model.location.Coordinates
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -62,6 +66,18 @@ class OdometerRepository @Inject constructor(
 
     /** The session the no-arg [sessionMilesFlow] tracks (the HUD's "session miles" view). */
     private val _currentSessionId = MutableStateFlow<String?>(null)
+
+    private val _acceptedFixes = MutableSharedFlow<Coordinates>(
+        replay = 0,
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+
+    /**
+     * Each fix the gate takes as the reference or accepts (never an ignored or rejected one), for on-phone consumers
+     * such as the automatic fuel price area (#1687). In memory only, no replay: never persisted and never logged.
+     */
+    val acceptedFixes: SharedFlow<Coordinates> = _acceptedFixes.asSharedFlow()
 
     // Public Output: Reactive Session Miles for the CURRENT session (the HUD's "session miles").
     val sessionMilesFlow: Flow<Double> =
@@ -172,6 +188,7 @@ class OdometerRepository @Inject constructor(
             is OdometerFixPolicy.Verdict.Reference -> {
                 lastAccepted = coords
                 closeRejectionStreak()
+                _acceptedFixes.tryEmit(coords)
             }
 
             is OdometerFixPolicy.Verdict.Accept -> {
@@ -180,6 +197,7 @@ class OdometerRepository @Inject constructor(
                 acceptedMeters += verdict.deltaMeters
                 addMeters(verdict.deltaMeters)
                 closeRejectionStreak()
+                _acceptedFixes.tryEmit(coords)
             }
 
             is OdometerFixPolicy.Verdict.Ignore -> {

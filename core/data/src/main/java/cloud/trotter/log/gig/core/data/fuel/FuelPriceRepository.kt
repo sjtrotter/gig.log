@@ -30,7 +30,8 @@ import javax.inject.Singleton
 
 /**
  * The fuel client: the gas price comes from gig.log's signed fuel feed ([FeedRepository]) for the area the dasher
- * picked. Every phone downloads the same file, all areas; the area is chosen on the phone and never sent.
+ * picked, or on Automatic the one [FuelAreaDetector] worked out on the phone. Every phone downloads the same file, all
+ * areas; the area is chosen on the phone and never sent.
  *
  * - **The follow** ([start]): while auto is on, the stored gas price follows the feed price resolved for the chosen
  *   area and the active fuel type ([FuelPriceFollow]). A new generation, an area change, a fuel type change and auto
@@ -145,8 +146,11 @@ class FuelPriceRepository @Inject constructor(
         return FuelLookup(FuelType.entries.mapNotNull { fuel -> stamped(state, area, fuel)?.let { fuel to it } }.toMap())
     }
 
-    /** Saves the chosen area; the follow applies its price from the cache. */
+    /** Saves an area picked by hand (Automatic turns off); the follow applies its price from the cache. */
     suspend fun setArea(area: FuelArea) = preferences.setFuelPriceArea(area)
+
+    /** Turns the automatic area on ([FuelAreaDetector]); the follow applies the detected area's price from the cache. */
+    suspend fun setAreaAutomatic() = preferences.setFuelPriceAreaAutomatic()
 
     private suspend fun refreshSafely(grant: OneShotGrant?): FeedRefresh = try {
         feed.refresh(grant)
