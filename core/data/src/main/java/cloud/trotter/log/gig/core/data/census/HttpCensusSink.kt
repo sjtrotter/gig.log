@@ -86,6 +86,12 @@ class HttpCensusSink @Inject constructor(
                             stats.platformNotChosen.incrementAndGet()
                             continue
                         }
+                        // #1573: a record taken before a clear is dropped before it can spend the day's sample or
+                        // matched quota; the spool checks the boundary again under its lock.
+                        if (offered.generation != spool.generation) {
+                            stats.spoolDropped.incrementAndGet()
+                            continue
+                        }
                         val item = CensusSkeletonSchema.deserialize(record.skeletonJson)
                         val key = requireNotNull(CensusSampleKey.of(item, record.presentFields))
                         if (!sample.admit(item.day, key)) {
