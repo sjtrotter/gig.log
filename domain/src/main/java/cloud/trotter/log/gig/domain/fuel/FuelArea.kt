@@ -8,13 +8,16 @@ import cloud.trotter.log.gig.domain.model.vehicle.FuelType
  *
  * [parent] is the next area up the chain city, state, sub-PADD, PADD, U.S.; a price missing for an area is looked up
  * along that chain ([FuelPriceResolution]). Entries are declared parents first, so an entry names only earlier ones.
- * [memberStates] are the postal codes of a region's states, a hint for the area picker; resolution never reads them.
+ * [memberStates] are the postal codes of a region's states: the area picker's hint and [FuelAreaLocator]'s state to
+ * region join; resolution never reads them. [statePostal] is a state series' own postal code, spelled out rather than
+ * derived from the EIA code, and null for every other kind.
  */
 enum class FuelArea(
     val code: String,
     val parent: FuelArea?,
     val kind: Kind,
     val memberStates: List<String> = emptyList(),
+    val statePostal: String? = null,
 ) {
     US("NUS", null, Kind.COUNTRY),
     EAST_COAST(
@@ -32,15 +35,15 @@ enum class FuelArea(
     ROCKY_MOUNTAIN("R40", US, Kind.REGION, listOf("CO", "ID", "MT", "UT", "WY")),
     WEST_COAST("R50", US, Kind.REGION, listOf("AK", "AZ", "CA", "HI", "NV", "OR", "WA")),
     WEST_COAST_EXCEPT_CALIFORNIA("R5XCA", WEST_COAST, Kind.REGION, listOf("AK", "AZ", "HI", "NV", "OR", "WA")),
-    CALIFORNIA("SCA", WEST_COAST, Kind.STATE),
-    COLORADO("SCO", ROCKY_MOUNTAIN, Kind.STATE),
-    FLORIDA("SFL", LOWER_ATLANTIC, Kind.STATE),
-    MASSACHUSETTS("SMA", NEW_ENGLAND, Kind.STATE),
-    MINNESOTA("SMN", MIDWEST, Kind.STATE),
-    NEW_YORK("SNY", CENTRAL_ATLANTIC, Kind.STATE),
-    OHIO("SOH", MIDWEST, Kind.STATE),
-    TEXAS("STX", GULF_COAST, Kind.STATE),
-    WASHINGTON("SWA", WEST_COAST_EXCEPT_CALIFORNIA, Kind.STATE),
+    CALIFORNIA("SCA", WEST_COAST, Kind.STATE, statePostal = "CA"),
+    COLORADO("SCO", ROCKY_MOUNTAIN, Kind.STATE, statePostal = "CO"),
+    FLORIDA("SFL", LOWER_ATLANTIC, Kind.STATE, statePostal = "FL"),
+    MASSACHUSETTS("SMA", NEW_ENGLAND, Kind.STATE, statePostal = "MA"),
+    MINNESOTA("SMN", MIDWEST, Kind.STATE, statePostal = "MN"),
+    NEW_YORK("SNY", CENTRAL_ATLANTIC, Kind.STATE, statePostal = "NY"),
+    OHIO("SOH", MIDWEST, Kind.STATE, statePostal = "OH"),
+    TEXAS("STX", GULF_COAST, Kind.STATE, statePostal = "TX"),
+    WASHINGTON("SWA", WEST_COAST_EXCEPT_CALIFORNIA, Kind.STATE, statePostal = "WA"),
     BOSTON("YBOS", MASSACHUSETTS, Kind.CITY),
     CHICAGO("YORD", MIDWEST, Kind.CITY),
     CLEVELAND("YCLE", OHIO, Kind.CITY),
