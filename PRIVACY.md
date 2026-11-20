@@ -129,7 +129,7 @@ EIA cities, at most once every 10 minutes. This makes no location request of its
 stores the resulting area code only (`fuel_price_area_detected`), never the coordinates; the fix is dropped after the
 check and never logged (the area's code is logged at DEBUG only). gig.log sends nothing about the location or the
 area: the fuel download is the same for every phone and carries neither (§6). Like the other app preferences, the
-area codes are included in Android backup and device transfer (§7).
+area codes are included in Android backup and device transfer (§6).
 
 ### 2.5 What gig.log never processes
 
