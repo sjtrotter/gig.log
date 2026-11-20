@@ -72,6 +72,18 @@ open class CensusSpool internal constructor(
     @Volatile var generation: Long = 0L
         private set
 
+    /** #1634: the census directory this spool sits in, where the click evidence files live beside it. */
+    internal val censusRoot: File get() = requireNotNull(directory.parentFile) { "a spool directory has a parent" }
+
+    /**
+     * #1634: runs [block] under this spool's lock with its current clear boundary. The click evidence store
+     * ([CensusClickCandidates]) makes every change this way, so its boundary check and its write are one step against
+     * [clear], which removes the click files under the same lock and boundary bump.
+     */
+    internal suspend fun <T> underClearLock(block: (boundary: Long) -> T): T = withContext(io) {
+        mutex.withLock { block(generation) }
+    }
+
     open fun count(): Int = if (initialized) size.value else
         directory.listFiles().orEmpty().count { it.isFile && FILE_NAME.matches(it.name) }
 
@@ -216,11 +228,13 @@ open class CensusSpool internal constructor(
 
     /**
      * Identity reset (#1185): deletes the in-flight marker (and its temp file), then every queued record and temp file.
-     * Not counted as a drop. A failed delete still leaves the count truthful.
+     * Not counted as a drop. A failed delete still leaves the count truthful. #1634: the skeleton spool's clear also
+     * deletes the click evidence (candidates, closed days, frozen batches) under the same lock and boundary bump.
      */
     open suspend fun clear() = withContext(io) {
         mutex.withLock {
             generation++
+            if (!envelopes) CensusClickCandidates.deleteAll(censusRoot)
             initialize()
             deleteInFlight()
             val tmp = File(inFlightFile.parentFile, "inflight.json.tmp")

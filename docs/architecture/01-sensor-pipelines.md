@@ -766,7 +766,7 @@ Not in #1148: `notificationTimeout` (stays 100 ms), TalkBack's subtree-only / fo
 The UNKNOWN screen/notification census (Epic #1138, #1189) is specified by ADR-0011; this layer builds hash-only skeletons and publishes them to the opt-in debug uploader (#1182).
 ADR-0011's 2026-11-13 amendment (§12 to §21, #1618, epic #1617) records the decided next design: skeletons from the
 Play and sideload builds, opt-in; shape templates and click flags; the contributor tier and its word gate; probes in
-place of fragment hashes; shadow mode, canary and rollback; click evidence; no region data; and the dasher-privacy
+place of fragment hashes; shadow mode, canary and rollback; click evidence (built by #1634); no region data; and the dasher-privacy
 model (sampling, a daily upload window, Wi-Fi by default, HTTPS only, keyed storage, epoch pseudonyms, deletion). §13
 (shape templates and click flags) is built by #1619 as the v2 wire schemas, sent only once the server accepts them
 (*Wire versions* below); §13's local "this slot varied" flag is not: it needs per-variant state across frames, which
@@ -786,6 +786,39 @@ is not built yet; the bullets below describe what runs today, and each issue tha
   under a consent receipt of revision 32 or later. The worker's one schema-aware batch id helper keys a matched batch,
   and each 413 split half, on fingerprint and rule id (`CensusApi.matchedBatchId`). Counts under `matched{…}`.
   **Invariant:** a matched frame never leaves without its `ruleId` and never under a v1/v2 id.
+- *Click evidence (#1634, ADR-0011 §19)* — UNKNOWN taps only (`obs.target == UNKNOWN_TARGET`); a recognized tap sends
+  nothing. **Acquisition:** `ClickEvidenceArming` (the sink's `clickEvidenceArmed`: census on, `uinode.clicked.v1` in
+  the accepted ids, which `HttpCensusSink` drops below consent revision 33) is read once per tap in
+  `AccessibilityPipeline.clickEvents()`; unarmed, nothing else is read (`UNARMED` counted). Armed, before
+  `ref.release()`, the clear boundary is read, then `AccessibilitySource.clickWindow`: the source's own
+  `getWindow().getRoot()` (never a parent climb: a failed `getParent()` would make a container the root and hide the
+  screen above it), window id, root window id and package checked, mapped by the marking mapper
+  (`toMarkedUiNode`), which compares each live node with the source BEFORE it is recycled and records its path over
+  the MAPPED children. Not found → `SOURCE_GONE`; found twice, a cap hit (depth, node budget or the child-index
+  limit: every breadth cut sets `TreeBudget.truncated`, so the screen path's truncation WARN now also names them) or a
+  failed check → `NO_WINDOW`; a throw →
+  `ACQUIRE_FAILED` in its own catch, so the click goes on. The window rides `PipelineEvent.Click.window`.
+  **Classification:** `classifyClick` reads `interpreter.generation` once and returns it as
+  `Classified.clickGeneration` (the click capture still masks with the cached screen's generation). The publisher
+  (`publishClick`, after the content and platform gates and BEFORE `FrameGate`, whose UNKNOWN suppressor keys a tap
+  on its detached node and cached screen target and would keep only the first of two taps on different windows or
+  owners) matches the window with that generation's screens directly
+  (`Ruleset.matchFirst`; no `lastScreenContexts`, `FrameGate`, health or shadow write); sensitive or noise
+  (`passesContentGates(parsed)`) → `BLOCKED`; a recognized window is masked with that rule's `redact` from the same
+  generation; an UNKNOWN window builds as an UNKNOWN frame. The owner is `actionOwner(node, UiOwnerShape)` on the
+  node inside the window tree. `SkeletonBuilder.clickedOutcome` builds the v2 body and the `tap` (`ownerPath`,
+  `tapPath` when the tapped node is not the owner, `generation` = `RuleIdentifiers.wire(id)`), paths found by identity
+  in the pass-1 tree. **Selection (D7):** `HttpCensusSink` routes a clicked item to `CensusClickCandidates`, never the
+  daily sample, the matched cap or the FIFO spool (a first-come rule would make the kept tap depend on order): per
+  open UTC day at most 64 candidates by smallest `ClickedIdentity.selectionKey`, the body with the smallest sha256 per
+  key; after the day ends the worker freezes the 10 smallest keys, in key order, into one immutable file and closes
+  the day; retryable answers resend the same bytes and batch id (`CensusApi.clickedBatchId`, "c-"), final answers
+  delete it, a 413 splits it in key order. Everything is deleted after seven days by observation day. Every change
+  runs under the skeleton spool's lock with its boundary (`CensusSpool.underClearLock`), and `CensusSpool.clear`
+  deletes the click files under that lock and bump, so evidence read before a deletion or identity reset is never
+  written behind it. Counts under `clicked{offered,refused{…},build{…}}` and the upload stats' `clicked*`.
+  **Invariant:** nothing from a window its own generation blocks, and no tap time or order on the wire or in the
+  selection.
 - *Wire versions (#1619, ADR-0011 §13)* — `SkeletonVersion` (contract) names `V1` (`uinode.skeleton.v1` /
   `notification.skeleton.v1`) and `V2` (`uinode.skeleton.v2` / `notification.skeleton.v2`). The publisher builds each
   kind in the NEWEST version the cached server policy lists in `acceptedSchemaIds`

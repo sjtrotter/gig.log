@@ -199,6 +199,12 @@ internal class CensusWorkerHarness(scope: CoroutineScope, io: CoroutineDispatche
         healthSink.apply { it.record(key, "doordash.screen.offer").record(key, null).trip(key) }
         return key
     }
+    /**
+     * #1634: the click evidence store over a real spool directory of its own (the worker's [spool] is a mock), so its
+     * lock and files behave as wired. Empty unless a test adds candidates.
+     */
+    val clickSpool = CensusSpool(RuntimeEnvironment.getApplication(), CensusUploadStats(), io)
+    val clicks = cloud.trotter.log.gig.core.data.census.CensusClickCandidates(clickSpool, stats)
     val queued = mutableListOf<List<CensusSpool.Spooled>>()
     var pending: CensusSpool.InFlight? = null
     private var sequence = 0
@@ -348,7 +354,7 @@ internal class CensusWorkerHarness(scope: CoroutineScope, io: CoroutineDispatche
     fun worker(tags: List<String> = emptyList()): CensusUploadWorker = TestListenableWorkerBuilder<CensusUploadWorker>(RuntimeEnvironment.getApplication())
         .setWorkerFactory(object : WorkerFactory() {
             override fun createWorker(appContext: Context, workerClassName: String, workerParameters: WorkerParameters): ListenableWorker =
-                CensusUploadWorker(appContext, workerParameters, preferences, credentials, spool, factory, planner, network, stats, lock, healthSink, metadataProvider, envelopeSpool, envelopeSink, deletion, uploadedSkeletons)
+                CensusUploadWorker(appContext, workerParameters, preferences, credentials, spool, factory, planner, network, stats, lock, healthSink, metadataProvider, envelopeSpool, envelopeSink, deletion, clicks, uploadedSkeletons)
         }).setTags(tags).build()
 }
 

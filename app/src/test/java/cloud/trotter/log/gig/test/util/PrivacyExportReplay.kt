@@ -112,6 +112,8 @@ class PrivacyExportReplay(
     val stats = PipelineStats("privacy-e2e", uploadStats)
     val preferences = DevSettingsRepository(DevSettingsDataSource(ReplayEdges.MemoryPreferences()), debug, io, "test")
     val skeletonSpool = CensusSpool(context, uploadStats, io)
+    /** #1634: the click evidence store beside the skeleton spool, as wired. */
+    val clicks = CensusClickCandidates(skeletonSpool, uploadStats)
     val envelopeSpool = CensusCredentialsModule.envelopeSpool(context, uploadStats, io)
     val skeletonRoot = File(context.filesDir, "census/spool")
     val envelopeRoot = File(context.filesDir, "census/envelopes")
@@ -132,7 +134,7 @@ class PrivacyExportReplay(
         else NoOpCensusEnvelopeSink
     private val sink: CensusSink = if (census)
         HttpCensusSink(preferences, skeletonSpool, CensusDailySample(context, io), uploadStats, backgroundScope, io,
-            readsUnboundPlatforms = true, matchedCap = CensusMatchedCap(context, io)) else object : CensusSink {
+            readsUnboundPlatforms = true, matchedCap = CensusMatchedCap(context, io), clicks = clicks) else object : CensusSink {
             override val isEnabled = false
             override fun offer(record: CensusRecord) = false
         }
@@ -305,7 +307,7 @@ class PrivacyExportReplay(
                     CensusUploadWorker(appContext, workerParameters, preferences, credentials, skeletonSpool, apiFactory,
                         CensusUploadPlanner(preferences, scheduling, Clock.systemUTC()), unmetered, uploadStats, lock, health,
                         metadata,
-                        envelopeSpool, envelopeSink, deletion)
+                        envelopeSpool, envelopeSink, deletion, clicks)
             }).build()
         assertEquals("worker completes", ListenableWorker.Result.success(), worker.doWork())
         settle()

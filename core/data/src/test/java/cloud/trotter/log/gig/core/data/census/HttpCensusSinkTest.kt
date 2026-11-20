@@ -6,6 +6,7 @@ import cloud.trotter.log.gig.domain.capture.CensusRecord
 import cloud.trotter.log.gig.domain.census.CensusChoices
 import cloud.trotter.log.gig.domain.census.CensusUploadPreferences
 import cloud.trotter.log.gig.domain.census.CensusUploadStats
+import cloud.trotter.log.gig.domain.census.ClickEvidence
 import cloud.trotter.log.gig.domain.census.MatchedSkeletons
 import cloud.trotter.log.gig.domain.state.Platform
 import kotlinx.coroutines.CompletableDeferred
@@ -41,7 +42,9 @@ class HttpCensusSinkTest {
         stats: CensusUploadStats,
         io: kotlinx.coroutines.CoroutineDispatcher,
         matchedCap: CensusMatchedCap = newMatchedCap(),
-    ) = HttpCensusSink(prefs, spool, sample(), stats, backgroundScope, io, readsUnboundPlatforms = false, matchedCap = matchedCap)
+        clicks: CensusClickCandidates = CensusClickCandidates(spool, stats),
+    ) = HttpCensusSink(prefs, spool, sample(), stats, backgroundScope, io, readsUnboundPlatforms = false, matchedCap = matchedCap,
+        clicks = clicks)
 
     private fun newMatchedCap(file: java.io.File = java.io.File(tmp.newFolder(), "matched.json")) =
         CensusMatchedCap(file, kotlinx.coroutines.Dispatchers.Unconfined)
@@ -239,5 +242,58 @@ class HttpCensusSinkTest {
         prefs.consentRevision.value = null
         runCurrent()
         assertEquals("no granted receipt sends none", setOf(SkeletonSchema.SCHEMA_ID_V2), sink.acceptedSchemaIds)
+    }
+
+    // #1634 D7, D8: click evidence.
+    @Test fun `a clicked skeleton goes to the click store, never the sample or the spool`() = runTest {
+        val io = StandardTestDispatcher(testScheduler)
+        val stats = CensusUploadStats()
+        val spool = CensusSpool(tmp.newFolder(), stats, io)
+        val sink = sink(Preferences(), spool, stats, io)
+        runCurrent()
+        val (_, record) = clickedCensusRecord(1, day = java.time.LocalDate.now(java.time.ZoneOffset.UTC).toString())
+        sink.offer(record, sink.clearBoundary); runCurrent()
+        sink.offer(record, sink.clearBoundary); runCurrent()
+        assertEquals(0, spool.count())
+        assertEquals(0L, stats.sampledRepeat.get())
+        assertEquals(1L, stats.clickedKept.get())
+        assertEquals("the same body again changes nothing", 1L, stats.clickedNotKept.get())
+    }
+
+    @Test fun `a clicked record read before a clear is dropped before the store`() = runTest {
+        val io = StandardTestDispatcher(testScheduler)
+        val stats = CensusUploadStats()
+        val spool = CensusSpool(tmp.newFolder(), stats, io)
+        val sink = sink(Preferences(), spool, stats, io)
+        runCurrent()
+        val boundary = sink.clearBoundary
+        spool.clear()
+        sink.offer(clickedCensusRecord(1).second, boundary); runCurrent()
+        assertEquals(0L, stats.clickedKept.get())
+        assertEquals(1L, stats.spoolDropped.get())
+    }
+
+    @Test fun `click evidence is armed only with the census on, the schema listed and a consent that names taps`() = runTest {
+        val io = StandardTestDispatcher(testScheduler)
+        val stats = CensusUploadStats()
+        val prefs = Preferences().apply {
+            acceptedSchemaIds.value = setOf(SkeletonSchema.SCHEMA_ID_V2, SkeletonSchema.SCHEMA_ID_CLICKED)
+            consentRevision.value = ClickEvidence.MIN_DISCLOSURE_REVISION - 1
+        }
+        val sink = sink(prefs, CensusSpool(tmp.newFolder(), stats, io), stats, io)
+        runCurrent()
+        assertEquals("a r32 consent sends no taps", setOf(SkeletonSchema.SCHEMA_ID_V2), sink.acceptedSchemaIds)
+        assertFalse(sink.clickEvidenceArmed.value)
+        prefs.consentRevision.value = ClickEvidence.MIN_DISCLOSURE_REVISION
+        runCurrent()
+        assertEquals(setOf(SkeletonSchema.SCHEMA_ID_V2, SkeletonSchema.SCHEMA_ID_CLICKED), sink.acceptedSchemaIds)
+        assertTrue(sink.clickEvidenceArmed.value)
+        prefs.enabled.value = false
+        runCurrent()
+        assertFalse("census off disarms", sink.clickEvidenceArmed.value)
+        prefs.enabled.value = true
+        prefs.acceptedSchemaIds.value = setOf(SkeletonSchema.SCHEMA_ID_V2)
+        runCurrent()
+        assertFalse("a policy without the schema disarms", sink.clickEvidenceArmed.value)
     }
 }

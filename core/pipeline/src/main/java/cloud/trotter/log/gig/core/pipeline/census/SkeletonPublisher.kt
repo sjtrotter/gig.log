@@ -3,8 +3,12 @@ package cloud.trotter.log.gig.core.pipeline.census
 import cloud.trotter.log.gig.core.pipeline.ParseRotTracker
 import cloud.trotter.log.gig.core.pipeline.PipelineEvent
 import cloud.trotter.log.gig.core.pipeline.PipelineStats
+import cloud.trotter.log.gig.core.pipeline.passesContentGates
+import cloud.trotter.log.gig.core.pipeline.rules.ParsedFieldsFactory
 import cloud.trotter.log.gig.core.pipeline.rules.RuleGeneration
+import cloud.trotter.log.gig.core.pipeline.rules.RuleIdentifiers
 import cloud.trotter.log.gig.core.pipeline.rules.ScreenRedactionSource
+import cloud.trotter.log.gig.core.pipeline.rules.TransformRegistry
 import cloud.trotter.log.gig.core.pipeline.census.SkeletonBuilder.Outcome
 import cloud.trotter.log.gig.domain.capture.CensusEnvelopeSink
 import cloud.trotter.log.gig.domain.capture.CensusRecord
@@ -22,6 +26,8 @@ import cloud.trotter.log.gig.domain.pipeline.Observation
 import cloud.trotter.log.gig.domain.pipeline.RecognitionIncident
 import cloud.trotter.log.gig.domain.pipeline.RecognitionIncidents
 import cloud.trotter.log.gig.domain.pipeline.UNKNOWN_TARGET
+import cloud.trotter.log.gig.domain.pipeline.UiOwnerShape
+import cloud.trotter.log.gig.domain.pipeline.actionOwner
 import cloud.trotter.log.gig.domain.state.Platform
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -38,7 +44,7 @@ import timber.log.Timber
  * ADR-0011 publisher (#1146): UNKNOWN branch, after `FrameGate.admit` and `captureScreen` so the
  * stamped `captureId` is the pairing key, before the terminal UNKNOWN filter.
  * Screens and notifications share one sink and server daily budget (ADR §10).
- * Clicks stay OUT until a reliable screen fingerprint is carried at click time.
+ * Clicks (#1634) go out only as click evidence ([publishClick]): an UNKNOWN tap's own window, read at click time.
  * Every build binds the HTTP spool sink behind the census consent (#1182, #1620).
  *
  * Each kind goes out in the NEWEST wire version the server's last policy lists in `acceptedSchemaIds`
@@ -225,6 +231,90 @@ class SkeletonPublisher @Inject constructor(
     /** The platform's rules in an open parse-rot incident; empty when there is none. */
     private fun openRotRules(platformWire: String): Set<String> =
         incidents.open.value.firstOrNull { it.platformWire == platformWire }?.parseRot?.mapTo(HashSet()) { it.ruleId }.orEmpty()
+
+    /**
+     * #1634: the click evidence of an UNKNOWN tap (a recognized tap sends nothing): the `uinode.clicked.v1` skeleton of
+     * the tap's own window ([PipelineEvent.Click.window], read at click time) with the tapped button as a position in it.
+     * Called for every tap that passed the content and platform gates, BEFORE `FrameGate`: its UNKNOWN suppressor keys a
+     * tap on the detached node and the cached screen target, which would keep only the first of two taps in different
+     * windows or on different owners. The store's selection is order-free instead. Fail-OPEN, so nothing here can cost
+     * the click.
+     *
+     * The window is classified with [clickGeneration] (the generation whose click rules classified the tap) through a
+     * pure match: no cached screen context, frame gate, health or shadow state is read or written. A sensitive or noise
+     * window sends nothing ([ClickEvidenceRefusal.BLOCKED]); a window a screen rule recognized is masked with that rule's
+     * own `redact` from the same generation; an UNKNOWN window builds exactly as an UNKNOWN frame. The tapped node's
+     * owner is bound by the same walk the tap executor binds with ([actionOwner], [UiOwnerShape]). The record is offered
+     * with the clear boundary read before the window was, so a deletion in between drops it.
+     */
+    fun publishClick(obs: Observation.Click, event: PipelineEvent.Click, clickGeneration: RuleGeneration?) {
+        if (obs.target != UNKNOWN_TARGET) return
+        val window = event.window ?: return // The acquisition counted why.
+        try {
+            if (!sink.isEnabled || SkeletonSchema.SCHEMA_ID_CLICKED !in sink.acceptedSchemaIds) {
+                return refuseClick(ClickEvidenceRefusal.UNARMED)
+            }
+            val platform = Platform.fromPackage(event.packageName)
+            if (platform == Platform.Unknown) {
+                stats.onCensusUnattributedPlatform()
+                return
+            }
+            val generation = clickGeneration ?: return refuseClick(ClickEvidenceRefusal.NO_GENERATION)
+            val generationId = generation.id ?: return refuseClick(ClickEvidenceRefusal.NO_GENERATION)
+            if (window.boundary != clearBoundary()) return refuseClick(ClickEvidenceRefusal.STALE_BOUNDARY)
+            val match = TransformRegistry.withClock(obs.timestamp) { generation.screens.matchFirst(window.tree, platform.wire) }
+            if (match != null && !passesContentGates(ParsedFieldsFactory.create(match.shape, match.fields))) {
+                return refuseClick(ClickEvidenceRefusal.BLOCKED)
+            }
+            val tapped = window.source() ?: return refuseClick(ClickEvidenceRefusal.SOURCE_GONE)
+            val owner = actionOwner(tapped, UiOwnerShape) ?: return refuseClick(ClickEvidenceRefusal.NO_OWNER)
+            when (val outcome = SkeletonBuilder.clickedOutcome(
+                window.tree,
+                window.windowTitle,
+                obs.metadata,
+                platform,
+                utcDay(obs.timestamp),
+                match?.let { generation.redactFor(it.ruleId) },
+                owner,
+                tapped,
+                RuleIdentifiers.wire(generationId),
+            )) {
+                is Outcome.Built -> {
+                    val offered = sink.offer(
+                        CensusRecord(
+                            platform = platform,
+                            fingerprint = outcome.skeleton.fingerprint,
+                            skeletonJson = outcome.json,
+                            itemBytes = outcome.itemBytes,
+                            captureId = null,
+                        ),
+                        window.boundary,
+                    )
+                    if (offered) stats.onClickedOffered() else stats.onCensusSinkRefused()
+                    Timber.tag("Census").d("click evidence offered=%s", offered)
+                }
+                is Outcome.Refused -> when (outcome.reason) {
+                    SkeletonBuilder.Refusal.SENSITIVE_FRAME, SkeletonBuilder.Refusal.SENSITIVE_TITLE ->
+                        refuseClick(ClickEvidenceRefusal.SENSITIVE)
+                    SkeletonBuilder.Refusal.CLICK_OWNER_WITHHELD -> refuseClick(ClickEvidenceRefusal.OWNER_WITHHELD)
+                    else -> stats.onClickedBuildRefused(outcome.reason)
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            stats.onCensusPublishFailure()
+            if (warned.compareAndSet(false, true)) {
+                Timber.tag("Census").w("census publisher failed (%s); click unaffected", t.javaClass.simpleName)
+            }
+        }
+    }
+
+    /** Counts [reason] and logs the decision at DEBUG (a reason, never text). */
+    private fun refuseClick(reason: ClickEvidenceRefusal) {
+        stats.onClickedRefused(reason)
+        Timber.tag("Census").d("click evidence refused reason=%s", reason)
+    }
 
     /** Post-admission/capture, before UNKNOWN rejection. Trusted envelope routing stays screen-only. */
     fun publish(obs: Observation.Notification, raw: RawNotificationData) {

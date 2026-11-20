@@ -33,3 +33,27 @@ internal fun matchedCensusRecord(number: Int = 0, ruleId: String = "doordash.scr
         "\"day\":\"$day\",\"ruleId\":\"$ruleId\",\"root\":{\"class\":\"android.widget.TextView\"}}"
     return CensusRecord(Platform.DoorDash, fingerprint, json, json.toByteArray().size, null)
 }
+
+/**
+ * #1634: a synthetic `uinode.clicked.v1` item, serialized by the contract (its canonical bytes): a frame with two buttons,
+ * the tap on button [owner]. [number] picks the layout fingerprint as in [censusRecord]; [appVersion] varies the body
+ * without changing its identity.
+ */
+internal fun clickedCensusRecord(
+    number: Int = 0,
+    owner: Int = 0,
+    day: String = "2026-10-02",
+    appVersion: String? = null,
+): Pair<cloud.trotter.census.contract.UiSkeletonDto, CensusRecord> {
+    val fingerprint = number.toString(16).padStart(64, '0')
+    val button = cloud.trotter.census.contract.UiSkeletonNodeDto(className = "android.widget.Button", isClickable = true)
+    val item = cloud.trotter.census.contract.UiSkeletonDto(
+        schemaId = cloud.trotter.census.contract.SkeletonSchema.SCHEMA_ID_CLICKED,
+        hashDomain = 1, filterRev = 1, fingerprint = fingerprint, platform = Platform.DoorDash.wire,
+        platformAppVersion = appVersion, engineVersion = 1, day = day,
+        tap = cloud.trotter.census.contract.TapRef(ownerPath = "root/$owner", generation = "0123456789abcdef"),
+        root = cloud.trotter.census.contract.UiSkeletonNodeDto(className = "android.widget.FrameLayout", children = listOf(button, button)),
+    )
+    val measured = cloud.trotter.census.contract.SkeletonSchema.measure(item)
+    return item to CensusRecord(Platform.DoorDash, fingerprint, measured.json, measured.bytes, null)
+}

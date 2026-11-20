@@ -6,9 +6,11 @@ import cloud.trotter.log.gig.domain.capture.ReplayMetadata
 import cloud.trotter.census.contract.CensusFingerprint
 import cloud.trotter.census.contract.CensusHash
 import cloud.trotter.census.contract.KindClassifier
+import cloud.trotter.census.contract.NodePath
 import cloud.trotter.census.contract.ShapeClassifier
 import cloud.trotter.census.contract.SkeletonSchema
 import cloud.trotter.census.contract.SkeletonVersion
+import cloud.trotter.census.contract.TapRef
 import cloud.trotter.census.contract.TextFold
 import cloud.trotter.census.contract.TextSlot
 import cloud.trotter.census.contract.UiSkeletonDto
@@ -104,6 +106,9 @@ object SkeletonBuilder {
 
         /** #1573: a matched build whose rule belongs to another platform than the frame's. */
         MATCHED_PLATFORM_MISMATCH,
+
+        /** #1634: a clicked build whose tap owner is not a node of the built skeleton (fail closed). */
+        CLICK_OWNER_WITHHELD,
 
         /**
          * Anything else went wrong building the item — e.g. a `StackOverflowError` on a pathological
@@ -264,6 +269,44 @@ object SkeletonBuilder {
         buildOutcome(tree, windowTitle, meta, platform, day, frame, null, SkeletonVersion.V2, collectWords = false, ruleId = ruleId)
     }
 
+    /**
+     * #1634: the `uinode.clicked.v1` skeleton of the window a tap landed in: the v2 build of that window's raw [tree]
+     * through the same filters (with [redact] withheld as well when a screen rule of the click's generation recognized
+     * the window; null for an UNKNOWN window, which builds exactly as an UNKNOWN frame), plus the [tap]: [owner] (the
+     * node that takes the click, a node of [tree]) and [tapped] (the tapped node, a node of [tree]) as paths into the
+     * emitted tree, and [generation], the click generation's 16-hex wire id. Nodes are matched by identity through the
+     * pass-1 tree, which mirrors the emitted one node for node, so a path names the node the skeleton carries. An owner
+     * not found is [Refusal.CLICK_OWNER_WITHHELD]; a tapped node not found leaves `tapPath` absent. No review words,
+     * never projected to v1. Never throws.
+     */
+    fun clickedOutcome(
+        tree: UiNode,
+        windowTitle: String?,
+        meta: ReplayMetadata,
+        platform: Platform,
+        day: LocalDate,
+        redact: CompiledRedact?,
+        owner: UiNode,
+        tapped: UiNode,
+        generation: String,
+    ): Outcome = guarded {
+        val frame = FrameFilter(::withholdingStep, ruleWithheld = RuleRedactionFields.of(tree, redact))
+        buildOutcome(
+            tree, windowTitle, meta, platform, day, frame, null, SkeletonVersion.V2, collectWords = false,
+            tap = ClickTarget(owner, tapped, generation),
+        )
+    }
+
+    /** #1634: the tap of a clicked build, as raw nodes of the tree being built. */
+    private class ClickTarget(val owner: UiNode, val tapped: UiNode, val generation: String)
+
+    /** The child-index path of [target] in the pass-1 tree under [root] (identity match); null when it is not there. */
+    private fun pathOf(root: Pending, target: UiNode): List<Int>? {
+        if (root.node === target) return emptyList()
+        root.children.forEachIndexed { index, child -> pathOf(child, target)?.let { return listOf(index) + it } }
+        return null
+    }
+
     /** [outcome] over an explicit [frame] — internal so a test can inject a defect (review II5). */
     internal fun outcome(
         tree: UiNode,
@@ -304,6 +347,7 @@ object SkeletonBuilder {
         version: SkeletonVersion,
         collectWords: Boolean,
         ruleId: String? = null,
+        tap: ClickTarget? = null,
     ): Outcome {
         // The whole-frame drop runs on the RAW tree and the RAW title, before anything is built. A scan
         // that FAILED (the marker scan's own fail-closed sentinel) is a build failure, not a banking
@@ -327,9 +371,26 @@ object SkeletonBuilder {
         // Pass 2: emit, withholding every field the frame-level rule catches.
         val root = frame.emit(pending)
         val fingerprint = CensusFingerprint.of(root) ?: return Outcome.Refused(Refusal.FINGERPRINT_FAILED)
+        // #1634: the tap's paths over the emitted tree (the pass-1 tree mirrors it node for node).
+        val tapPaths = tap?.let {
+            val owner = pathOf(pending, it.owner) ?: return Outcome.Refused(Refusal.CLICK_OWNER_WITHHELD)
+            owner to (if (it.tapped === it.owner) null else pathOf(pending, it.tapped))
+        }
         val item = try {
+            val tapRef = tap?.let {
+                val (owner, tapped) = requireNotNull(tapPaths)
+                TapRef(
+                    ownerPath = requireNotNull(NodePath.of(owner)) { "owner path out of range" },
+                    tapPath = tapped?.let { path -> requireNotNull(NodePath.of(path)) { "tap path out of range" } },
+                    generation = it.generation,
+                )
+            }
             UiSkeletonDto(
-                schemaId = if (ruleId != null) SkeletonSchema.SCHEMA_ID_MATCHED else SkeletonSchema.SCHEMA_ID_V2,
+                schemaId = when {
+                    tapRef != null -> SkeletonSchema.SCHEMA_ID_CLICKED
+                    ruleId != null -> SkeletonSchema.SCHEMA_ID_MATCHED
+                    else -> SkeletonSchema.SCHEMA_ID_V2
+                },
                 hashDomain = CensusHash.HASH_DOMAIN,
                 filterRev = FILTER_REV,
                 fingerprint = fingerprint,
@@ -341,15 +402,16 @@ object SkeletonBuilder {
                 rulesetFormatVersion = meta.rulesetFormatVersion,
                 day = DAY_FORMAT.format(day),
                 ruleId = ruleId,
+                tap = tapRef,
                 windowTitle = title?.let { frame.slot(it) },
                 root = root,
-            ).let { if (version == SkeletonVersion.V1 && ruleId == null) it.toV1() else it }
+            ).let { if (version == SkeletonVersion.V1 && ruleId == null && tapRef == null) it.toV1() else it }
         } catch (_: IllegalArgumentException) {
             return Outcome.Refused(Refusal.INVALID_ENVELOPE)
         }
         val measured = SkeletonSchema.measure(item)
         if (measured.bytes > SkeletonSchema.MAX_ITEM_BYTES) return Outcome.Refused(Refusal.OVERSIZE)
-        val words = if (collectWords && version == SkeletonVersion.V2 && ruleId == null) reviewWords(tree, pending, title, frame) else null
+        val words = if (collectWords && version == SkeletonVersion.V2 && ruleId == null && tap == null) reviewWords(tree, pending, title, frame) else null
         return Outcome.Built(item, measured.json, measured.bytes, frame.malformedClass, words)
     }
 

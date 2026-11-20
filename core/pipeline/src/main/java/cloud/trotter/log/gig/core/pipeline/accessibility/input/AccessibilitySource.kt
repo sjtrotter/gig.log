@@ -5,9 +5,12 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import cloud.trotter.log.gig.domain.model.accessibility.UiNode
+import cloud.trotter.log.gig.core.pipeline.ClickWindow
 import cloud.trotter.log.gig.core.pipeline.PipelineStats
 import cloud.trotter.log.gig.core.pipeline.accessibility.TreeSnapshot
+import cloud.trotter.log.gig.core.pipeline.accessibility.mapper.toMarkedUiNode
 import cloud.trotter.log.gig.core.pipeline.accessibility.mapper.toUiNode
+import cloud.trotter.log.gig.core.pipeline.census.ClickEvidenceRefusal
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -277,6 +280,41 @@ class AccessibilitySource @Inject constructor(
             )
         }
         return null
+    }
+
+    /**
+     * #1634: the window [source] (a tapped node, still open) belongs to, for click evidence. The root comes from the
+     * node's own window (`getWindow()`, readable under `flagRetrieveInteractiveWindows`), never from a parent climb: a
+     * failed `getParent()` returns null and would make a container look like the root, hiding the screen above it. The
+     * window and its root must both carry [source]'s window id and the root must belong to [eventPackage]; a failed
+     * check is [ClickEvidenceRefusal.NO_WINDOW]. The tree is mapped with the frame caps; a cut tree is NO_WINDOW too, so
+     * a window is never classified from part of itself. [source] must be found exactly once
+     * ([ClickEvidenceRefusal.SOURCE_GONE] when it is not there). [boundary] is the census clear boundary the caller read
+     * before this call. May throw: the caller turns a throw into [ClickEvidenceRefusal.ACQUIRE_FAILED].
+     */
+    fun clickWindow(source: AccessibilityNodeInfo, eventPackage: String?, boundary: Long): ClickAcquisition {
+        val window = source.window ?: return ClickAcquisition.Refused(ClickEvidenceRefusal.NO_WINDOW)
+        val root = window.root ?: return ClickAcquisition.Refused(ClickEvidenceRefusal.NO_WINDOW)
+        if (eventPackage == null || window.id != source.windowId || root.windowId != source.windowId ||
+            root.packageName?.toString() != eventPackage
+        ) {
+            return ClickAcquisition.Refused(ClickEvidenceRefusal.NO_WINDOW)
+        }
+        val marked = root.toMarkedUiNode(source) ?: return ClickAcquisition.Refused(ClickEvidenceRefusal.NO_WINDOW)
+        if (marked.truncated) return ClickAcquisition.Refused(ClickEvidenceRefusal.NO_WINDOW)
+        return when (marked.sourcePaths.size) {
+            0 -> ClickAcquisition.Refused(ClickEvidenceRefusal.SOURCE_GONE)
+            1 -> ClickAcquisition.Acquired(
+                ClickWindow(marked.tree, marked.sourcePaths.single(), window.title?.toString(), boundary),
+            )
+            else -> ClickAcquisition.Refused(ClickEvidenceRefusal.NO_WINDOW)
+        }
+    }
+
+    /** #1634: [clickWindow]'s result: the window, or why there is none. */
+    sealed interface ClickAcquisition {
+        class Acquired(val window: ClickWindow) : ClickAcquisition
+        data class Refused(val reason: ClickEvidenceRefusal) : ClickAcquisition
     }
 
     // --- 3. Multi-Window Support ---

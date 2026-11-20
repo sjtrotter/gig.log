@@ -4,6 +4,8 @@ import cloud.trotter.log.gig.domain.state.Platform
 import cloud.trotter.census.contract.NotifTextField
 import cloud.trotter.census.contract.SkeletonSchema
 import cloud.trotter.log.gig.domain.census.contributor.ReviewWords
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * One census item the publisher hands the sink (#1146). Carries NO timestamp — the skeleton's
@@ -43,7 +45,8 @@ interface CensusSink {
     val isEnabled: Boolean
     /**
      * Non-blocking snapshot of the schema ids this phone may send now: the last server policy's, less the matched schema
-     * while the census consent predates its disclosure (#1573). No policy means screens only.
+     * while the census consent predates its disclosure (#1573), and the clicked schema while it predates the disclosure that
+     * names taps (#1634). No policy means screens only.
      */
     val acceptedSchemaIds: Set<String> get() = setOf(SkeletonSchema.SCHEMA_ID)
     /** #1626: non-blocking snapshot; true while a contributor review could take this frame, so the builder keeps its words. */
@@ -56,8 +59,18 @@ interface CensusSink {
      */
     val clearBoundary: Long get() = 0L
 
+    /**
+     * #1634: true while a tap's window may be read for click evidence: the census is on, the server lists
+     * `uinode.clicked.v1` and the census consent was given under the disclosure that names taps (the same fold as
+     * [acceptedSchemaIds]). A live value the click path reads once per tap; while false the click path reads nothing more.
+     */
+    val clickEvidenceArmed: StateFlow<Boolean> get() = UNARMED
+
     fun offer(record: CensusRecord): Boolean
 
     /** [offer], refused when a census deletion ran after [boundary] was read ([clearBoundary]). */
     fun offer(record: CensusRecord, boundary: Long): Boolean = offer(record)
 }
+
+/** A sink that never arms click evidence. */
+private val UNARMED: StateFlow<Boolean> = MutableStateFlow(false)

@@ -44,6 +44,15 @@ internal class TreeBudget(
     val nodesExhausted: Boolean
         get() = nodes >= maxNodes
 
+    /**
+     * #1634: a breadth short-circuit stopped reading a node's remaining children (the node budget spent, or the
+     * child-index cap) without calling [admit] for them: the tree is cut there too, so it is flagged. Every cap-induced
+     * cut now sets [truncated]; the converted tree itself is unchanged.
+     */
+    fun cutBreadth() {
+        truncated = true
+    }
+
     /** True if a node at [depth] may be ingested; flags truncation otherwise. */
     fun admit(depth: Int): Boolean {
         if (depth > maxDepth || nodes >= maxNodes) {
@@ -98,6 +107,29 @@ fun AccessibilityNodeInfo?.toUiNode(): UiNode? {
 }
 
 /**
+ * #1634: [toUiNode] that also finds [source] in the converted tree. Each live node is compared with [source]
+ * (`AccessibilityNodeInfo.equals`: window id + source node id) while its handle is still open, before the mapper
+ * recycles it, and the match is recorded as its child-index path over the MAPPED children, the indices the converted
+ * tree and every path built from it use. Null when the root does not map. Same caps as a screen frame ([TreeBudget]).
+ */
+fun AccessibilityNodeInfo.toMarkedUiNode(source: AccessibilityNodeInfo): MarkedTree? {
+    val budget = TreeBudget()
+    val mark = SourceMark(source)
+    val root = convert(this, depth = 0, budget = budget, rootPackage = packageName?.toString(), mark = mark) ?: return null
+    budget.logIfTruncated(className)
+    return MarkedTree(root.restoreParents(), mark.matches, budget.truncated)
+}
+
+/** #1634: a converted tree, every path at which the source node was found, and whether a node or depth cap cut it. */
+class MarkedTree(val tree: UiNode, val sourcePaths: List<List<Int>>, val truncated: Boolean)
+
+/** The marking state of one [toMarkedUiNode] walk: the node sought and the path of the node being converted. */
+private class SourceMark(val source: AccessibilityNodeInfo) {
+    val path = ArrayList<Int>()
+    val matches = ArrayList<List<Int>>(1)
+}
+
+/**
  * Text-length cap (#590): a pathological node text can't ride verbatim into the
  * [UiNode] / capture envelope. `take` is safe on any String and a no-op below the
  * cap, so every real screen string is untouched.
@@ -111,11 +143,14 @@ private fun convert(
     budget: TreeBudget,
     rootPackage: String?,
     parentForeign: Boolean = false,
+    mark: SourceMark? = null,
 ): UiNode? {
     // #1149 review V1: a foreign boundary is INHERITED — a same-package node beneath a foreign wrapper is
     // foreign too, exactly as fire-time discovery never descends into the wrapper to reach it.
     val foreign = parentForeign || node.packageName?.toString() != rootPackage
     if (!budget.admit(depth)) return null
+    // #1634: an admitted node always maps, so its path (set by the caller) is its path in the converted tree.
+    if (mark != null && node == mark.source) mark.matches += mark.path.toList()
 
     val childCount = node.childCount
     var nullChildren = 0
@@ -132,12 +167,26 @@ private fun convert(
         //    issues at most MAX_TREE_NODES binder calls (#590 review F1).
         // nodesExhausted stays keyed on node budget (not truncated) so a deep branch
         // hitting the depth cap does NOT suppress this node's shallower siblings.
-        if (budget.nodesExhausted || i >= TreeBudget.MAX_TREE_NODES) break
+        if (budget.nodesExhausted || i >= TreeBudget.MAX_TREE_NODES) {
+            // #1634: children left unread are a cut tree, never a whole one (a click window refuses it as NO_WINDOW).
+            budget.cutBreadth()
+            break
+        }
 
         val childAccNode = node.getChild(i)
         if (childAccNode != null) {
             try {
-                convert(childAccNode, depth + 1, budget, rootPackage, foreign)?.let(children::add)
+                if (mark == null) {
+                    convert(childAccNode, depth + 1, budget, rootPackage, foreign)?.let(children::add)
+                } else {
+                    // The child's index among the MAPPED children: the next slot, filled only if it maps.
+                    mark.path.add(children.size)
+                    try {
+                        convert(childAccNode, depth + 1, budget, rootPackage, foreign, mark)?.let(children::add)
+                    } finally {
+                        mark.path.removeAt(mark.path.size - 1)
+                    }
+                }
             } finally {
                 @Suppress("DEPRECATION") // Required on API 30-32; a no-op on newer Android.
                 childAccNode.recycle()
