@@ -14,7 +14,10 @@ import cloud.trotter.log.gig.core.pipeline.passesContentGates
 import cloud.trotter.log.gig.core.pipeline.ObservationClassifier
 import cloud.trotter.log.gig.core.pipeline.PipelineEvent
 import cloud.trotter.log.gig.core.pipeline.PipelineStats
+import cloud.trotter.log.gig.core.pipeline.ClickWindow
 import cloud.trotter.log.gig.core.pipeline.RecognitionHealthMonitor
+import cloud.trotter.log.gig.core.pipeline.census.ClickEvidenceArming
+import cloud.trotter.log.gig.core.pipeline.census.ClickEvidenceRefusal
 import cloud.trotter.log.gig.core.pipeline.census.SkeletonPublisher
 import cloud.trotter.log.gig.core.pipeline.rules.RuleGeneration
 import cloud.trotter.log.gig.core.pipeline.shadow.ShadowWorker
@@ -22,7 +25,7 @@ import cloud.trotter.log.gig.core.pipeline.accessibility.event.type.window.conte
 import cloud.trotter.log.gig.core.pipeline.accessibility.event.type.window.state_changed.StateChangedPipeline
 import cloud.trotter.log.gig.core.pipeline.accessibility.event.type.window.windows_changed.WindowsChangedPipeline
 import cloud.trotter.log.gig.core.pipeline.accessibility.input.AccessibilitySource
-import cloud.trotter.log.gig.core.pipeline.accessibility.mapper.toUiNode
+import android.view.accessibility.AccessibilityNodeInfo
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
@@ -58,6 +61,8 @@ class AccessibilityPipeline @Inject constructor(
     private val shadowWorker: ShadowWorker,
     /** The event clock (#1573): production binds the system clock; a replay test drives frame times through it. */
     private val clock: Clock = Clock.systemUTC(),
+    /** #1634: whether a tap's window is read for click evidence; [ClickEvidenceArming.OFF] reads none. */
+    private val clickArming: ClickEvidenceArming = ClickEvidenceArming.OFF,
 ) {
     companion object {
         const val SCREEN_PIPELINE_ID = PipelineRegistry.SCREEN_PIPELINE_ID
@@ -96,6 +101,8 @@ class AccessibilityPipeline @Inject constructor(
                     timestamp = clock.millis(),
                     node = node,
                     packageName = event.packageName,
+                    // #1634: read while the source node is still open, before the release below.
+                    window = clickWindow(sourceNode, event.packageName),
                 )
             } catch (e: Exception) {
                 // A failed ref.resolve() must cost one click, not the whole sensing upstream (#430).
@@ -108,6 +115,40 @@ class AccessibilityPipeline @Inject constructor(
                 ref.release()
             }
         }
+
+    /**
+     * #1634: the tap's own window for click evidence, or null. Unarmed, this is one StateFlow read and a counter.
+     * Armed, the census clear boundary is read first, then the window ([AccessibilitySource.clickWindow]). Its own
+     * catch: a failure here costs the evidence, never the click.
+     */
+    private fun clickWindow(sourceNode: AccessibilityNodeInfo, eventPackage: String?): ClickWindow? {
+        if (!clickArming.isArmed()) {
+            stats.onClickedRefused(ClickEvidenceRefusal.UNARMED)
+            return null
+        }
+        return try {
+            val boundary = skeletonPublisher.clearBoundary()
+            when (val acquired = source.clickWindow(sourceNode, eventPackage, boundary)) {
+                is AccessibilitySource.ClickAcquisition.Acquired -> acquired.window
+                is AccessibilitySource.ClickAcquisition.Refused -> {
+                    stats.onClickedRefused(acquired.reason)
+                    Timber.tag("Census").d("click window refused reason=%s", acquired.reason)
+                    null
+                }
+            }
+        } catch (e: Exception) {
+            onClickWindowFailed(e)
+        } catch (e: LinkageError) {
+            // The API-mismatch class the mapper refuses (#1164): deterministic, so it must never restart the flow.
+            onClickWindowFailed(e)
+        }
+    }
+
+    private fun onClickWindowFailed(t: Throwable): ClickWindow? {
+        stats.onClickedRefused(ClickEvidenceRefusal.ACQUIRE_FAILED)
+        Timber.tag("Census").d("click window failed (%s); click unaffected", t.javaClass.simpleName)
+        return null
+    }
 
     // ── Main pipeline ──────────────────────────────────────────────────
 
@@ -220,6 +261,10 @@ class AccessibilityPipeline @Inject constructor(
             // (#1573), masked with the classifying generation's redact.
             if (captured is Observation.Screen && event is PipelineEvent.Screen) {
                 skeletonPublisher.publish(captured, event, classified.redaction, censusBoundary)
+            }
+            // #1634 click evidence: an UNKNOWN tap's own window, classified with the click's generation; fail-open.
+            if (captured is Observation.Click && event is PipelineEvent.Click) {
+                skeletonPublisher.publishClick(captured, event, classified.clickGeneration)
             }
             captured
         }

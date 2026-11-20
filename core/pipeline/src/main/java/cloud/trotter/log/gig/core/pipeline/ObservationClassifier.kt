@@ -277,7 +277,10 @@ class ObservationClassifier @Inject constructor(
         val screenContext = screenContextFor(platformWire)
         val screenTarget = screenContext?.target
         val screenRules = screenContext?.rules ?: RuleGeneration.EMPTY
-        val ruleset = interpreter.generation?.clicks
+        // #1634: ONE generation read per click. Its click rules classify the tap, and it rides along as the click's
+        // generation, so click evidence classifies the tap's own window with the same rules and names that generation.
+        val generation = interpreter.generation
+        val ruleset = generation?.clicks
         if (ruleset != null) {
             val result = ruleset.matchFirst(event.node, platformWire, screenTarget)
             if (result != null) {
@@ -295,7 +298,7 @@ class ObservationClassifier @Inject constructor(
                     transitionOverrides = result.transitionOverrides,
                     screenTarget = screenTarget,
                     screenRuleId = screenContext?.ruleId,
-                ), screenRules)
+                ), screenRules, generation)
             }
         }
 
@@ -320,7 +323,7 @@ class ObservationClassifier @Inject constructor(
             target = UNKNOWN_TARGET,
             screenTarget = screenTarget,
             screenRuleId = screenContext?.ruleId,
-        ), screenRules)
+        ), screenRules, generation)
     }
 
     // ── Notification ────────────────────────────────────────────────────
@@ -386,4 +389,9 @@ class ObservationClassifier @Inject constructor(
 data class Classified<out O : Observation.FlowObservation>(
     val observation: O,
     val redaction: ScreenRedactionSource,
+    /**
+     * #1634: for a click, the generation whose click rules classified it (null when none was loaded); null for every
+     * other kind. Separate from [redaction], which stays the cached screen's generation for the click capture.
+     */
+    val clickGeneration: RuleGeneration? = null,
 )

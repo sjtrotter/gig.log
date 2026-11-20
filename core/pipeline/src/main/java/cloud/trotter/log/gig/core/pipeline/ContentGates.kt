@@ -15,5 +15,12 @@ internal fun passesContentGates(obs: Observation.FlowObservation): Boolean {
     val isNoise = obs.parsed is ParsedFields.NoiseFields
     if (isSensitive) Timber.d("Sensitive gate: dropped %s", obs.target)
     if (isNoise) Timber.v("Noise gate: dropped %s", obs.target)
-    return !isSensitive && !isNoise
+    return passesContentGates(obs.parsed)
 }
+
+/**
+ * The gate's predicate alone, for a parse that is not an observation (#1634: the classification of a tap's own window,
+ * which must refuse exactly what the gate drops). Logs nothing.
+ */
+internal fun passesContentGates(parsed: ParsedFields): Boolean =
+    parsed !is ParsedFields.SensitiveFields && parsed !is ParsedFields.NoiseFields

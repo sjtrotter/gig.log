@@ -47,6 +47,16 @@ class CensusUploadStats @Inject constructor() {
     val platformNotChosen = AtomicLong()
     /** #1573: a matched skeleton over its rule's or the day's limit ([MatchedSkeletons]), counted and not queued. */
     val matchedCapped = AtomicLong()
+    /** #1634: a clicked skeleton kept as its day's candidate ([ClickEvidence]), new or replacing one. */
+    val clickedKept = AtomicLong()
+    /** #1634: a clicked skeleton not kept: its candidate already holds a smaller body, or the day holds 64 smaller keys. */
+    val clickedNotKept = AtomicLong()
+    /** #1634: a clicked skeleton for a day already closed, or older than the kept days, dropped. */
+    val clickedLate = AtomicLong()
+    /** #1634: a clicked skeleton taken before a census deletion or identity reset, dropped at admission. */
+    val clickedStale = AtomicLong()
+    /** #1634: a day's candidates frozen into its one batch after the day ended. */
+    val clickedFrozen = AtomicLong()
     private val rejected = ConcurrentHashMap<String, AtomicLong>()
 
     fun reject(reasons: Map<String, Int>) {
@@ -76,7 +86,11 @@ class CensusUploadStats @Inject constructor() {
             "envelopesRejected" to envelopesRejected,
             "envelopesNotTrusted" to envelopesNotTrusted,
         ).mapValues { it.value.get() }.filterValues { it != 0L }
-        val sampling = linkedMapOf("sampledRepeat" to sampledRepeat, "platformNotChosen" to platformNotChosen, "matchedCapped" to matchedCapped)
+        val sampling = linkedMapOf(
+            "sampledRepeat" to sampledRepeat, "platformNotChosen" to platformNotChosen, "matchedCapped" to matchedCapped,
+            "clickedKept" to clickedKept, "clickedNotKept" to clickedNotKept, "clickedLate" to clickedLate,
+            "clickedStale" to clickedStale, "clickedFrozen" to clickedFrozen,
+        )
             .mapValues { it.value.get() }.filterValues { it != 0L }
         val reasons = rejectedCounts()
         if (sampling.isEmpty() && envelopes.isEmpty() && health.isEmpty() && values.all { it == 0L } && reasons.isEmpty() &&

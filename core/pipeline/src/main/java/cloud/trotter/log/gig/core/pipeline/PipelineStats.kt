@@ -6,6 +6,7 @@ import cloud.trotter.log.gig.domain.state.ParsedFields
 import timber.log.Timber
 import cloud.trotter.log.gig.core.pipeline.accessibility.ForegroundSkipReason
 import cloud.trotter.log.gig.core.pipeline.accessibility.OverlayRejectReason
+import cloud.trotter.log.gig.core.pipeline.census.ClickEvidenceRefusal
 import cloud.trotter.log.gig.core.pipeline.census.NotificationSkeletonBuilder
 import cloud.trotter.log.gig.core.pipeline.census.SkeletonBuilder
 import cloud.trotter.log.gig.core.pipeline.shadow.ShadowStats
@@ -112,6 +113,17 @@ class PipelineStats @Inject constructor(
     private val matchedReleased = AtomicLong()
     private val matchedDropped = AtomicLong()
     private val matchedRefusals: Map<SkeletonBuilder.Refusal, AtomicLong> =
+        EnumMap<SkeletonBuilder.Refusal, AtomicLong>(SkeletonBuilder.Refusal::class.java).apply {
+            SkeletonBuilder.Refusal.entries.forEach { put(it, AtomicLong()) }
+        }
+
+    /** #1634: click evidence offered to the sink, refused (by reason), and clicked builds the builder refused. */
+    private val clickedOffered = AtomicLong()
+    private val clickedRefusals: Map<ClickEvidenceRefusal, AtomicLong> =
+        EnumMap<ClickEvidenceRefusal, AtomicLong>(ClickEvidenceRefusal::class.java).apply {
+            ClickEvidenceRefusal.entries.forEach { put(it, AtomicLong()) }
+        }
+    private val clickedBuildRefusals: Map<SkeletonBuilder.Refusal, AtomicLong> =
         EnumMap<SkeletonBuilder.Refusal, AtomicLong>(SkeletonBuilder.Refusal::class.java).apply {
             SkeletonBuilder.Refusal.entries.forEach { put(it, AtomicLong()) }
         }
@@ -536,6 +548,25 @@ class PipelineStats @Inject constructor(
     fun matchedRefusedCount(reason: SkeletonBuilder.Refusal): Long = matchedRefusals.getValue(reason).get()
     fun censusPublishFailureCount(): Long = censusPublishFailures.get()
 
+    /** #1634: a tap's click evidence was offered to the census sink. */
+    fun onClickedOffered() {
+        clickedOffered.incrementAndGet()
+    }
+
+    /** #1634: a tap produced no click evidence; the click is unaffected. */
+    fun onClickedRefused(reason: ClickEvidenceRefusal) {
+        clickedRefusals.getValue(reason).incrementAndGet()
+    }
+
+    /** #1634: the builder refused a clicked build (a reason other than the sensitive scan or a withheld owner). */
+    fun onClickedBuildRefused(reason: SkeletonBuilder.Refusal) {
+        clickedBuildRefusals.getValue(reason).incrementAndGet()
+    }
+
+    fun clickedOfferedCount(): Long = clickedOffered.get()
+    fun clickedRefusedCount(reason: ClickEvidenceRefusal): Long = clickedRefusals.getValue(reason).get()
+    fun clickedBuildRefusedCount(reason: SkeletonBuilder.Refusal): Long = clickedBuildRefusals.getValue(reason).get()
+
     /** An observation was forwarded to the state machine. */
     fun onForwarded() {
         val n = forwarded.incrementAndGet()
@@ -576,6 +607,7 @@ class PipelineStats @Inject constructor(
             overlayRejectedSuffix() +
             censusSuffix() +
             matchedSuffix() +
+            clickedSuffix() +
             shadow.suffix()
 
     private fun mapperLinkageRefusalsSuffix(): String =
@@ -608,6 +640,14 @@ class PipelineStats @Inject constructor(
         val refused = reasonSuffix(",refused", matchedRefusals)
         if (matchedHeld.get() == 0L && matchedReleased.get() == 0L && matchedDropped.get() == 0L && refused.isEmpty()) return ""
         return " matched{held=${matchedHeld.get()},released=${matchedReleased.get()},dropped=${matchedDropped.get()}$refused}"
+    }
+
+    /** `" clicked{offered=1,refused{…},build{…}}"` (#1634), counts only; absent while every counter is zero. */
+    private fun clickedSuffix(): String {
+        val refused = reasonSuffix(",refused", clickedRefusals)
+        val build = reasonSuffix(",build", clickedBuildRefusals)
+        if (clickedOffered.get() == 0L && refused.isEmpty() && build.isEmpty()) return ""
+        return " clicked{offered=${clickedOffered.get()}$refused$build}"
     }
 
     /**
