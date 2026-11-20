@@ -23,6 +23,7 @@ package cloud.trotter.census.contract
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
@@ -34,8 +35,10 @@ import kotlinx.serialization.json.JsonPrimitive
  * any key it did not know; [requireV1Keys] restores that: a v1 item carrying a v2 key is refused whatever the key's
  * value (`false`, `true`, `null`, `[]`). It runs on the parsed JSON before the typed decode.
  *
- * The same holds for [RULE_ID] (#1573): only a `uinode.matched.v1` item carries it, so a v1 or v2 screen item that
- * sends the key at all, `null` included, is refused (the typed decode would read a `null` as absent).
+ * The same holds for [RULE_ID] (#1573) and [TAP] (#1634): only a `uinode.matched.v1` item carries a `ruleId` and only
+ * a `uinode.clicked.v1` item carries a `tap`, so any other screen item that sends the key at all, `null` included, is
+ * refused (the typed decode would read a `null` as absent). Inside a `tap`, a field is never an explicit `null`: an
+ * absent [TAP_PATH] is omitted, so an item has one wire form.
  */
 internal object V2WireKeys {
     /** v2 node flags. */
@@ -50,15 +53,32 @@ internal object V2WireKeys {
     /** The matched-only top-level key ([SkeletonSchema.SCHEMA_ID_MATCHED]). */
     const val RULE_ID: String = "ruleId"
 
+    /** The clicked-only top-level key ([SkeletonSchema.SCHEMA_ID_CLICKED]) and the keys of its object ([TapRef]). */
+    const val TAP: String = "tap"
+    const val OWNER_PATH: String = "ownerPath"
+    const val TAP_PATH: String = "tapPath"
+    const val GENERATION: String = "generation"
+    private val TAP_FIELDS: List<String> = listOf(OWNER_PATH, TAP_PATH, GENERATION)
+
     /**
-     * Throws when [item] names a v1 schema and carries any v2 key anywhere, or names a v1 or v2 screen schema and
-     * carries a [RULE_ID] key. Any other item passes untouched.
+     * Throws when [item] names a v1 schema and carries any v2 key anywhere, names a screen schema other than the
+     * matched one and carries a [RULE_ID] key, names a screen schema other than the clicked one and carries a [TAP]
+     * key, or carries a [TAP] object with an explicit `null` field. Any other item passes untouched.
      */
     fun requireV1Keys(item: JsonElement) {
         val obj = item as? JsonObject ?: return
         val schema = (obj["schemaId"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return
-        if (RULE_ID in obj && SkeletonVersion.ofScreenSchema(schema) != null) {
-            throw SerializationException("a v1 or v2 screen item carries a rule id")
+        if (SkeletonSchema.bodyVersion(schema) != null) {
+            if (RULE_ID in obj && schema != SkeletonSchema.SCHEMA_ID_MATCHED) {
+                throw SerializationException("only a matched screen item carries a rule id")
+            }
+            if (TAP in obj && schema != SkeletonSchema.SCHEMA_ID_CLICKED) {
+                throw SerializationException("only a clicked screen item carries a tap")
+            }
+            val tap = obj[TAP]
+            if (tap is JsonObject && TAP_FIELDS.any { tap[it] is JsonNull }) {
+                throw SerializationException("a tap field is never an explicit null")
+            }
         }
         val carries = when (schema) {
             SkeletonSchema.SCHEMA_ID -> screenCarriesV2Key(obj)

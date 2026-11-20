@@ -74,7 +74,7 @@ object HealthReportSchema {
     val SHADOW_METRICS: List<String> = listOf("tied", "onUnknown", "emptyParse", "maskFail")
 
     private val DAY = Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}")
-    private val HEX16 = Regex("[0-9a-f]{16}")
+    private val HEX16 = WireTokenGrammars.shortDigest
     private val json = Json { encodeDefaults = false; explicitNulls = false }
 
     fun encode(report: HealthReportDto): String = json.encodeToString(HealthReportDto.serializer(), report)

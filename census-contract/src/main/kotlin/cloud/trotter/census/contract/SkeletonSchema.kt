@@ -24,9 +24,9 @@ import kotlinx.serialization.json.Json
 
 /**
  * The `uinode.skeleton.v1` / `uinode.skeleton.v2` wire schema (ADR-0011 §1, §13; ADR-0003 versioning rules apply;
- * the versions are [SkeletonVersion]), and the matched schema `uinode.matched.v1` ([SCHEMA_ID_MATCHED]) — the census
- * sibling of `UiNodeSchema`. Deliberately NOT a `CaptureSchema`: the contract package depends on
- * nothing outside the JDK, kotlinx-serialization and `sha256OrNull`.
+ * the versions are [SkeletonVersion]), the matched schema `uinode.matched.v1` ([SCHEMA_ID_MATCHED]) and the clicked
+ * schema `uinode.clicked.v1` ([SCHEMA_ID_CLICKED]) — the census sibling of `UiNodeSchema`. Deliberately NOT a
+ * `CaptureSchema`: the contract package depends on nothing outside the JDK, kotlinx-serialization and `sha256OrNull`.
  *
  * Encoding is canonical by construction: declaration-order properties, defaults and nulls omitted,
  * and the builder inserts each node's text keys in `UiNodeTextField` order. Decoding is STRICT — an
@@ -49,6 +49,14 @@ object SkeletonSchema {
      */
     const val SCHEMA_ID_MATCHED: String = "uinode.matched.v1"
 
+    /**
+     * The clicked screen schema (#1634, census#87): a v2 body of the tapped window's tree plus a REQUIRED top-level
+     * `tap` ([TapRef]), the node that was tapped as a path into that body. Separate from the ladder for the same
+     * reason as [SCHEMA_ID_MATCHED]; a v1, v2 or matched item never carries a `tap`, a clicked item never lacks one
+     * and never carries a `ruleId` ([UiSkeletonDto]).
+     */
+    const val SCHEMA_ID_CLICKED: String = "uinode.clicked.v1"
+
     /** Size cap on one item: uncompressed UTF-8 bytes of its serialized JSON, metadata included. */
     const val MAX_ITEM_BYTES: Int = 65_536
 
@@ -60,8 +68,17 @@ object SkeletonSchema {
     fun serialize(item: UiSkeletonDto): String = json.encodeToString(UiSkeletonDto.serializer(), item)
 
     /**
-     * Strict decode; a v1 item carrying any v2 key, or a v1 or v2 item carrying a `ruleId` key, is refused whatever
-     * the value ([V2WireKeys]).
+     * The body version of a screen [schemaId]: the ladder version it names, or [SkeletonVersion.V2] for the matched and
+     * clicked schemas. Null for any other id.
+     */
+    internal fun bodyVersion(schemaId: String): SkeletonVersion? = when (schemaId) {
+        SCHEMA_ID_MATCHED, SCHEMA_ID_CLICKED -> SkeletonVersion.V2
+        else -> SkeletonVersion.ofScreenSchema(schemaId)
+    }
+
+    /**
+     * Strict decode; a v1 item carrying any v2 key, a `ruleId` key on any screen item but a matched one, or a `tap`
+     * key on any screen item but a clicked one, is refused whatever the value ([V2WireKeys]).
      */
     fun deserialize(text: String): UiSkeletonDto {
         // The guard reads a parsed copy; the typed decode stays the strict string decoder it always was.

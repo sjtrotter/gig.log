@@ -50,6 +50,13 @@ enum class SkeletonRejectionReason(val wire: String) {
 
     /** A matched item's `ruleId` is not a rule id of the item's platform ([WireTokenGrammars.isRuleIdFor], #1573). */
     BAD_RULE_ID("bad_rule_id"),
+
+    /**
+     * A clicked item's `tap` does not hold in its tree: a path off the canonical grammar or off the tree, an owner that
+     * takes no click, a tap that is not strictly below its nearest owner, or a generation that is not 16 lowercase hex
+     * ([TapRef], #1634).
+     */
+    BAD_TAP_REF("bad_tap_ref"),
     ;
 
     companion object {
