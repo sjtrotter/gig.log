@@ -252,6 +252,12 @@ jobs:
         if: ${{ !cancelled() && env.RUN_GATE == 'true' }}
         run: python3 -I -m unittest discover -s tools/feeds -p 'test_*.py'
 
+      - name: State outline generator tests
+        # #1687 — the generator of the bundled state outlines (domain/src/main/resources/fuel/state-outlines.bin): a
+        # hand-built two-square shapefile round trip, stdlib only. Well under a second; every run, drafts included.
+        if: ${{ !cancelled() && env.RUN_GATE == 'true' }}
+        run: python3 -I -m unittest discover -s tools/fuel-areas -p 'test_*.py'
+
       # #1463 — light and dark pictures of the key screens, recorded only and never compared. They
       # render after the gate's results are uploaded and write their JUnit XML to their own
       # directory (build/test-results/screenshots), so the gate's results are never replaced. They
