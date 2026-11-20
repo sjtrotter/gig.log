@@ -48,7 +48,7 @@ class CensusSkeletonSchemaTest {
         assertEquals(
             listOf(
                 SkeletonSchema.SCHEMA_ID, NotificationSkeletonSchema.SCHEMA_ID, SkeletonSchema.SCHEMA_ID_V2,
-                NotificationSkeletonSchema.SCHEMA_ID_V2, SkeletonSchema.SCHEMA_ID_MATCHED,
+                NotificationSkeletonSchema.SCHEMA_ID_V2, SkeletonSchema.SCHEMA_ID_MATCHED, SkeletonSchema.SCHEMA_ID_CLICKED,
             ),
             CensusSkeletonSchema.SUPPORTED_SCHEMA_IDS,
         )

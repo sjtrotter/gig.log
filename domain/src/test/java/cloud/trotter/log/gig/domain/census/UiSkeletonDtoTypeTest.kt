@@ -3,6 +3,7 @@ package cloud.trotter.log.gig.domain.census
 import cloud.trotter.census.contract.CensusFingerprint
 import cloud.trotter.census.contract.CensusHash
 import cloud.trotter.census.contract.SkeletonSchema
+import cloud.trotter.census.contract.TapRef
 import cloud.trotter.census.contract.TextSlot
 import cloud.trotter.census.contract.UiSkeletonDto
 import cloud.trotter.census.contract.UiSkeletonNodeDto
@@ -39,6 +40,8 @@ class UiSkeletonDtoTypeTest {
         // census-own, `uinode.matched.v1` only: our own rule id, held to the rule-id grammar under the item's platform (#1573)
         "ruleId",
     )
+    /** `uinode.clicked.v1` only (#1634): two node paths and a 16-hex generation, each held to its grammar by [TapRef]. */
+    private val tapStrings = setOf("ownerPath", "tapPath", "generation")
     private val envelopeInts = setOf(
         "engineVersion", "rulesetFormatVersion", // ReplayMetadata's own names
         "filterRev", "hashDomain", // census-own
@@ -56,6 +59,8 @@ class UiSkeletonDtoTypeTest {
         assertEquals(slotStrings, TextSlot.serializer().descriptor.stringElements())
         assertEquals(envelopeStrings, UiSkeletonDto.serializer().descriptor.stringElements())
         assertEquals(envelopeInts, UiSkeletonDto.serializer().descriptor.intElements())
+        assertEquals(tapStrings, TapRef.serializer().descriptor.elementNames.toSet())
+        assertEquals(tapStrings, TapRef.serializer().descriptor.stringElements())
     }
 
     @Test
@@ -66,7 +71,7 @@ class UiSkeletonDtoTypeTest {
         )
         assertEquals(slotStrings, TextSlot.serializer().descriptor.elementNames.toSet())
         assertEquals(
-            envelopeStrings + envelopeInts + setOf("windowTitle", "root"),
+            envelopeStrings + envelopeInts + setOf("tap", "windowTitle", "root"),
             UiSkeletonDto.serializer().descriptor.elementNames.toSet(),
         )
     }
@@ -104,6 +109,7 @@ class UiSkeletonDtoTypeTest {
         assertEquals(setOf("className", "id"), stringProps(UiSkeletonNodeDto::class))
         assertEquals(slotStrings, stringProps(TextSlot::class))
         assertEquals(envelopeStrings, stringProps(UiSkeletonDto::class))
+        assertEquals(tapStrings, stringProps(TapRef::class))
     }
 
     @Test

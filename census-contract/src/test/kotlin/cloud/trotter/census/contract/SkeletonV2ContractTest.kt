@@ -207,7 +207,10 @@ class SkeletonV2ContractTest {
     fun `the newest accepted version is chosen per kind`() {
         val all = CensusSkeletonSchema.SUPPORTED_SCHEMA_IDS
         assertEquals(
-            listOf("uinode.skeleton.v1", "notification.skeleton.v1", "uinode.skeleton.v2", "notification.skeleton.v2", "uinode.matched.v1"),
+            listOf(
+                "uinode.skeleton.v1", "notification.skeleton.v1", "uinode.skeleton.v2", "notification.skeleton.v2",
+                "uinode.matched.v1", "uinode.clicked.v1",
+            ),
             all,
         )
         assertEquals(SkeletonVersion.V2, SkeletonVersion.newestScreen(all))
