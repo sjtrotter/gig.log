@@ -235,7 +235,10 @@ class SkeletonPublisher @Inject constructor(
     /**
      * #1634: the click evidence of an UNKNOWN tap (a recognized tap sends nothing): the `uinode.clicked.v1` skeleton of
      * the tap's own window ([PipelineEvent.Click.window], read at click time) with the tapped button as a position in it.
-     * Post-admission, after the click capture; fail-OPEN, so nothing here can cost the click.
+     * Called for every tap that passed the content and platform gates, BEFORE `FrameGate`: its UNKNOWN suppressor keys a
+     * tap on the detached node and the cached screen target, which would keep only the first of two taps in different
+     * windows or on different owners. The store's selection is order-free instead. Fail-OPEN, so nothing here can cost
+     * the click.
      *
      * The window is classified with [clickGeneration] (the generation whose click rules classified the tap) through a
      * pure match: no cached screen context, frame gate, health or shadow state is read or written. A sensitive or noise

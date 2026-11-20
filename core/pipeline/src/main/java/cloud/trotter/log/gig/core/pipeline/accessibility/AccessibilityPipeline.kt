@@ -206,6 +206,14 @@ class AccessibilityPipeline @Inject constructor(
                     clickDedupHash(event.node, (obs as? Observation.Click)?.screenTarget)
                 else -> null
             }
+            // #1634 click evidence, BEFORE the gate: FrameGate's UNKNOWN suppressor keys a tap on its detached node and
+            // the cached screen target, so taps in different windows or on different owners would collide there and
+            // the first to arrive would win. Every UNKNOWN tap with a window reaches the evidence store, whose own
+            // selection is order-free; recognition and capture dedup are untouched. Fail-open and cheap: a tap with no
+            // window (unarmed, or the read refused) returns at once, and the publisher catches everything else.
+            if (obs is Observation.Click && event is PipelineEvent.Click) {
+                skeletonPublisher.publishClick(obs, event, classified.clickGeneration)
+            }
             if (!frameGate.admit(obs, contentHash)) {
                 stats.onDuplicateSuppressed()
                 Timber.v("Dedup: suppressed %s", obs.target)
@@ -261,10 +269,6 @@ class AccessibilityPipeline @Inject constructor(
             // (#1573), masked with the classifying generation's redact.
             if (captured is Observation.Screen && event is PipelineEvent.Screen) {
                 skeletonPublisher.publish(captured, event, classified.redaction, censusBoundary)
-            }
-            // #1634 click evidence: an UNKNOWN tap's own window, classified with the click's generation; fail-open.
-            if (captured is Observation.Click && event is PipelineEvent.Click) {
-                skeletonPublisher.publishClick(captured, event, classified.clickGeneration)
             }
             captured
         }
