@@ -17,32 +17,32 @@
    - Likely cause (lead-verified in code): a click never drives mode. `PlatformRegionStepper.kt` reads "Click — records user intent, does NOT drive mode", so the go_offline click arms no end. The rule comments in `matchers/rules/uber.json5` (the #857 `idle_map` comment and the #874 `home_dashboard` comment) assume deliberate toggles "ride the go_offline click". The code does not do that.
    - At 20:28 the end worked because the "You're offline" frame came 1.1 s after the tap and the dasher stayed on it. At 12:02 the dasher switched apps before that frame could come.
    - Evidence that Uber really went offline at 12:02: no Uber offer for 7.5 h, against one every 10 to 30 s in the 19:30 burst, and Uber showed its offline home at 19:30:03.
-   - **Status:** Open. Issue drafted, not filed.
+   - **Status:** Open (#1697).
 2. **Going online after the long gap cancelled the stale shift's end instead of ending it.**
    - At 19:30:03 the inset offline home armed the stale shift's end. The GO tap came at 19:30:06 and the "Finding trips" sheet at 19:30:10; an online frame cancels an end armed by an Offline edge, so the real evening shift merged into the noon one.
    - Miles: the merged Uber row claims 83.45 mi. About 57 mi of it (16.65 and 40.62) is the same driving as the two DoorDash shifts, 12.93 mi is off-shift driving between 14:10 and 16:58, and about 13 mi is Uber work. The developer's own odometer readings in that gap show 12 mi against 11.40 GPS miles, so the GPS was accurate and the booking was wrong. The overlap half is #1507's double count; the off-shift half comes from bug 1.
    - One possibility: an Offline-edge end standing after a long stretch with no frame from that platform is evidence the old shift ended, and a resume should commit it at its last evidence (12:02:45 here) before a new shift starts.
-   - **Status:** Open. Issue drafted, not filed.
+   - **Status:** Open (#1698).
 3. **The one Uber delivery was not recorded (#826).** The $20.09 offer was presented at 19:33:58 and 19:34:08; no accept click reached the app, not even a textless one. `active_trip` names no store, so the #1119 pool held the store-less work frame and then minted a bare job with no tasks at 19:34:28. Four offers from the same fast-food store sat in the pool (two at $6.54, two presentations of the $20.09). No delivery-confirmation or post-trip screen was recognized. At shift end the accepted offer ended `OFFER_NOT_TAKEN` and the Uber row shows $0. The "Going to <store>" and "Arrived at <store>" pushes carry the store name, but `trip_en_route_pickup` parses no `storeName`.
-   - **Status:** Open (#826, #1600). Comment drafted, not posted.
+   - **Status:** Open (#826, #1600). Evidence added to #826.
 4. **Uber pay notifications are not read, and two pushes after the trip were dropped without a trace.**
    - The tip push at 20:28:06 ("You've received a $8.68 tip!") matched `uber.notification.tip_received`, which has no amount parse. Nothing reached the delivery or a receipt row.
    - Lead-verified finding: two Uber notifications after the trip, one a fraction of a second after the tip push (20:28:06.434) and one at 20:47:47, were admitted by the listener and then dropped. Either the duplicate gate or the sensitive/noise content gate dropped them (`NotificationPipeline.kt`), and nothing logs which gate, nor the text. The evening's `PipelineStats` summary lines stop at 14:09, so the counters cannot say either.
    - Hypothesis: those two were the developer's ~$11 fare and ~$3 pushes (developer observation 3). Against it: the desk report read the 20:28:06.434 one as a repost of the tip push, and Uber's own screens at 20:51 show $20.09 with no $3 line.
    - The $8.68 tip is already inside the offer's "Guaranteed (incl. tip)" $20.09, so adding a tip push on top would count it twice.
-   - **Status:** Open. Issue drafted, not filed.
+   - **Status:** Open (#1702).
 5. **"Must verify ID" was read as the store.** On two Uber offers (12:01:22, a liquor store; 19:32:26, a big-box store) the ID-check chip won `storeName` in `uber.screen.offer`, in both the display copy and the `orders[]` copy. The voice said "Offer. Must verify ID.", the chat line and `offer_records.merchantName` say the same, and both offers share presentation key `7e728b89…`, a false-merge risk under the #1069 identity rule. The chip sits above the store line and is not on the exclusion list. The Trip Radar board rule already lists it as chrome.
-   - **Status:** Open. Issue drafted, not filed.
+   - **Status:** Open (#1700).
 6. **A whole-dollar Uber offer ("$10") fell to UNKNOWN, and its X tap was booked to the card before it.** A restaurant offer at $10 was on screen 19:30:57 to 19:31:13. The offer rule requires `\$\d+\.\d{2}`, so all three of its frames went UNKNOWN. The X tap at 19:31:15 was recorded as a decline of the previous card (a pharmacy offer, $8.37).
-   - **Status:** Open. Issue drafted, not filed.
+   - **Status:** Open (#1701).
 7. **Two Uber offline screens are unrecognized.** At 20:28:52 the full-map status sheet read a promo line ("It's dinner time") where "You're offline" sits, with no GO button, so `idle_map` fails all three of its positive arms. At 20:28:04 the "Your session (7:30 PM - 8:28 PM)" summary sheet (pay, trips completed, trips offered) went UNKNOWN because `uber.screen.session_summary` requires "Session summary". Candidate anchor for the first: `agenda_feed_content_view` beside `status_assistant`, present on 4 of 4 offline sheet frames (2 here, 2 in the corpus) and on none of 42 online, on-trip or splash frames. Four is a thin sample.
-   - **Status:** Open. Issue drafted, not filed.
+   - **Status:** Open (#1699).
 8. **DoorDash shift 1 is short $25.73: a stale pooled offer tied with the real accept.** A 12:01 grocery offer ran out its countdown while the dasher was declining Uber offers, so DoorDash's decline sheet was never seen and #1610's demotion did not apply. It stayed a candidate. At 13:11 the dasher accepted an offer at the same chain; it re-rendered as UNKNOWN frames without Accept and left by the expiry timer. At 13:12:21 the two tied (`#1119 2 pooled offers tie`). The receipt ($25.73) stayed unproven (`OFFER_COUNT`) and placed nothing, as #1598 intends.
-   - **Status:** Open. Issue drafted, not filed.
+   - **Status:** Open (#1704).
 9. **DoorDash shift 2 is short $8.50: an add-on's drop merged into another drop.** A three-store job (two offers plus an add-on accepted at 18:56:42) had three customers but two delivery rows. One drop navigated and arrived as the add-on's store and customer, then confirmed and completed as another store's. Recorded $20.75 against $29.25 of offers. `#1458 job … left open … outstanding=1` at 19:26:05; #997 `STAMP_FALLBACK`.
-   - **Status:** Open (#1600, #1489). Comment drafted, not posted.
+   - **Status:** Open (#1600, #1489). Evidence added to #1600.
 10. **Raw customer PII in UNKNOWN Uber debug captures.** A customer's first name and last initial inside a tapped order-card button (click at 19:36:06), a customer's drop-off street and city on three Trip Details frames (20:47:51, 20:47:57, 20:47:59), and cross-street lines on three offer-card partials (19:30:57 twice, 19:33:32). Debug captures only. Lead-verified: the census received layouts and hashed text only; its cluster JSON holds no text fields.
-    - **Status:** Open. Issue drafted, not filed.
+    - **Status:** Open (#1703).
 
 ### Developer observations
 
