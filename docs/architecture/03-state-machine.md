@@ -339,6 +339,39 @@ existing path. Accepted residual (#1697): if Uber refuses to go offline and no o
 the 10 s grace, the end commits, and the next Uber offer starts a new shift. Neither intent is load-validated yet
 (click intents are #1322); `TriageRulesTest` pins both rules to their constants.
 
+**A stale shift ends at the offline screen (#1698).** On 11-20 an Uber shift stayed open from noon (the #1697 gap);
+for 7.5 h no Uber screen arrived, then Uber's offline home armed the ordinary end, the dasher tapped GO, and
+"Finding trips" seven seconds later hit the Offline→Online arm that treats any non-authoritative standing end as a
+transient flash and cancels it. The evening shift merged into the noon one. The rule (`StaleShiftEnd.kt`):
+
+- **Anchor.** `PlatformRegion.lastOnlineEvidenceAt` is the `obs.timestamp` of the live shift's latest own
+  `Observation.Screen` whose flow is non-null and resolves to Online (offers and task flows included). Clicks,
+  notifications (a promo push), timeouts and flow-less frames never stamp; a foreign platform's observation never
+  reaches the region. It never moves backwards and is cleared at both session boundaries (`endSession` and the mint
+  in `applyModeTransition`), so each shift measures from its own evidence. `stampOnlineEvidence` runs in the step
+  wrapper after `stepCore`, so the offline edge reads the anchor as it stood before the frame. Default null: an older
+  snapshot, or a shift with no online screen yet, declines the rule.
+- **Threshold.** `GraceConfig.staleShiftSilenceMs` through `TransitionPolicy.staleShiftSilenceMs(platform)`, null =
+  disabled. Uber = 30 min (fielded Uber offers arrive every 10 to 30 s while online); DoorDash and the default are
+  null. Silence alone never ends a shift; only a positive offline screen after it does.
+- **Arm.** At the screen-driven Online→Offline edge of a live shift, a silence of at least the threshold arms the
+  same `armSessionEndGrace` with `authoritative = true`: ordinary grace, `since` = the offline frame (the first
+  observed end evidence; never backdated to the anchor, which would erase unseen working time and move the #1311
+  window). A Paused region keeps its countdown and pause-safety path, and a short flash inside a live shift (recent
+  anchor) arms the ordinary end that a resume cancels. One DEBUG line (tag `StateMachine`): platform, session id,
+  silence, threshold.
+- **Then.** Every reader of `authoritative` behaves as for the summary's end minus the summary fields: a resume does
+  not cancel it, a task-flow screen does (#431), the #1311 hint path arms the next shift's graced start from the
+  first "Finding trips" frame, the end commits at the offline frame (`DASH_STOP`, `early_offline`), and the new
+  shift starts at the first hint. A later summary tightens it as usual.
+
+Residuals. Miles: a session's recorded miles are the odometer at commit minus its start anchor, so miles driven
+during the silence stay on the old shift; an odometer witness at each evidence observation is a follow-up beside
+#1507. Replay: a journal tail recorded before this rule shipped replays through it, so a tail holding both a 30-min
+Uber silence and an offline frame would replay to a different end than the live run recorded (no schema bump; the
+single-user alpha accepts it). A shift started by a `MODE_RESUME_COMMIT` wake has no anchor until its first online
+screen after the start.
+
 **Graces.** Destructive commits are graced through the unified `pendingDestructive` slot and woken
 by `GRACE_COMMIT` timers (#431), including short authoritative windows for the dash summary AND the
 delivery receipt, plus `JOB_ABANDON` after unassign → marked no-orders idle (#1312,

@@ -90,6 +90,7 @@ Five items the dev confirmed on 2026-10-07. Each full item appears once, with it
 - [Going offline is seen on the offline home drawn without its Dash button (#1668)](checklist/open/1668-offline-home-without-dash-button.md)
 - [The End dash tap ends a shift that earned nothing (#1668)](checklist/open/1668-end-dash-tap-ends-shift.md)
 - [Uber's GO OFFLINE tap ends the Uber shift (#1697)](checklist/open/1697-uber-go-offline-tap-ends-shift.md)
+- [A stale Uber shift ends at Uber's offline screen (#1698)](checklist/open/1698-stale-shift-ends-at-offline-screen.md)
 - [The waiting-for-offers screen is recognized without its "Finding offers" card (#1669)](checklist/open/1669-waiting-without-finding-offers-card.md)
 
 - [🆕 NEW — after a GPS dash, the delivery drill-down's rows carry an arrival odometer and…](checklist/open/1310-after-a-gps-dash-the-delivery-drill-down-s-rows.md)
