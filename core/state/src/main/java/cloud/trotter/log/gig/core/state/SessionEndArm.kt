@@ -90,6 +90,9 @@ internal fun Task.honoredRetireInstant(since: Long): Long =
  * Arms only over a live session with no `SESSION_END` already standing, so a second signal never
  * moves `since` or the deadline.
  *
+ * [authoritative] (#1698): the offline edge after a stale silence ([StaleShiftEnd]) arms the same
+ * grace marked authoritative, so a resume cannot cancel it; the timing is unchanged.
+ *
  * #1078: this arm used to OVERWRITE a standing `TASK_RETIRE` with `SESSION_END` (the loss documented
  * as a #1076 gap) — the retire's evidence simply vanished and the eventual teardown force-stamped an
  * unqualified completion. Absorb the retire's `since` so `endSession` can honor it, through the SAME
@@ -101,6 +104,7 @@ internal fun PlatformRegion.armSessionEndGrace(
     at: Long,
     policy: TransitionPolicy,
     byTap: Boolean = false,
+    authoritative: Boolean = false,
 ): PlatformRegion {
     if (session == null || pendingDestructive?.kind == DestructiveKind.SESSION_END) return this
     val absorbed = absorbableRetire()
@@ -114,6 +118,7 @@ internal fun PlatformRegion.armSessionEndGrace(
             absorbedRetireDeadline = absorbed?.deadline,
             wakeId = wakeId,
             armedByTap = byTap,
+            authoritative = authoritative,
         )
     }
 }

@@ -124,6 +124,22 @@ class SerializationRoundTripTest {
         assertNull(StateJson.decodeFromString<PlatformRegion>("""{"platform":"DoorDash"}""").receiptExpandSeenAt)
     }
 
+    @Test
+    fun `#1698 the online-evidence anchor round-trips, and an old region blob decodes it null`() {
+        val region = PlatformRegion(platform = Platform.Uber, lastOnlineEvidenceAt = 1_300L)
+        assertEquals(region, StateJson.decodeFromString<PlatformRegion>(StateJson.encodeToString(region)))
+        assertNull(StateJson.decodeFromString<PlatformRegion>("""{"platform":"Uber"}""").lastOnlineEvidenceAt)
+        val start = PendingModeResume(
+            since = 1_000L, deadline = 9_000L, evidenceAt = 1_200L,
+            wakeId = PlatformRegion(Platform.Uber, wakeSeq = 6L).mintWakeId().second,
+        )
+        assertEquals(start, StateJson.decodeFromString<PendingModeResume>(StateJson.encodeToString(start)))
+        assertNull(
+            "a pending start written before #1698 decodes with no evidence",
+            StateJson.decodeFromString<PendingModeResume>("""{"since":1000,"deadline":9000,"wakeId":7}""").evidenceAt,
+        )
+    }
+
     private val parsedTime = ParsedTime(text = "5:39 PM", time = 1_000_000L)
 
     private fun allSubtypes(): List<ParsedFields> = listOf(
@@ -247,6 +263,7 @@ class SerializationRoundTripTest {
                         lastPostTaskFields = ParsedFields.PostTaskFields(totalPay = 9.75),
                         mintCounter = 3L,
                         lastObservedAt = 1_000L,
+                        lastOnlineEvidenceAt = 950L,
                     ),
                 ),
             ),
@@ -308,7 +325,7 @@ class SerializationRoundTripTest {
             """{"value":16.7,"since":1000,"deadline":4000,"flow":"Idle","unconfirmed":false,"wakeId":7}""",
         )
         assertWakeJson<PendingModeResume>(
-            """{"since":1000,"deadline":9000,"wakeId":7,"idleFields":null}""",
+            """{"since":1000,"deadline":9000,"wakeId":7,"idleFields":null,"evidenceAt":null}""",
         )
         assertWakeJson<PendingWake>("""{"deadline":9000,"wakeId":7}""")
         assertWakeJson<PendingDestructive>(

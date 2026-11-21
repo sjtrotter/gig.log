@@ -28,6 +28,16 @@ import cloud.trotter.log.gig.domain.state.UNKNOWN_STORE
  * `retireActiveTask`, `endSession` — deliberately stays in `PlatformRegionStepper.kt`; the lineage
  * family lives in the sibling `TaskLineage.kt`.
  */
+/**
+ * #1698: an own phase-less task screen (`task:active`, Uber's on-job view) is work on screen, so it cancels a standing
+ * `SESSION_END` as a phased task frame's update does (#431); without this an authoritative end outlived the work.
+ * A pending `TASK_RETIRE` is untouched: an interposed `task:active` frame still neither cancels nor commits it (#762).
+ */
+private fun phaseLessWorkCancelsShiftEnd(region: PlatformRegion, obs: Observation.FlowObservation): PlatformRegion =
+    if (obs is Observation.Screen && obs.flow?.isTaskFlow() == true &&
+        region.pendingDestructive?.kind == DestructiveKind.SESSION_END
+    ) region.copy(pendingDestructive = null) else region
+
 internal fun PlatformRegionStepper.updateTaskLifecycle(
     sink: DecisionSink,
     region: PlatformRegion,
@@ -53,7 +63,7 @@ internal fun PlatformRegionStepper.updateTaskLifecycle(
 
     // Task flow → create or update active task
     if (nextFlowVal.isTaskFlow()) {
-        val taskPhase = nextFlowVal.toTaskPhase() ?: return region
+        val taskPhase = nextFlowVal.toTaskPhase() ?: return phaseLessWorkCancelsShiftEnd(region, obs)
         val taskSubFlow = nextFlowVal.toTaskSubFlow() ?: return region
         val taskFields = parsed as? ParsedFields.TaskFields
 
