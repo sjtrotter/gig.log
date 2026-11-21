@@ -93,10 +93,11 @@ class PlatformRegionStepper @Inject constructor() {
         policy: TransitionPolicy,
     ): PlatformStep {
         val sink = DecisionSink()
+        // #1698: the online-evidence stamp runs after stepCore, so the offline edge reads the pre-frame anchor.
         // #1460: the receipt episode ends on any frame that is neither the receipt nor its offer
         // overlay. Run here, after stepCore (whose receipt entry reads and writes the key), so no
         // early return can skip it; the edge is this region's acted flow before the frame.
-        val stepped = stampLastActedFlow(
+        val stepped = StaleShiftEnd.stampOnlineEvidence(stampLastActedFlow(
             // #438 B3: the offer lifecycle runs FIRST, on THIS platform's owned pendingOffers, so an
             // accept-latched offer is marked accepted-pending-consumption before stepCore's task edge
             // consumes it (the old armAcceptStash mirror, run AFTER stepCore, is retired).
@@ -121,7 +122,7 @@ class PlatformRegionStepper @Inject constructor() {
                 ).let { requestArrivalEstimate(it, obs) },
             ),
             obs,
-        )
+        ), obs, policy)
         val actedPrev = actedFlowEdge(prev, prevFlow, obs).first
         // #1598: the receipt evidence episode ends on the same frames as the #1460 key; #1672: so does the expand mark.
         val region = receiptExpandEpisode(
@@ -467,7 +468,8 @@ class PlatformRegionStepper @Inject constructor() {
                     // Grace active + the same session is still present → a genuine
                     // resume (a transient offline flash). A real new-dash start
                     // would already have committed the end in step() (startingSession).
-                    // An AUTHORITATIVE pending (armed by the dash summary, #431) is
+                    // An AUTHORITATIVE pending (armed by the dash summary, #431, or by a
+                    // stale shift's offline screen, #1698) is
                     // deliberately NOT cancelled here: a post-summary online flash
                     // must not resurrect a really-ended session. Only a task-flow
                     // observation cancels it (updateTaskLifecycle).
@@ -482,14 +484,15 @@ class PlatformRegionStepper @Inject constructor() {
                             startedAt = startedAt,
                         ),
                         mintCounter = region.mintCounter + 1,
+                        lastOnlineEvidenceAt = null, // #1698: the new shift measures from its own evidence
                     ))
                 }
             }
             prev.mode != Mode.Offline && newMode == Mode.Offline -> {
-                // Non-authoritative offline — arm a provisional dash-end, keeping
-                // the session alive until it's confirmed or cancelled (one armer with the
-                // end-shift tap, #1668; it absorbs a standing retire, #1078).
-                region = region.armSessionEndGrace(obs.timestamp, policy)
+                // Offline — arm a provisional dash-end, keeping the session alive until it's
+                // confirmed or cancelled (one armer with the end-shift tap, #1668; it absorbs a
+                // standing retire, #1078). Authoritative after a stale silence (#1698).
+                region = StaleShiftEnd.armAtOfflineEdge(prev, region, obs, policy)
             }
         }
 
@@ -1193,6 +1196,7 @@ class PlatformRegionStepper @Inject constructor() {
             openReceiptEvidence = null,
             // #1601: the closed-job settlement marker belongs to the shift that just ended.
             closedJobSettlement = null,
+            lastOnlineEvidenceAt = null, // #1698
         ))
     }
 

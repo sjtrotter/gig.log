@@ -128,6 +128,10 @@ class TransitionPolicy @Inject constructor(
     fun storelessHoldFrames(platform: Platform): Int =
         graceConfig.forPlatform(platform).storelessHoldFrames
 
+    /** #1698: the silence after which an offline screen ends the shift for good on [platform]; null = disabled. */
+    fun staleShiftSilenceMs(platform: Platform): Long? =
+        graceConfig.forPlatform(platform).staleShiftSilenceMs
+
     /**
      * Determine what mode a flow + modeHint combination implies.
      * Returns null if no mode signal is present.

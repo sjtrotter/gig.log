@@ -106,6 +106,13 @@ data class GraceConfig(
     val storelessHoldMs: Long = STORELESS_HOLD_MS,
     /** #1119 S2: the most task-flow frames a store-less hold spans, the held frame included. */
     val storelessHoldFrames: Int = STORELESS_HOLD_FRAMES,
+    /**
+     * #1698: how long an Online shift may go without its own online screen before the next offline screen ends it
+     * for good. At or past this silence, the offline edge arms the shift end authoritative, so a resume cannot cancel
+     * it and the next online screen starts a new shift. Null disables the rule: the offline edge arms the ordinary
+     * end that a resume cancels. Silence alone never ends a shift; only the offline screen after it does.
+     */
+    val staleShiftSilenceMs: Long? = null,
 ) {
     companion object {
         const val JOB_ABANDON_GRACE_MS = 5_000L
@@ -153,18 +160,28 @@ data class GraceConfig(
          */
         const val UBER_ACCEPT_GRACE_MS = 600_000L
 
+        /**
+         * Uber's stale-shift silence (#1698): 30 min. Fielded Uber offers arrive every 10 to 30 s while the dasher
+         * is online, so half an hour with no online screen is far outside an ordinary online stretch.
+         */
+        const val UBER_STALE_SHIFT_SILENCE_MS = 1_800_000L
+
         /** Code-constant default applied to any platform without an override. */
         val DEFAULT = GraceConfig()
 
         /**
          * Per-platform **code defaults** (before any user override), keyed by [Platform] (Principle
          * 8 — data keyed by platform, never `== Platform.X` in logic). A platform absent here uses
-         * [DEFAULT]; the only current divergence is Uber's wider [acceptGraceMs]. A future
+         * [DEFAULT]; the current divergences are Uber's wider [acceptGraceMs] and its
+         * [staleShiftSilenceMs] (#1698, null for every other platform). A future
          * per-platform grace editor's DataStore override still wins over this in
          * [GraceConfigProvider.forPlatform].
          */
         private val CODE_DEFAULTS: Map<Platform, GraceConfig> = mapOf(
-            Platform.Uber to GraceConfig(acceptGraceMs = UBER_ACCEPT_GRACE_MS),
+            Platform.Uber to GraceConfig(
+                acceptGraceMs = UBER_ACCEPT_GRACE_MS,
+                staleShiftSilenceMs = UBER_STALE_SHIFT_SILENCE_MS,
+            ),
         )
 
         /** The code default for [platform] — its [CODE_DEFAULTS] entry, else [DEFAULT]. */

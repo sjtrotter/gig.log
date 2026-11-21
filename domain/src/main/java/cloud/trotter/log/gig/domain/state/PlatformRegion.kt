@@ -329,6 +329,14 @@ data class PlatformRegion(
     val acceptResolveSeq: Long = 0,
     /** #1601: the just-closed job's settlement marker; see [ClosedJobSettlement]. Cleared at `endSession`. */
     val closedJobSettlement: ClosedJobSettlement? = null,
+    /**
+     * #1698: the `obs.timestamp` of the live shift's latest own screen that implied Online (offers and task flows
+     * included). Clicks, notifications, timeouts and flow-less frames never set it, and it never moves backwards.
+     * Cleared when a shift ends or starts, so each shift measures from its own evidence. The stale-shift rule reads it
+     * at the Online→Offline edge (`StaleShiftEnd`). It measures the last online evidence, not when the shift really
+     * ended. Default null, so an older snapshot decodes and the rule declines.
+     */
+    val lastOnlineEvidenceAt: Long? = null,
 ) {
     /**
      * This platform's current PRESENTED offer — the accepted-pending-consumption survivors
@@ -695,6 +703,10 @@ data class PendingDestructive(
      * online-resume — a post-summary online flash must not resurrect a
      * really-ended session. Only a task-flow observation (unambiguously
      * still dashing) cancels them.
+     *
+     * #1698: a `SESSION_END` armed by an offline screen after a stale silence (`StaleShiftEnd`)
+     * is authoritative too, with the ordinary grace and no summary fields: the resume that
+     * follows starts a new shift instead of cancelling the end.
      */
     val authoritative: Boolean = false,
     /**
