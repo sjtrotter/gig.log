@@ -21,4 +21,5 @@ issues: #1152, #251, #826
      #826.) With Uber DISABLED, an Uber offer must NOT pause DoorDash frames at all.
   5. `overlayScans=` in the summary shows how often the window list is read for this feature.
   - Issue: #1152. Confirmed: 0/2
+    - desk 11-21 (pull of the 11-20 shifts, build `c4ada68c`, DoorDash 8.108.11, Uber 4.606.10000): `overlaySnapshots=84` and Uber offers were recognized from the overlay, seen working in the 11-20 pull, awaiting the developer's confirmation. Counter unchanged.
   Triage source: first-line blame 2026-09-30 (`45b08c27e`, original README L279).

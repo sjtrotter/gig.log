@@ -33,5 +33,6 @@ issues: #882, #881
   stack shows across re-renders, the desk can finally settle whether identity may follow the store
   (today it deliberately does not).
   - Confirmed: 0/2
+    - desk 11-21 (pull of the 11-20 shifts, build `c4ada68c`, Uber 4.606.10000): a new chip class wins the store read on single-store cards: "Must verify ID" became `storeName` on two offers (12:01:22, 19:32:26), the voice said "Offer. Must verify ID.", `merchantName` recorded it, and both offers share one presentation key (session log, bug 5). No stack card or Match hand-off to check. Counter unchanged.
   desk: needs field: an Uber stack and Match-to-direct hand-off must occur; then compare merchant, trip-time and outcome rows with captures.
   Triage source: first-line blame 2026-07-27 (`1f4c4a940`, original README L1140).

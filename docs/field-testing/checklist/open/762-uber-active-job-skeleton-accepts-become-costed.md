@@ -28,5 +28,6 @@ issues: #762, #784, #785, #786, #826, #827
     fragility during Uber app instability.)
   - (2026-07-19: decline affordance capture-first — WARN "No declineButton target bound for uber"
     fired; confirmed still open, feeds #786.)
+  - desk 11-21 (pull of the 11-20 shifts, build `c4ada68c`, Uber 4.606.10000): still blocked by #826. No accept click reached the app; `active_trip` held Online and the #1119 pool minted a bare job with no tasks at 19:34:28, not a costed one. The $20.09 delivery recorded $0 (session log, bug 3). Counter unchanged.
   desk: needs field: accept and drive an Uber offer to observe the ON JOB badge and verify a costed job survives the long accept grace.
   Triage source: first-line blame 2026-07-15 (`19991604a`, original README L1500).

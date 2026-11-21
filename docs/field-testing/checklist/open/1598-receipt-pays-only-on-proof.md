@@ -10,3 +10,4 @@ issues: #1598, #1326
   one receipt split across drops, or an UNPROVEN receipt with placed money.
   — Confirmed: 0/2
   - desk 11-12 (pull of 11-07 and 11-11, builds `9064004e.dirty` and `96fa4a89.dirty`, DoorDash 8.106.9): not on the phone. Desk estimate: the 6 single-drop receipts would be `PROVEN_SINGLE`; the 11-07 two-drop receipt would be `CARD_COUNT_NOT_ONE` (the drops keep the offer estimate), unless the pool ties first (#1610, see the 1119 offer-pool item), in which case the gap would be `OFFER_COUNT`. Counter unchanged.
+  - desk 11-21 (pull of the 11-20 shifts, build `c4ada68c`, DoorDash 8.108.11): one PROVEN_SINGLE receipt placed its whole total (3350¢); three UNPROVEN receipts (`OFFER_COUNT` twice, `CARD_COUNT_NOT_ONE` once) placed nothing, seen working in the 11-20 pull, awaiting the developer's confirmation. One `OFFER_COUNT` gap is shift 1's tie ($25.73, session log, bug 8). Counter unchanged.

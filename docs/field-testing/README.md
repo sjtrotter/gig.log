@@ -86,6 +86,7 @@ Dated field reports continue below; checklist policy is in CHECKLIST §0.
 
 ## Sessions
 
+- [2026-11-20 — desk analysis of the 11-21 pull: two DoorDash shifts and an Uber evening; the Uber shift stayed open 8 h 27 m after a GO OFFLINE tap; the one Uber delivery recorded $0; DoorDash short $34.23](sessions/2026-11-20-desk-analysis-of-the-11-21-pull-uber-and-doordash.md)
 - [2026-11-16 — desk analysis of the 11-16 pull: shifts 11-15 and 11-16; a same-store add-on accept recorded as not taken; DoorDash 8.107.10 broke no state-bearing screen; the app re-opened dismissed receipts](sessions/2026-11-16-desk-analysis-of-the-11-16-pull-shifts-11-15-and-11-16.md)
 - [2026-11-15 — desk analysis of the 11-15 pull: shifts 11-13 and 11-14; money reconciles; a stacked drop logged as arrived 5 mi early; the handoff screen saved a building name raw](sessions/2026-11-15-desk-analysis-of-the-11-15-pull-shifts-11-13-and-11-14.md)
 - [2026-11-12 — desk analysis of the 11-12 pull: dashes 11-07 and 11-11; money reconciles; two trailing-plus cards lost; v0.233.0's offer pool…](sessions/2026-11-12-desk-analysis-of-the-11-12-pull-dashes-11-07-and-11-11.md)
