@@ -124,6 +124,13 @@ class SerializationRoundTripTest {
         assertNull(StateJson.decodeFromString<PlatformRegion>("""{"platform":"DoorDash"}""").receiptExpandSeenAt)
     }
 
+    @Test
+    fun `#1698 the online-evidence anchor round-trips, and an old region blob decodes it null`() {
+        val region = PlatformRegion(platform = Platform.Uber, lastOnlineEvidenceAt = 1_300L)
+        assertEquals(region, StateJson.decodeFromString<PlatformRegion>(StateJson.encodeToString(region)))
+        assertNull(StateJson.decodeFromString<PlatformRegion>("""{"platform":"Uber"}""").lastOnlineEvidenceAt)
+    }
+
     private val parsedTime = ParsedTime(text = "5:39 PM", time = 1_000_000L)
 
     private fun allSubtypes(): List<ParsedFields> = listOf(
@@ -247,6 +254,7 @@ class SerializationRoundTripTest {
                         lastPostTaskFields = ParsedFields.PostTaskFields(totalPay = 9.75),
                         mintCounter = 3L,
                         lastObservedAt = 1_000L,
+                        lastOnlineEvidenceAt = 950L,
                     ),
                 ),
             ),
