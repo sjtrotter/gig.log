@@ -13,9 +13,10 @@ import cloud.trotter.log.gig.domain.state.TaskPhase
 import timber.log.Timber
 
 /*
- * The non-authoritative `SESSION_END` arm, the retire it may absorb (#1078), and the end-shift confirm
- * tap that arms it without a mode change (#1668). Split out of `PlatformRegionStepper` (size ceiling);
- * the stepper calls these, and nothing here reads a wall clock or a platform literal.
+ * The non-authoritative `SESSION_END` arm, the retire it may absorb (#1078), and the end-shift tap
+ * (a confirm sheet's last tap, #1668; a one-tap go-offline toggle, #1697) that arms it without a mode
+ * change. Split out of `PlatformRegionStepper` (size ceiling); the stepper calls these, and nothing here
+ * reads a wall clock or a platform literal.
  */
 
 /**
@@ -85,7 +86,7 @@ internal fun Task.honoredRetireInstant(since: Long): Long =
  * Arm the NON-authoritative `SESSION_END` grace at [at]: the session stays alive until the grace
  * commits (lazy expiry or its `GRACE_COMMIT` wake), and the commit ends it at [at] (#431).
  *
- * Two callers: the Online→Offline mode edge, and the end-shift confirm tap ([EndShiftTap], #1668).
+ * Two callers: the Online→Offline mode edge, and the end-shift tap ([EndShiftTap], #1668/#1697).
  * Arms only over a live session with no `SESSION_END` already standing, so a second signal never
  * moves `since` or the deadline.
  *
@@ -118,13 +119,15 @@ internal fun PlatformRegion.armSessionEndGrace(
 }
 
 /**
- * #1668 — the dasher's end-shift confirm tap ends the shift, graced.
+ * #1668/#1697 — the dasher's end-shift tap ends the shift, graced.
  *
  * A shift that earned nothing gets no platform summary, so the end used to wait for the offline home,
- * which can render late or in a shape no rule claims. The confirm tap (a click whose rule declares
- * [SessionIntent.END_SHIFT_CONFIRM]; the tap that only OPENS the confirm sheet must not, because the
- * dasher can still cancel there) arms the same non-authoritative grace the offline edge arms, marked
- * [PendingDestructive.armedByTap]. The click does not move mode: a click records intent.
+ * which can render late, in a shape no rule claims, or never (the dasher switched apps first). The end
+ * request tap is the earlier signal: a click whose rule declares [SessionIntent.END_SHIFT_CONFIRM] (the
+ * last tap of a confirm sheet; the tap that only OPENS that sheet must not, because the dasher can still
+ * cancel there) or [SessionIntent.GO_OFFLINE] (a one-tap offline toggle with no confirm sheet). Either
+ * arms the same non-authoritative grace the offline edge arms, marked [PendingDestructive.armedByTap].
+ * The click does not move mode: a click records intent.
  *
  * The mark exists because this end's cancel rule differs from the Offline edge's, whose pending a
  * resume to Online cancels. While a tap-armed end stands:
@@ -145,10 +148,13 @@ internal object EndShiftTap {
         it.kind == DestructiveKind.SESSION_END && it.armedByTap && !it.authoritative
     }
 
-    /** True when [obs] is [region]'s own end-shift confirm click. */
-    fun isConfirm(obs: Observation, region: PlatformRegion): Boolean =
+    /** The click intents that request the end of the shift. */
+    private val END_REQUEST_INTENTS = setOf(SessionIntent.END_SHIFT_CONFIRM, SessionIntent.GO_OFFLINE)
+
+    /** True when [obs] is [region]'s own end-request click (an end-shift confirm or a go-offline tap). */
+    fun isEndRequest(obs: Observation, region: PlatformRegion): Boolean =
         obs is Observation.Click && obs.platform == region.platform &&
-            (obs.parsed as? ParsedFields.ClickFields)?.intent == SessionIntent.END_SHIFT_CONFIRM
+            (obs.parsed as? ParsedFields.ClickFields)?.intent in END_REQUEST_INTENTS
 
     /**
      * Arm the grace at the tap; a no-op without a live session or with a `SESSION_END` already standing.

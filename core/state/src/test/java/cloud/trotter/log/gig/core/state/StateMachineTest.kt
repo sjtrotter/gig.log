@@ -20,6 +20,7 @@ import cloud.trotter.log.gig.domain.state.PendingWake
 import cloud.trotter.log.gig.domain.state.PlatformRegion
 import cloud.trotter.log.gig.domain.state.ParsedFields
 import cloud.trotter.log.gig.domain.state.Platform
+import cloud.trotter.log.gig.domain.state.SessionIntent
 import cloud.trotter.log.gig.domain.state.TaskPhase
 import cloud.trotter.log.gig.domain.state.TaskSubFlow
 import cloud.trotter.log.gig.domain.state.mintWakeId
@@ -413,14 +414,23 @@ class StateMachineTest {
         assertEquals(Mode.Online, state.regions.platforms[Platform.Uber]!!.mode)
 
         // go_offline click — mode should stay Online
+        val tapAt = tick()
         state = machine.step(state, clickObs(
             modeHint = Mode.Offline,
-            intent = "go_offline",
+            intent = SessionIntent.GO_OFFLINE,
             ruleId = "uber.click.go_offline",
+            timestamp = tapAt,
         )).newState
 
         val uber = state.regions.platforms[Platform.Uber]!!
         assertEquals(Mode.Online, uber.mode) // NOT Offline — click is just intent
+        // #1697: the tap arms the graced shift end instead, at the tap, the session still alive.
+        val pend = uber.pendingDestructive!!
+        assertEquals(DestructiveKind.SESSION_END, pend.kind)
+        assertTrue(pend.armedByTap)
+        assertFalse(pend.authoritative)
+        assertEquals(tapAt, pend.since)
+        assertNotNull(uber.session)
     }
 
     @Test
@@ -435,21 +445,28 @@ class StateMachineTest {
         )).newState
         assertEquals(Mode.Online, state.regions.platforms[Platform.Uber]!!.mode)
 
-        // go_offline click — mode stays Online (click is intent only)
+        // go_offline click — mode stays Online (click is intent only), the graced end armed at the tap (#1697)
+        val tapAt = tick()
         state = machine.step(state, clickObs(
             modeHint = Mode.Offline,
-            intent = "go_offline",
+            intent = SessionIntent.GO_OFFLINE,
             ruleId = "uber.click.go_offline",
+            timestamp = tapAt,
         )).newState
         assertEquals(Mode.Online, state.regions.platforms[Platform.Uber]!!.mode)
+        val armed = state.regions.platforms[Platform.Uber]!!.pendingDestructive!!
+        assertEquals(DestructiveKind.SESSION_END, armed.kind)
+        assertTrue(armed.armedByTap)
+        assertEquals(tapAt, armed.since)
 
-        // Stale awaiting_offer screen (still visible 0.3s after click) — Online confirmed
+        // Stale awaiting_offer screen (still visible 0.3s after click) — Online confirmed, the end stands
         state = machine.step(state, screenObs(
             flow = Flow.Idle,
             modeHint = Mode.Online,
             ruleId = "uber.screen.awaiting_offer",
         )).newState
         assertEquals(Mode.Online, state.regions.platforms[Platform.Uber]!!.mode)
+        assertEquals(armed, state.regions.platforms[Platform.Uber]!!.pendingDestructive)
 
         // idle_map screen (authoritative offline signal)
         state = machine.step(state, screenObs(
@@ -458,8 +475,11 @@ class StateMachineTest {
             ruleId = "uber.screen.idle_map",
         )).newState
 
-        // Screen-authoritative: one offline screen = Offline immediately
-        assertEquals(Mode.Offline, state.regions.platforms[Platform.Uber]!!.mode)
+        // Screen-authoritative: one offline screen = Offline immediately; the end keeps the tap as `since`
+        val uber = state.regions.platforms[Platform.Uber]!!
+        assertEquals(Mode.Offline, uber.mode)
+        assertEquals(armed, uber.pendingDestructive)
+        assertNotNull(uber.session)
     }
 
     // =========================================================================

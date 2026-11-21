@@ -37,6 +37,8 @@ import org.junit.Test
  * nothing gets no summary, so without the tap the end waited for the offline home (11 s late on 11-16).
  * Timings mirror the fielded sequence: the timeline redraws (hint online) ~0.35 s after the tap, then
  * the summary at ~+2 s or, on a shift that earned nothing, the offline home at ~+11 s.
+ *
+ * #1697: Uber's GO OFFLINE tap (no confirm sheet) arms the same end; see the Uber section at the bottom.
  */
 class EndShiftTapTest {
     private val platform = Platform.DoorDash
@@ -256,5 +258,172 @@ class EndShiftTapTest {
             assertEquals(acted.wire, Mode.Offline, commit.newState.region().mode)
             assertEquals(acted.wire, tap, stop(commit.effects).endedAt)
         }
+    }
+
+    // =========================================================================
+    // #1697: Uber's GO OFFLINE tap (SessionIntent.GO_OFFLINE) arms the same graced end. Timings mirror the
+    // fielded 11-20 sequence: two "You're online" redraws at +0.6 s and +5.2 s, then the dasher switched to
+    // DoorDash before Uber drew its offline screen, so no further Uber frame arrived.
+    // =========================================================================
+
+    private val uber = Platform.Uber
+    private val uberGrace = policy.gracePeriodMs(uber)
+
+    /** Uber online and waiting for offers, DoorDash online beside it. */
+    private fun twoPlatforms() = AppState(
+        regions = Regions(
+            flow = FlowRegion(flow = Flow.Idle, activePlatform = uber),
+            platforms = mapOf(
+                uber to PlatformRegion(platform = uber, mode = Mode.Online, session = Session("uber-shift", startedAt = 0L)),
+                platform to PlatformRegion(platform = platform, mode = Mode.Online, session = Session("dd-shift", startedAt = 0L)),
+            ),
+        ),
+    )
+
+    private fun AppState.uberRegion() = regions.platforms.getValue(uber)
+
+    private fun goOffline(t: Long) = Observation.Click(
+        timestamp = t, captureId = null, ruleId = "uber.click.go_offline",
+        metadata = ReplayMetadata.EMPTY, flow = null, modeHint = Mode.Offline,
+        parsed = ParsedFields.ClickFields(intent = SessionIntent.GO_OFFLINE),
+    )
+
+    private fun uberScreen(t: Long, flow: Flow?, hint: Mode?) = Observation.Screen(
+        timestamp = t, captureId = null, ruleId = "uber.screen.synthetic", metadata = ReplayMetadata.EMPTY,
+        flow = flow, modeHint = hint, parsed = ParsedFields.None,
+    )
+
+    /** The "You're online" / "Finding trips" sheet (`uber.screen.awaiting_offer`). */
+    private fun youreOnline(t: Long) = uberScreen(t, Flow.Idle, Mode.Online)
+    private fun youreOffline(t: Long) = uberScreen(t, Flow.Idle, Mode.Offline)
+
+    private fun uberWake(pending: PendingDestructive) = Observation.Timeout(
+        timestamp = pending.deadline, type = TimeoutType.GRACE_COMMIT, targetPlatform = uber,
+        payload = ObservationPayload.GraceWake(pending.wakeId.value),
+    )
+
+    private fun stops(effects: List<AppEffect>): List<SessionStopPayload> = effects.filterIsInstance<AppEffect.LogEvent>()
+        .filter { it.event.type == AppEventType.DASH_STOP }.map { it.event.payload as SessionStopPayload }
+
+    /** Steps [obs] in order from [from], returning the final state and every effect emitted. */
+    private fun steps(from: AppState, vararg obs: Observation): Pair<AppState, List<AppEffect>> {
+        var state = from
+        val effects = mutableListOf<AppEffect>()
+        for (o in obs) {
+            val t = machine.step(state, o)
+            state = t.newState
+            effects += t.effects
+        }
+        return state to effects
+    }
+
+    /** The tap on [from]: the graced end armed at the tap, Uber still Online, its wake scheduled. */
+    private fun uberTapped(from: AppState = twoPlatforms()): AppState {
+        val armed = machine.step(from, goOffline(tap))
+        val pending = requireNotNull(armed.newState.uberRegion().pendingDestructive)
+        assertEquals(DestructiveKind.SESSION_END, pending.kind)
+        assertFalse(pending.authoritative)
+        assertTrue(pending.armedByTap)
+        assertEquals(tap, pending.since)
+        assertEquals(tap + uberGrace, pending.deadline)
+        assertEquals(Mode.Online, armed.newState.uberRegion().mode)
+        assertEquals("uber-shift", armed.newState.uberRegion().session?.sessionId)
+        assertTrue(stops(armed.effects).isEmpty())
+        val timer = armed.effects.filterIsInstance<AppEffect.ScheduleTimeout>().single { it.type == TimeoutType.GRACE_COMMIT }
+        assertEquals(uber, timer.platform)
+        assertEquals(pending.deadline, timer.deadlineMs)
+        return armed.newState
+    }
+
+    /** A DoorDash frame (the class's [platform]). */
+    private fun ddScreen(t: Long, flow: Flow?, hint: Mode?, parsed: ParsedFields = ParsedFields.None) =
+        screen(t, flow, hint, parsed)
+
+    @Test
+    fun `Uber go-offline tap, two online redraws, then only DoorDash ends the Uber shift at the tap`() {
+        val armed = uberTapped()
+        val pending = requireNotNull(armed.uberRegion().pendingDestructive)
+        val (end, effects) = steps(
+            armed,
+            youreOnline(tap + 600L),
+            youreOnline(tap + 5_200L),
+            ddScreen(tap + 7_000L, Flow.Idle, Mode.Online),
+            ddScreen(tap + 9_000L, Flow.Idle, Mode.Online),
+            uberWake(pending),
+            ddScreen(tap + 60_000L, Flow.Idle, Mode.Online),
+        )
+        val region = end.uberRegion()
+        assertNull(region.session)
+        assertNull(region.pendingDestructive)
+        assertEquals(Mode.Offline, region.mode)
+        assertEquals(tap, region.lastSessionEndedAt)
+        val stop = stops(effects).single()
+        assertEquals("uber-shift", stop.sessionId)
+        assertEquals(uber.name, stop.platform)
+        assertEquals(tap, stop.endedAt)
+        assertEquals(SessionEndSource.EARLY_OFFLINE, stop.source)
+        assertEquals("dd-shift", end.region().session?.sessionId)
+        assertEquals(Mode.Online, end.region().mode)
+    }
+
+    @Test
+    fun `an Uber offer inside the grace cancels the go-offline end and its wake stays inert`() {
+        val armed = uberTapped()
+        val pending = requireNotNull(armed.uberRegion().pendingDestructive)
+        val (offer, effects) = steps(armed, youreOnline(tap + 600L), uberScreen(tap + 3_000L, Flow.OfferPresented, null))
+        assertNull(offer.uberRegion().pendingDestructive)
+        assertEquals("uber-shift", offer.uberRegion().session?.sessionId)
+        assertEquals(Mode.Online, offer.uberRegion().mode)
+
+        val (stale, wakeEffects) = steps(offer, uberWake(pending))
+        assertEquals("uber-shift", stale.uberRegion().session?.sessionId)
+        assertTrue(stops(effects + wakeEffects).isEmpty())
+    }
+
+    @Test
+    fun `Uber's offline screen inside the grace keeps the end at the tap`() {
+        val armed = uberTapped()
+        val pending = requireNotNull(armed.uberRegion().pendingDestructive)
+        val (home, homeEffects) = steps(armed, youreOnline(tap + 600L), youreOffline(tap + 4_000L))
+        assertEquals(Mode.Offline, home.uberRegion().mode)
+        assertEquals(pending, home.uberRegion().pendingDestructive)
+        assertEquals("uber-shift", home.uberRegion().session?.sessionId)
+
+        val (end, wakeEffects) = steps(home, uberWake(pending))
+        assertNull(end.uberRegion().session)
+        assertEquals(Mode.Offline, end.uberRegion().mode)
+        val stop = stops(homeEffects + wakeEffects).single()
+        assertEquals(tap, stop.endedAt)
+    }
+
+    @Test
+    fun `a second go-offline tap inside the grace moves neither since nor the deadline`() {
+        val armed = uberTapped()
+        val first = requireNotNull(armed.uberRegion().pendingDestructive)
+        val (again, _) = steps(armed, youreOnline(tap + 600L), goOffline(tap + 3_000L))
+        assertEquals(first, again.uberRegion().pendingDestructive)
+        val (replayed, _) = steps(armed, goOffline(tap))
+        assertEquals(first, replayed.uberRegion().pendingDestructive)
+    }
+
+    @Test
+    fun `DoorDash frames inside the grace neither cancel nor commit the Uber go-offline end`() {
+        val armed = uberTapped()
+        val pending = requireNotNull(armed.uberRegion().pendingDestructive)
+        val task = ParsedFields.TaskFields(phase = TaskPhase.PICKUP, subFlow = TaskSubFlow.NAVIGATION, storeName = "Store")
+        val (during, effects) = steps(
+            armed,
+            ddScreen(tap + 2_000L, Flow.OfferPresented, null),
+            ddScreen(tap + 4_000L, Flow.TaskPickupNavigation, Mode.Online, task),
+            ddScreen(tap + 9_000L, Flow.Idle, Mode.Online),
+        )
+        assertEquals(pending, during.uberRegion().pendingDestructive)
+        assertEquals("uber-shift", during.uberRegion().session?.sessionId)
+        assertEquals(Mode.Online, during.uberRegion().mode)
+        assertTrue(stops(effects).isEmpty())
+
+        val (end, wakeEffects) = steps(during, uberWake(pending))
+        assertNull(end.uberRegion().session)
+        assertEquals(tap, stops(wakeEffects).single().endedAt)
     }
 }
