@@ -215,6 +215,8 @@ class PlatformRegionStepper @Inject constructor() {
         // provisional transition.
         // Lapse is [graceLapsed] (#1054): strictly past for a frame, or this pending's OWN wake
         // (identified by its `GraceWake` payload) whenever it lands. See `GraceExpiry.kt`.
+        // #1698: a start held for a stale end is released by the step that commits that end.
+        val startHeldForEnd = StaleShiftEnd.startWaitsForEnd(current)
         current.pendingDestructive?.let { pend ->
             if (pend.kind == DestructiveKind.JOB_ABANDON) {
                 // Any task frame restores absorption, even without parsed task identity. PostTask
@@ -302,7 +304,9 @@ class PlatformRegionStepper @Inject constructor() {
         // is BUSY holding the just-completed delivery's TASK_RETIRE grace.
         // [graceLapsed] (#1054), as above.
         current.pendingModeResume?.let { pend ->
-            if (graceLapsed(pend.deadline, pend.wakeId, obs, TimeoutType.MODE_RESUME_COMMIT)) {
+            if (graceLapsed(pend.deadline, pend.wakeId, obs, TimeoutType.MODE_RESUME_COMMIT) ||
+                StaleShiftEnd.startReleasedByEnd(startHeldForEnd, current, pend.deadline, obs)
+            ) {
                 // #1311: end at 0 s, hint at 6 s, late wake, Offline at 14.001 s must CANCEL,
                 // not mint a session before the same frame goes Offline. Paused also contradicts
                 // either resume origin (#605); let the normal mode step apply that frame once.

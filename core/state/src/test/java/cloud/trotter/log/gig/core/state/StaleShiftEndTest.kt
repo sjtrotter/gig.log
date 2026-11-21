@@ -219,6 +219,31 @@ class StaleShiftEndTest {
     }
 
     @Test
+    fun `a start and a stale end due at the same instant start a new shift in either wake order`() {
+        val atHome = machine.step(stamped(), offlineHome(home)).newState
+        val end = requireNotNull(atHome.region().pendingDestructive)
+        val online = machine.step(atHome, findingTrips(home + 2_000L)).newState
+        val start = requireNotNull(online.region().pendingModeResume)
+        assertEquals("hint at +2 s: both deadlines coincide", end.deadline, start.deadline)
+
+        fun assertNewShift(state: AppState, effects: List<AppEffect>) {
+            val newShift = requireNotNull(state.region().session)
+            assertNotEquals("uber-shift", newShift.sessionId)
+            assertEquals(home + 2_000L, newShift.startedAt)
+            assertEquals(Mode.Online, state.region().mode)
+            assertNull(state.region().pendingModeResume)
+            assertEquals(home, stops(effects).single().endedAt)
+            assertEquals(newShift.sessionId, starts(effects).single().sessionId)
+        }
+
+        val (startFirst, startFirstEffects) = steps(online, resumeWake(start), endWake(end))
+        assertNewShift(startFirst, startFirstEffects)
+
+        val (endFirst, endFirstEffects) = steps(online, endWake(end), resumeWake(start))
+        assertNewShift(endFirst, endFirstEffects)
+    }
+
+    @Test
     fun `Uber's phase-less on-job screen inside the stale end's grace keeps the shift`() {
         val job = Job("job", offerStoreHint = emptyList(), parentOfferHash = null, startedAt = 100L)
         val onJob = twoPlatforms {

@@ -58,6 +58,14 @@ internal object StaleShiftEnd {
         } == true
 
     /**
+     * True when this step committed the stale end a lapsed start was held for ([heldBefore], read before the
+     * destructive expiry) and the start is due. A start wake deferred by [startWaitsForEnd] is spent, and an end wake
+     * landing exactly on the start's deadline is not "strictly past" it, so without this the start would be stranded.
+     */
+    fun startReleasedByEnd(heldBefore: Boolean, region: PlatformRegion, startDeadline: Long, obs: Observation): Boolean =
+        heldBefore && !startWaitsForEnd(region) && obs.timestamp >= startDeadline
+
+    /**
      * Arm the shift end at the Online/Paused→Offline mode edge. [prev] is the region before the edge, [region] the one
      * with the new mode. Authoritative when [prev] was Online on a live shift and its last online evidence is at
      * least the platform's threshold old at this offline screen; otherwise the ordinary end a resume cancels.
