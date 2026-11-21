@@ -15,7 +15,7 @@
 1. **The Uber shift stayed open 8 h 27 m after a GO OFFLINE tap.**
    - The 12:02:39 tap was recognized (`uber.click.go_offline`, mode hint Offline). The two Uber frames after it, 0.6 s and 5.2 s later, still read "You're online". The dasher left Uber at 12:02:42 and the app saw no Uber window until 19:30:00, so the shift kept running from 12:01:17 to 20:28:01.
    - Likely cause (lead-verified in code): a click never drives mode. `PlatformRegionStepper.kt` reads "Click — records user intent, does NOT drive mode", so the go_offline click arms no end. The rule comments in `matchers/rules/uber.json5` (the #857 `idle_map` comment and the #874 `home_dashboard` comment) assume deliberate toggles "ride the go_offline click". The code does not do that.
-   - At 20:28 the end worked because the "You're offline" frame came 1.1 s after the tap and the dasher stayed on it. At 12:02 the dasher switched apps before that frame could come.
+   - At 20:28 the end worked because the "You're offline" frame came 1.1 s after the tap and the dasher stayed on it. At 12:02 no offline frame was seen; one possibility is that the dasher switched apps before it came.
    - Evidence that Uber really went offline at 12:02: no Uber offer for 7.5 h, against one every 10 to 30 s in the 19:30 burst, and Uber showed its offline home at 19:30:03.
    - **Status:** Open (#1697).
 2. **Going online after the long gap cancelled the stale shift's end instead of ending it.**
@@ -27,7 +27,7 @@
    - **Status:** Open (#826, #1600). Evidence added to #826.
 4. **Uber pay notifications are not read, and two pushes after the trip were dropped without a trace.**
    - The tip push at 20:28:06 ("You've received a $8.68 tip!") matched `uber.notification.tip_received`, which has no amount parse. Nothing reached the delivery or a receipt row.
-   - Lead-verified finding: two Uber notifications after the trip, one a fraction of a second after the tip push (20:28:06.434) and one at 20:47:47, were admitted by the listener and then dropped. Either the duplicate gate or the sensitive/noise content gate dropped them (`NotificationPipeline.kt`), and nothing logs which gate, nor the text. The evening's `PipelineStats` summary lines stop at 14:09, so the counters cannot say either.
+   - Lead-verified finding: two Uber notifications after the trip, one a fraction of a second after the tip push (20:28:06.434) and one at 20:47:47, were admitted by the listener and then dropped. Either the duplicate gate or the sensitive/noise content gate dropped them (`NotificationPipeline.kt`), and nothing logs which gate, nor the text. The `PipelineStats` summaries at 19:32 and 00:42 count drops for both pipelines together, so they cannot say which gate dropped a particular push.
    - Hypothesis: those two were the developer's ~$11 fare and ~$3 pushes (developer observation 3). Against it: the desk report read the 20:28:06.434 one as a repost of the tip push, and Uber's own screens at 20:51 show $20.09 with no $3 line.
    - The $8.68 tip is already inside the offer's "Guaranteed (incl. tip)" $20.09, so adding a tip push on top would count it twice.
    - **Status:** Open (#1702).
@@ -41,13 +41,13 @@
    - **Status:** Open (#1704).
 9. **DoorDash shift 2 is short $8.50: an add-on's drop merged into another drop.** A three-store job (two offers plus an add-on accepted at 18:56:42) had three customers but two delivery rows. One drop navigated and arrived as the add-on's store and customer, then confirmed and completed as another store's. Recorded $20.75 against $29.25 of offers. `#1458 job … left open … outstanding=1` at 19:26:05; #997 `STAMP_FALLBACK`.
    - **Status:** Open (#1600, #1489). Evidence added to #1600.
-10. **Raw customer PII in UNKNOWN Uber debug captures.** A customer's first name and last initial inside a tapped order-card button (click at 19:36:06), a customer's drop-off street and city on three Trip Details frames (20:47:51, 20:47:57, 20:47:59), and cross-street lines on three offer-card partials (19:30:57 twice, 19:33:32). Debug captures only. Lead-verified: the census received layouts and hashed text only; its cluster JSON holds no text fields.
+10. **Raw customer PII in UNKNOWN Uber debug captures.** A customer's first name and last initial inside a tapped order-card button (click at 19:36:06), a customer's drop-off street and city on three Trip Details frames (20:47:51, 20:47:57, 20:47:59), and cross-street lines on three offer-card partials (19:30:57 twice, 19:33:32). Checked on the server 11-21: the census cluster records carry layouts and hashed words only, and none of the night's 47 Uber clusters has a trusted capture paired with it (the phone's posted-envelope counter stayed at 20 all day). The phone's trusted-capture queue (share-captures switch on) still holds unsent envelopes, and UNKNOWN envelopes get only the backstops, so this text can reach the census when they send.
     - **Status:** Open (#1703).
 
 ### Developer observations
 
 1. Uber has two offline map screens: the map still full-screen but offline, and the map inset into the page like the home. The pull matches: the full-map sheet reading "You're offline" came right after the 20:28 tap, and the inset home about 55 s later.
-2. The dasher can dismiss Uber's ongoing "online" notification. A removal signal must tell a removal by the app from one by the user. Android's `onNotificationRemoved` reason codes make the split: app cancel against user cancel, clear-all or click. Today `NotificationListener.onNotificationRemoved` is empty, so no removal is seen (#249 covers the posted side only). The ongoing notification was posted at 12:01:06 and again at 19:30:08.
+2. Design concern (developer, not an observation from this pull): the dasher can dismiss Uber's ongoing "online" notification. A removal signal must tell a removal by the app from one by the user. Android's `onNotificationRemoved` reason codes make the split: app cancel against user cancel, clear-all or click. Today `NotificationListener.onNotificationRemoved` is empty, so no removal is seen (#249 covers the posted side only). The ongoing notification was posted at 12:01:06 and again at 19:30:08.
 3. The Uber pay arrived as three notifications: about $11, then $8, then $3. Only the $8.68 tip push was recognized (bug 4).
 
 ### Working as intended
