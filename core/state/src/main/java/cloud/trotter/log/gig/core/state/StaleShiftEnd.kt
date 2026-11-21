@@ -1,6 +1,7 @@
 package cloud.trotter.log.gig.core.state
 
 import cloud.trotter.log.gig.domain.pipeline.Observation
+import cloud.trotter.log.gig.domain.state.DestructiveKind
 import cloud.trotter.log.gig.domain.state.Mode
 import cloud.trotter.log.gig.domain.state.PlatformRegion
 import timber.log.Timber
@@ -32,14 +33,29 @@ internal object StaleShiftEnd {
      * so the offline edge reads the anchor as it stood before the frame.
      */
     fun stampOnlineEvidence(region: PlatformRegion, obs: Observation, policy: TransitionPolicy): PlatformRegion {
-        val screen = obs as? Observation.Screen ?: return region
-        val flow = screen.flow ?: return region
         if (region.session == null) return region
         val last = region.lastOnlineEvidenceAt
         if (last != null && last >= obs.timestamp) return region
-        if (policy.resolveMode(flow, screen.modeHint) != Mode.Online) return region
-        return region.copy(lastOnlineEvidenceAt = obs.timestamp)
+        val at = onlineEvidenceAt(obs, policy) ?: return region
+        return region.copy(lastOnlineEvidenceAt = at)
     }
+
+    /** [obs]'s timestamp when it is online evidence (an own screen whose non-null flow implies Online), else null. */
+    fun onlineEvidenceAt(obs: Observation, policy: TransitionPolicy): Long? {
+        val screen = obs as? Observation.Screen ?: return null
+        val flow = screen.flow ?: return null
+        return obs.timestamp.takeIf { policy.resolveMode(flow, screen.modeHint) == Mode.Online }
+    }
+
+    /**
+     * True while an Offline-origin pending start (#1311) must wait for the authoritative end standing over the live
+     * shift: its 8 s grace can lapse before the end's 10 s one, and committing it then would resume the OLD shift.
+     * Kept, it commits on the frame or wake that commits the end, as the first step of the new shift (`since` kept).
+     */
+    fun startWaitsForEnd(region: PlatformRegion): Boolean =
+        region.mode == Mode.Offline && region.session != null && region.pendingDestructive?.let {
+            it.kind == DestructiveKind.SESSION_END && it.authoritative
+        } == true
 
     /**
      * Arm the shift end at the Online/Paused→Offline mode edge. [prev] is the region before the edge, [region] the one

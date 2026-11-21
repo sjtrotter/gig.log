@@ -309,6 +309,7 @@ class PlatformRegionStepper @Inject constructor() {
                 current = when {
                     impliedMode == Mode.Offline || impliedMode == Mode.Paused ->
                         current.copy(pendingModeResume = null)
+                    StaleShiftEnd.startWaitsForEnd(current) -> current // #1698: never resume the ended shift
                     obs is Observation.Timeout || flowObs != null -> commitModeResume(sink, current, obs, policy)
                     else -> current
                 }
@@ -450,6 +451,7 @@ class PlatformRegionStepper @Inject constructor() {
         obs: Observation,
         policy: TransitionPolicy,
         startedAt: Long = obs.timestamp,
+        startEvidenceAt: Long? = null,
     ): PlatformRegion {
         var region = prev.copy(
             mode = newMode,
@@ -484,7 +486,8 @@ class PlatformRegionStepper @Inject constructor() {
                             startedAt = startedAt,
                         ),
                         mintCounter = region.mintCounter + 1,
-                        lastOnlineEvidenceAt = null, // #1698: the new shift measures from its own evidence
+                        // #1698: the new shift measures from its own evidence (a timer start's qualifying screen).
+                        lastOnlineEvidenceAt = startEvidenceAt,
                     ))
                 }
             }
@@ -536,10 +539,13 @@ class PlatformRegionStepper @Inject constructor() {
         } else null
         val since = existing?.since ?: obs.timestamp
         val deadline = since + policy.pauseResumeGraceMs(region.platform)
+        val evidenceAt = if (region.mode == Mode.Offline) {
+            listOfNotNull(existing?.evidenceAt, StaleShiftEnd.onlineEvidenceAt(obs, policy)).maxOrNull()
+        } else null
         // #1054: keep both the original since and wake identity while the deadline stands.
         val (withId, resume) = region.modeResumeWindow(existing) { wakeId ->
             PendingModeResume(
-                since = since, deadline = deadline, wakeId = wakeId, idleFields = idleFields,
+                since = since, deadline = deadline, wakeId = wakeId, idleFields = idleFields, evidenceAt = evidenceAt,
             )
         }
         return withId.copy(lastObservedAt = obs.timestamp, pendingModeResume = resume)
@@ -556,6 +562,7 @@ class PlatformRegionStepper @Inject constructor() {
         val resumed = applyModeTransition(
             region, Mode.Online, obs, policy,
             startedAt = pending?.since ?: obs.timestamp,
+            startEvidenceAt = pending?.evidenceAt,
         )
         return pending?.idleFields?.let {
             updateSessionFields(sink, resumed, obs, Flow.Idle, policy, it)

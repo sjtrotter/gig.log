@@ -648,6 +648,13 @@ data class PendingModeResume(
     override val wakeId: WakeId,
     /** Latest idle parse deferred by an Offline-origin start; Paused resumes leave this null. */
     val idleFields: ParsedFields.IdleFields? = null,
+    /**
+     * #1698: the latest online evidence among the screens that armed an Offline-origin start (the
+     * `PlatformRegion.lastOnlineEvidenceAt` rule). The session it mints starts with it as its anchor, so a shift
+     * started by the timer keeps the screen that qualified it. Null for Paused resumes, flow-less hints and older
+     * snapshots.
+     */
+    val evidenceAt: Long? = null,
 ) : WakeBearing
 
 /**
