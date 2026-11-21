@@ -361,16 +361,22 @@ transient flash and cancels it. The evening shift merged into the noon one. The 
   anchor) arms the ordinary end that a resume cancels. One DEBUG line (tag `StateMachine`): platform, session id,
   silence, threshold.
 - **Then.** Every reader of `authoritative` behaves as for the summary's end minus the summary fields: a resume does
-  not cancel it, a task-flow screen does (#431), the #1311 hint path arms the next shift's graced start from the
-  first "Finding trips" frame, the end commits at the offline frame (`DASH_STOP`, `early_offline`), and the new
-  shift starts at the first hint. A later summary tightens it as usual.
+  not cancel it, a task-flow screen does (#431; a phase-less `task:active` screen too, in `TaskLifecycle`'s
+  `phaseLessWorkCancelsShiftEnd`, while a `TASK_RETIRE` still ignores it), the #1311 hint path arms the next
+  shift's graced start from the first "Finding trips" frame, the end commits at the offline frame (`DASH_STOP`,
+  `early_offline`), and the new shift starts at the first hint. A later summary tightens it as usual.
+- **Timer order.** The 8 s start can lapse before the 10 s end (a hint 1 s after the offline frame). While an
+  authoritative end stands over a live session, a lapsed Offline-origin start is kept (`startWaitsForEnd`), never
+  committed against the old shift; the frame or wake that commits the end commits it next, in the same step, with
+  its first-hint `since`. This also covers a summary end whose deadline an absorbed retire pushed past the start's.
+- **Timer-started shifts keep their evidence.** `PendingModeResume.evidenceAt` carries the latest online evidence
+  among the screens that armed the start, and the mint installs it as the new shift's anchor.
 
 Residuals. Miles: a session's recorded miles are the odometer at commit minus its start anchor, so miles driven
 during the silence stay on the old shift; an odometer witness at each evidence observation is a follow-up beside
 #1507. Replay: a journal tail recorded before this rule shipped replays through it, so a tail holding both a 30-min
 Uber silence and an offline frame would replay to a different end than the live run recorded (no schema bump; the
-single-user alpha accepts it). A shift started by a `MODE_RESUME_COMMIT` wake has no anchor until its first online
-screen after the start.
+single-user alpha accepts it). A shift started only by flow-less hints has no anchor until its first online screen.
 
 **Graces.** Destructive commits are graced through the unified `pendingDestructive` slot and woken
 by `GRACE_COMMIT` timers (#431), including short authoritative windows for the dash summary AND the
