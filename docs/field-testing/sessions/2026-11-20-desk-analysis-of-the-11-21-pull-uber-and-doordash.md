@@ -64,7 +64,7 @@
 - **#1672:** 4 `Performing expand_earnings` lines for 4 receipts, plus one dropped repeat.
 - **#688B / #1108 miles:** drop miles within the odometer span on both DoorDash shifts (25.89 of 31.72, 38.65 of 40.62).
 - **WARN/ERROR census (11-17 to 11-21):** no ERROR. WARNs: 11 GRACE_COMMIT, 10 capture-backstop PII masks (the backstop working), 7 odometer fix rejections, 6 parse shortfalls (`waiting_for_offer`, `idle_map`, `dash_along_the_way`, `pickup_shopping`), the one #1119 tie, one #691 unsplit, one `NoTrustedEpoch` (11-19), and the 200 UNKNOWN capture cap reached at 20:51.
-- **Census device side:** uploads on 11-17, 11-19, 11-20 and 11-21, 0 rejected. Server half not read.
+- **Census device side:** uploads on 11-17, 11-19, 11-20 and 11-21, 0 rejected. The desk review did not read the server; a later check on 11-21 did: one install, 3 batches, 0 rejected, taps empty, and none of the night's 47 Uber clusters has a trusted capture paired with it.
 
 ### Field UX context
 
@@ -91,5 +91,5 @@
 ### Verification TODOs
 
 - Purge the seven Uber captures named in bug 10 from the pull and the device once nothing needs them.
-- Read the census server's Uber clusters for the Trip Details and order-card shapes (tunnel was down).
+- After the phone's queued capture envelopes send, re-check the census for trusted captures paired with the Trip Details and order-card clusters (#1703).
 - Next Uber shift: go offline and stay on the offline screen 10 s, then once switch apps right after the tap; compare the two shift ends.
