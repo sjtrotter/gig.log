@@ -9,3 +9,4 @@ issues: #1672
   - In the log: one `Performing expand_earnings` line (INFO, tag `Effects`) per receipt, or two when the first
     attempt failed closed. A `#1672 receipt already expanded` line (DEBUG, tag `StateMachine`) marks a pending
     expand the app dropped. — Confirmed: 0/2
+    - desk 11-21 (pull of the 11-20 shifts, build `c4ada68c`, DoorDash 8.108.11): 4 `Performing expand_earnings` lines for 4 receipts and one `#1672 receipt already expanded … dropped` at 14:09:43, seen working in the 11-20 pull, awaiting the developer's confirmation. Counter unchanged.

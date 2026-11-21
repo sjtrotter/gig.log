@@ -12,3 +12,4 @@ issues: #1634
   by owner path with their class and id, and none from the blocked screen. How to tell it works: taps, the bubble
   and recognition behave as before; recognized taps (Accept, Decline) never appear; at most 10 taps go a day.
   - Issue: #1634. Confirmed: 0/2 (awaiting field validation)
+    - desk 11-21 (pull of the 11-20 shifts, build `c4ada68c`): not on the phone; the build predates PRs #1694 and #1696. Counter unchanged.

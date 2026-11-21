@@ -19,5 +19,6 @@ issues: #874, #875, #857, #872
   `UNKNOWN` (that is the fix, not a regression). Online→Offline edges in `app_events` should be
   1:1 with `uber.click.go_offline` clicks or with an evidence-bearing home/idle_map frame.
   - Confirmed: 0/2
+    - desk 11-21 (pull of the 11-20 shifts, build `c4ada68c`, Uber 4.606.10000): every `home_dashboard` frame carried `go_online_button` and the nav-bar-only frame (19:30:03.760) stayed UNKNOWN, seen working in the 11-20 pull, awaiting the developer's confirmation. The offline home at 19:30:03 armed the end of a shift left open since 12:02; going online 7 s later cancelled it (session log, bug 2). The "Unable to go online" selfie card stays UNKNOWN (no session was open). The premise that the go_offline click covers deliberate toggles does not hold: the click moves nothing (session log, bug 1). Counter unchanged.
   desk: desk-verifiable: correlate Uber home captures and offline events with positive offline evidence; nav-only frames must not end a session.
   Triage source: first-line blame 2026-07-27 (`81f5eb304`, original README L1199).

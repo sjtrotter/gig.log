@@ -6,3 +6,4 @@ issues: #1527
   - Confirmed: 0/2
     - desk 11-12 (pull of 11-07 and 11-11, builds `9064004e.dirty` and `96fa4a89.dirty`, DoorDash 8.106.9): not exercised as written (all four shifts ended on the summary). `idle_map` matched on 8.106.9 on both days. Counter unchanged.
     - desk 11-16 (pull of 11-15 and 11-16, build `7a193657`, DoorDash 8.107.10): S3 is the scenario (no offers, no summary). The shift ended 11 s after the End dash tap, not a second or two: the offline home drew without its Dash button under a workflow host for 9 s. #1675 re-anchors the button-less home; the post-End-dash frames still stay UNKNOWN (#1668 open). CONTRADICTS the timing. Counter unchanged.
+    - desk 11-21 (pull of the 11-20 shifts, build `c4ada68c`, DoorDash 8.108.11): not exercised as written (both shifts ended on the summary). The button-less offline home and side-menu family is still UNKNOWN on 8.108.11 (about 36 frames). Counter unchanged.

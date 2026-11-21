@@ -10,3 +10,4 @@ issues: #1601
   mid-job settled anyway, shares that do not add up to the receipt, a settled row later re-priced, or a settled row
   reading "Matched by you".
   — Confirmed: 0/2
+  - desk 11-21 (pull of the 11-20 shifts, build `c4ada68c`, DoorDash 8.108.11): the desk half seen working in the 11-20 pull, awaiting the developer's confirmation: shift 2's two-drop one-offer job logged `#1601 job … settled r1` at 2045¢, the offer's amount. The shift page needs the developer's eyes. Counter unchanged.

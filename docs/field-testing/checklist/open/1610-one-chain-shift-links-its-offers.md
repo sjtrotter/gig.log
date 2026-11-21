@@ -8,3 +8,4 @@ issues: #1610
   - desk (4): every INFO link line within 60 s of a same-chain sheet decline names a card presented after that decline left the screen.
   - Confirmed: 0/2
     - desk 11-16 (pull of 11-15 and 11-16, build `7a193657`, DoorDash 8.107.10): S2 was one chain throughout: 0 tie WARNs; two links came 22 s and 54 s after a same-chain sheet decline and each named a card presented after the declined one left. Consistent. Counter unchanged.
+    - desk 11-21 (pull of the 11-20 shifts, build `c4ada68c`, DoorDash 8.108.11): 1 tie WARN on shift 1. Its stale candidate was a timer leave with no sheet sighting: it ran out while the dasher was in Uber, then tied a same-chain accept about 70 min later (session log, bug 8). Counter unchanged.
