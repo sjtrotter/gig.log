@@ -172,6 +172,68 @@ class StaleShiftEndTest {
         assertEquals(newShift.sessionId, newStart.sessionId)
         assertTrue("nothing starts before the graced start commits", starts(homeEffects + onlineEffects + endEffects).isEmpty())
         assertEquals("DoorDash's shift is untouched", "dd-shift", fresh.region(doorDash).session?.sessionId)
+        assertEquals("the timer-started shift keeps its qualifying screen", home + 7_000L, fresh.region().lastOnlineEvidenceAt)
+
+        // A second stale stretch on the new shift ends it the same way: a third shift, not a merge.
+        val home2 = home + 7_000L + threshold + hour
+        val (atHome2, home2Effects) = steps(fresh, ddIdle(home + hour), offlineHome(home2))
+        val end2 = requireNotNull(atHome2.region().pendingDestructive)
+        assertTrue(end2.authoritative)
+        val (online2, online2Effects) = steps(atHome2, goOnline(home2 + 3_000L), findingTrips(home2 + 7_000L))
+        val start2 = requireNotNull(online2.region().pendingModeResume)
+        val (third, thirdEffects) = steps(online2, endWake(end2), resumeWake(start2))
+        val thirdShift = requireNotNull(third.region().session)
+        assertNotEquals(newShift.sessionId, thirdShift.sessionId)
+        assertNotEquals("uber-shift", thirdShift.sessionId)
+        assertEquals(home2 + 7_000L, thirdShift.startedAt)
+        val stop2 = stops(home2Effects + online2Effects + thirdEffects).single()
+        assertEquals(newShift.sessionId, stop2.sessionId)
+        assertEquals(home2, stop2.endedAt)
+        assertEquals(thirdShift.sessionId, starts(home2Effects + online2Effects + thirdEffects).single().sessionId)
+    }
+
+    @Test
+    fun `a start whose grace lapses before the stale end's waits for it, then starts a new shift`() {
+        val atHome = machine.step(stamped(), offlineHome(home)).newState
+        val end = requireNotNull(atHome.region().pendingDestructive)
+        assertTrue(end.authoritative)
+        val online = machine.step(atHome, findingTrips(home + 1_000L)).newState
+        val start = requireNotNull(online.region().pendingModeResume)
+        assertTrue("the 8 s start lapses before the 10 s end", start.deadline < end.deadline)
+
+        val (early, earlyEffects) = steps(online, resumeWake(start))
+        assertEquals("the start never resumes the ended shift", "uber-shift", early.region().session?.sessionId)
+        assertEquals(Mode.Offline, early.region().mode)
+        assertEquals(start, early.region().pendingModeResume)
+        assertEquals(end, early.region().pendingDestructive)
+        assertTrue(starts(earlyEffects).isEmpty() && stops(earlyEffects).isEmpty())
+
+        val (fresh, freshEffects) = steps(early, endWake(end))
+        val newShift = requireNotNull(fresh.region().session)
+        assertNotEquals("uber-shift", newShift.sessionId)
+        assertEquals(home + 1_000L, newShift.startedAt)
+        assertEquals(Mode.Online, fresh.region().mode)
+        assertEquals(home + 1_000L, fresh.region().lastOnlineEvidenceAt)
+        assertEquals(home, stops(freshEffects).single().endedAt)
+        assertEquals(newShift.sessionId, starts(freshEffects).single().sessionId)
+    }
+
+    @Test
+    fun `Uber's phase-less on-job screen inside the stale end's grace keeps the shift`() {
+        val job = Job("job", offerStoreHint = emptyList(), parentOfferHash = null, startedAt = 100L)
+        val onJob = twoPlatforms {
+            it.copy(activeJob = job, lastActedFlow = Flow.TaskActive, lastOnlineEvidenceAt = lastOnline)
+        }.let { it.copy(regions = it.regions.copy(flow = FlowRegion(flow = Flow.TaskActive, activePlatform = uber))) }
+        val atHome = machine.step(onJob, offlineHome(home)).newState
+        val end = requireNotNull(atHome.region().pendingDestructive)
+        assertTrue(end.authoritative)
+
+        val (after, effects) = steps(atHome, screen(uber, home + 1_000L, Flow.TaskActive, null), endWake(end))
+        assertNull("the task:active screen cancels the stale end", after.region().pendingDestructive)
+        assertEquals("uber-shift", after.region().session?.sessionId)
+        assertEquals("job", after.region().activeJob?.jobId)
+        assertEquals(Mode.Online, after.region().mode)
+        assertTrue(stops(effects).isEmpty())
     }
 
     @Test
@@ -293,7 +355,7 @@ class StaleShiftEndTest {
             val t = machine.step(state, obs)
             t.effects.filterIsInstance<AppEffect.LogEvent>()
                 .filter { it.event.type == AppEventType.DASH_STOP || it.event.type == AppEventType.DASH_START }
-                .forEach { keys += it.effectKey.toString() }
+                .forEach { keys += it.effectKey }
             state = t.newState
         }
         val prefix = listOf(findingTrips(lastOnline)) + silence()
