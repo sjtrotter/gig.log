@@ -26,8 +26,8 @@ import org.junit.runners.Parameterized
  *
  * The branch now requires POSITIVE evidence — the offline card's own id-anchored headline —
  * so these must classify UNKNOWN: no observation reaches the state machine and the platform
- * region keeps its last known mode until a settled frame or the already-recognized
- * `uber.click.go_offline` arrives.
+ * region keeps its last known mode until a settled frame arrives (a deliberate toggle's
+ * `uber.click.go_offline` tap arms the graced shift end itself, #1697).
  *
  * The positive half lives in the golden corpus (the `uber` captures under
  * `snapshots/home_dashboard`, guarded by

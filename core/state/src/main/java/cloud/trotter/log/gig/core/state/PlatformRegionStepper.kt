@@ -339,8 +339,9 @@ class PlatformRegionStepper @Inject constructor() {
 
         if (flowObs == null) return current
 
-        // #1668: the end-shift confirm tap arms the graced dash end; the click does not move mode.
-        if (EndShiftTap.isConfirm(obs, current)) current = EndShiftTap.arm(current, obs, policy)
+        // #1668/#1697: an end-request tap (end-shift confirm, go offline) arms the graced dash end; the click
+        // does not move mode.
+        if (EndShiftTap.isEndRequest(obs, current)) current = EndShiftTap.arm(current, obs, policy)
 
         // #1315: explicit completion-steps intent is a second delivery witness. The step wrapper's
         // reconcileJobTasks mirrors this copy into Job.tasks; arrival/dwell and flow stay untouched.

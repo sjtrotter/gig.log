@@ -496,6 +496,23 @@ class TriageRulesTest {
         assertNotEquals(SessionIntent.END_SHIFT_CONFIRM, intent)
     }
 
+    // #1697: Uber's GO OFFLINE tap is the stepper's go-offline end request. The tapped node is the generic
+    // Carbon button, which also renders on the splash and active-trip windows, so only the online
+    // "Finding trips" sheet may carry the intent.
+    private val carbonButton = node(id = "carbon_action_button")
+
+    @Test
+    fun `go_offline — the Carbon button on the awaiting_offer sheet carries the go-offline intent`() {
+        assertEquals(SessionIntent.GO_OFFLINE, click(carbonButton, screenTarget = "awaiting_offer"))
+    }
+
+    @Test
+    fun `go_offline — the Carbon button on any other Uber surface is not a go-offline tap`() {
+        for (target in listOf("active_trip", "splash", "idle_map", "home_dashboard", "offer", null)) {
+            assertNotEquals("screenTarget=$target", SessionIntent.GO_OFFLINE, click(carbonButton, screenTarget = target))
+        }
+    }
+
     @Test
     fun `unrecognized click returns null`() {
         assertNull(click(node(id = "some_random_button")))

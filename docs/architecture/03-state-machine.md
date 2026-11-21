@@ -304,18 +304,22 @@ early-offline end. The active pickup the teardown force-stamps is excluded from 
 the end does not repair miles the open shift already accrued, nor split later shifts it absorbed: the stop fold
 keeps the odometer delta from the start.
 
-**The end-shift confirm tap ends the shift, graced (#1668).** A shift that earned nothing gets no dash summary,
-so the end used to wait for the offline home, which DoorDash 8.107.10 often renders in a shape no rule claims
-(11-16: the end landed 11 s late). The confirm tap is the earlier signal. A click whose rule declares
-`SessionIntent.END_SHIFT_CONFIRM` (`doordash.click.end_dash_confirm`, the "End your current dash" sheet's End
-dash) arms the same non-authoritative `SESSION_END` the Online→Offline edge arms, through the one armer
+**The end-shift tap ends the shift, graced (#1668, #1697).** A shift that earned nothing gets no dash summary, so
+the end used to wait for the offline home, which DoorDash 8.107.10 often renders in a shape no rule claims (11-16:
+the end landed 11 s late). The tap is the earlier signal. A click whose rule declares
+`SessionIntent.END_SHIFT_CONFIRM` (`doordash.click.end_dash_confirm`, the "End your current dash" sheet's End dash)
+or `SessionIntent.GO_OFFLINE` (#1697: `uber.click.go_offline`, Uber's one-tap GO OFFLINE, which has no confirm
+sheet; on 11-20 the dasher switched to DoorDash before Uber drew its offline screen and the Uber shift stayed open
+for hours) arms the same non-authoritative `SESSION_END` the Online→Offline edge arms, through the one armer
 `armSessionEndGrace` (`SessionEndArm.kt`): live session and no `SESSION_END` standing, `since` = the tap,
-deadline = `since + gracePeriodMs`, a fresh `WakeId`, and the same `absorbableRetire` absorption. The
-timeline's End dash only opens that sheet, where the dasher can still go back, so its rule carries the
-informational `open_end_dash`. The click does not move mode: the region stays Online (or Paused) while the grace
-stands. The pending is marked `PendingDestructive.armedByTap`, because its cancel rule differs from the Offline
-edge's (whose pending any resume to Online cancels); `EndShiftTap` owns the rule, for a tap-armed end that the
-summary has not made authoritative:
+deadline = `since + gracePeriodMs`, a fresh `WakeId`, and the same `absorbableRetire` absorption. DoorDash's
+timeline End dash only opens the confirm sheet, where the dasher can still go back, so its rule carries the informational
+`open_end_dash`. Uber's Carbon button also renders on its splash and active-trip windows, so the destructive click
+is scoped `screenIs: awaiting_offer` (the online "Finding trips" sheet). `EndShiftTap.isEndRequest` reads both
+intents. The click does not move mode: the region stays Online (or Paused) while the grace stands. The pending is
+marked `PendingDestructive.armedByTap`, because its cancel rule differs from the Offline edge's (whose pending any
+resume to Online cancels); `EndShiftTap` owns the rule, for a tap-armed end that the summary has not made
+authoritative:
 
 - An offer or task-flow SCREEN cancels it (`yieldToWork`, after lazy expiry): DoorDash often sends an offer as
   the dasher taps, and the dasher is still working.
@@ -330,7 +334,10 @@ summary has not made authoritative:
 Inside the window the summary tightens the standing pending as it tightens any (authoritative, short deadline,
 `since` kept, so the end is the tap), and the offline home neither re-arms nor moves `since`. The commit (wake or
 lazy expiry) ends the shift at the tap; `diffMode` emits `DASH_STOP` (`early_offline`, `endedAt` = the tap), and
-the #1311 post-end window then graces any hint-only redraw. An offer after the commit starts a new shift on the existing path. The intent is not load-validated yet (click intents are #1322).
+the #1311 post-end window then graces any hint-only redraw. An offer after the commit starts a new shift on the
+existing path. Accepted residual (#1697): if Uber refuses to go offline and no offer or task screen arrives inside
+the 10 s grace, the end commits, and the next Uber offer starts a new shift. Neither intent is load-validated yet
+(click intents are #1322); `TriageRulesTest` pins both rules to their constants.
 
 **Graces.** Destructive commits are graced through the unified `pendingDestructive` slot and woken
 by `GRACE_COMMIT` timers (#431), including short authoritative windows for the dash summary AND the

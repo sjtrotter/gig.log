@@ -1324,9 +1324,9 @@
       //
       // Bias is deliberately "believe still online": a partial genuinely-offline frame now
       // classifies UNKNOWN, makes no mode claim, and the platform region keeps its last
-      // mode until a settled frame or the (already recognized) `uber.click.go_offline`
-      // arrives. A false offline destroys a session record permanently; a delayed offline
-      // costs seconds.
+      // mode until a settled frame arrives; a deliberate toggle needs no frame, because the
+      // `uber.click.go_offline` tap arms the graced shift end itself (#1697). A false
+      // offline destroys a session record permanently; a delayed offline costs seconds.
       "state": {
         "flow": "idle",
         "modeHint": "offline"
@@ -1432,9 +1432,10 @@
       // Recognizing it narrows the deliberate believe-online window #857 chose.
       //
       // Bias, unchanged from #857: a false offline destroys a session record permanently,
-      // a delayed offline costs seconds and the already-recognized `uber.click.go_offline`
-      // covers every deliberate toggle — so an evidence-free partial now classifies
-      // UNKNOWN, makes no mode claim, and the platform region keeps its last known mode.
+      // a delayed offline costs seconds and a deliberate toggle's `uber.click.go_offline`
+      // tap arms the graced shift end itself (#1697) — so an evidence-free partial now
+      // classifies UNKNOWN, makes no mode claim, and the platform region keeps its last
+      // known mode.
       "id": "uber.screen.home_dashboard",
       "priority": 140,
       "branches": [
@@ -1738,8 +1739,15 @@
       }
     },
     {
+      // #1697: the GO OFFLINE tap is the end request (SessionIntent.GO_OFFLINE); the stepper arms the graced
+      // shift end on it, so a dasher who switches apps before Uber draws its offline screen still ends the
+      // shift at the tap. The tapped node is the generic Carbon button, which also renders on the splash
+      // and active-trip windows, so a destructive click is scoped to the online "Finding trips" sheet both
+      // fielded GO OFFLINE taps landed on. The modeHint is informational: a click's modeHint does not
+      // drive mode.
       "id": "uber.click.go_offline",
       "priority": 21,
+      "screenIs": "awaiting_offer",
       "intent": "go_offline",
       "state": {
         "modeHint": "offline"
