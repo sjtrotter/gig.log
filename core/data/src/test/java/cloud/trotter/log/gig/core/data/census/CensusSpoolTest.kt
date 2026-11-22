@@ -150,9 +150,9 @@ class CensusSpoolTest {
         val held = censusRecord(0).fingerprint
         val all = spool.take(100, 100_000)
         // #1709: the held record is passed over and does not use up the item limit.
-        assertEquals(all.drop(1).take(1), spool.take(1, 100_000) { it.fingerprint != held })
+        assertEquals(all.drop(1).take(1), spool.take(1, 100_000, admit = { it.fingerprint != held }))
         spool.markInFlight(all.take(2).map { it.id }, "mixed-batch")
-        assertEquals(all.drop(1), spool.take(100, 100_000) { it.fingerprint != held })
+        assertEquals(all.drop(1), spool.take(100, 100_000, admit = { it.fingerprint != held }))
         assertNull("a retry holding a refused record loses its marker", spool.inFlight())
         assertEquals(3, spool.count())
         assertEquals(all, spool.take(100, 100_000))
@@ -179,7 +179,7 @@ class CensusSpoolTest {
         val all = spool.take(100, 100_000)
         spool.markInFlight(all.take(1).map { it.id }, "held-batch")
         val held = all.first().id
-        assertEquals(all.drop(1), spool.take(100, 100_000) { it.id != held })
+        assertEquals(all.drop(1), spool.take(100, 100_000, admit = { it.id != held }))
         assertNull("the held retry's marker is dropped so accepted work is not blocked", spool.inFlight())
         assertEquals(3, spool.count())
     }
