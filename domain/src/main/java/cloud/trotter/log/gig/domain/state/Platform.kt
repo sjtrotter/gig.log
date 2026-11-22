@@ -1,5 +1,6 @@
 package cloud.trotter.log.gig.domain.state
 
+import cloud.trotter.census.contract.CensusPlatforms
 import java.util.Locale
 
 /**
@@ -32,6 +33,10 @@ import java.util.Locale
  * platform namespace prefix of rule ids (`<wire>.<section>.<name>`), so a wire
  * containing a `.` or an empty wire would break prefix-based resolution
  * ([fromRuleId], `Ruleset.evalOrderByPlatform`).
+ *
+ * Each [wire] is a constant of the census contract's [CensusPlatforms] (#1709), the one list of platform wire ids the
+ * census server's policy is derived from; `PlatformWireContractTest` pins the registry's wires equal to
+ * [CensusPlatforms.ALL], so a platform added in one place and not the other fails the build.
  */
 enum class Platform(
     val wire: String,
@@ -42,11 +47,11 @@ enum class Platform(
     val offerOverlay: Boolean = false,
     val bound: Boolean = false,
 ) {
-    DoorDash("doordash", "com.doordash.driverapp", "DoorDash", "DD", "DoorDash", bound = true),
-    Uber("uber", "com.ubercab.driver", "Uber Driver", "Uber", "Uber", offerOverlay = true, bound = true),
-    Instacart("instacart", "com.instacart.shopper", "Instacart Shopper", "IC", "Instacart"),
-    WalmartSpark("walmart_spark", "com.walmart.spark", "Walmart Spark", "Spark", "Walmart Spark"),
-    Unknown("_unknown", null, "Unknown", "", "Unknown"),
+    DoorDash(CensusPlatforms.DOORDASH, "com.doordash.driverapp", "DoorDash", "DD", "DoorDash", bound = true),
+    Uber(CensusPlatforms.UBER, "com.ubercab.driver", "Uber Driver", "Uber", "Uber", offerOverlay = true, bound = true),
+    Instacart(CensusPlatforms.INSTACART, "com.instacart.shopper", "Instacart Shopper", "IC", "Instacart"),
+    WalmartSpark(CensusPlatforms.WALMART_SPARK, "com.walmart.spark", "Walmart Spark", "Spark", "Walmart Spark"),
+    Unknown(CensusPlatforms.UNKNOWN, null, "Unknown", "", "Unknown"),
     ;
 
     companion object {

@@ -132,7 +132,18 @@ open class CensusSpool internal constructor(
         }
     }
 
-    open suspend fun take(maxItems: Int, maxBytes: Int): List<Spooled> = withContext(io) {
+    /**
+     * The oldest records, at most [maxItems] and [maxBytes]. #1709: a record [admit] refuses is passed over, left queued
+     * and not counted against the limits. An in-flight retry holding a refused record loses its marker, so what is taken
+     * goes out in a new batch; with [keepHeldRetry] (a run that holds everything) a retry refused whole is kept, marker
+     * and id, and nothing is taken.
+     */
+    open suspend fun take(
+        maxItems: Int,
+        maxBytes: Int,
+        admit: (Spooled) -> Boolean = { true },
+        keepHeldRetry: Boolean = false,
+    ): List<Spooled> = withContext(io) {
         require(maxItems > 0 && maxBytes > 0)
         mutex.withLock {
             initialize()
@@ -143,7 +154,12 @@ open class CensusSpool internal constructor(
                     val file = File(directory, id)
                     if (file.isFile) readOrDrop(file) else null
                 }
-                if (items.isNotEmpty()) return@withLock items
+                if (items.isNotEmpty()) {
+                    if (items.all(admit)) return@withLock items
+                    // A run that holds everything ([keepHeldRetry]) leaves a retry it refuses whole as it is, marker and
+                    // batch id, so a later run can still be answered as a duplicate.
+                    if (keepHeldRetry && items.none(admit)) return@withLock emptyList()
+                }
                 deleteInFlight()
             }
             val result = mutableListOf<Spooled>()
@@ -151,6 +167,7 @@ open class CensusSpool internal constructor(
             for (file in files()) {
                 if (result.size == maxItems) break
                 val item = readOrDrop(file) ?: continue
+                if (!admit(item)) continue
                 val itemBytes = item.itemJson.toByteArray(Charsets.UTF_8).size
                 if (itemBytes > maxBytes) {
                     drop(file, stats.spoolOversized)

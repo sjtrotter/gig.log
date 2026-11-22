@@ -12,6 +12,7 @@ enum class CensusRunOutcome(val wire: String) {
     HEALTH_REJECTED("health_rejected"), // detail = reports rejected this run
     SPOOL_EMPTY("spool_empty"),
     STALE_REMOVED("stale_removed"),  // detail = stale items removed locally when nothing else happened this run
+    HELD("held"),                    // detail = items kept for a platform the policy does not accept yet (#1709)
     UPLOADED("uploaded"),            // detail = accepted items this run
     ENVELOPES_POSTED("envelopes_posted"), // detail = envelopes accepted this run
     ENVELOPES_REJECTED("envelopes_rejected"), // detail = envelopes rejected this run

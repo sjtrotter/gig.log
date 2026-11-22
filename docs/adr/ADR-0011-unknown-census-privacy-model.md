@@ -1288,8 +1288,8 @@ like a PII-id field and seeding its exact value frame-wide; a sensitive marker i
 frame; no review words, no capture id, no envelope. *Caps:* 1 per rule and 10 per UTC day over every platform
 (`CensusMatchedCap`, `filesDir/census/matched.json`, two days, never uploaded or backed up), after the daily sample,
 whose key gains a `rule=` line for a matched item only. *Upload:* the same window and budgets; a matched batch's id is
-`m-` plus a digest of each item's fingerprint and rule id, so it never collides with the UNKNOWN batch of the same
-layout. *Server:* separate tables (census#69), never the cluster tables, vocabulary or contributor release.
+`m-` plus a digest of its items' bytes, which carry the rule id (a digest of fingerprint and rule id until #1709), so it
+never collides with the UNKNOWN batch of the same layout. *Server:* separate tables (census#69), never the cluster tables, vocabulary or contributor release.
 *Residual:* the rule's id says which kind of screen the install saw that UTC day; PRIVACY.md r32 and the in-app
 census texts say so.
 

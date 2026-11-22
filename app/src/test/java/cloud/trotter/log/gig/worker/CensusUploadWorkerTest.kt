@@ -116,7 +116,7 @@ class CensusUploadWorkerTest {
         assertNull(h.preferences.censusLastRun.first()) // A consent-off no-op never overwrites the last real outcome.
         assertEquals(0, h.factoryCalls)
         verify(h.credentials, never()).current()
-        verify(h.spool, never()).take(any(), any())
+        verify(h.spool, never()).take(any(), any(), any(), any())
     }
 
     @Test fun `nothing uploads until the disclosure is accepted`() = runTest {
@@ -128,7 +128,7 @@ class CensusUploadWorkerTest {
         assertEquals(CensusConsent.OFF, h.preferences.censusConsent.first())
         assertEquals(ListenableWorker.Result.success(), h.worker().doWork())
         assertEquals(0, h.factoryCalls)
-        verify(h.spool, never()).take(any(), any())
+        verify(h.spool, never()).take(any(), any(), any(), any())
         assertTrue(h.api.healthBodies.isEmpty())
 
         h.preferences.setCensusUploadEnabled(true) // The disclosure's Accept.
@@ -382,7 +382,7 @@ class CensusUploadWorkerTest {
             verify(h.credentials, never()).mint()
             verify(h.credentials, never()).wipe()
             verify(h.credentials, never()).markEnrolled()
-            verify(h.spool, never()).take(any(), any())
+            verify(h.spool, never()).take(any(), any(), any(), any())
             assertTrue(h.api.enrolledIds.isEmpty())
         } finally {
             Timber.uproot(tree)
@@ -408,7 +408,7 @@ class CensusUploadWorkerTest {
                 assertEquals(0L, h.stats.uploadFailures.get())
                 verify(h.credentials, never()).mint()
                 verify(h.credentials, never()).markEnrolled()
-                verify(h.spool, never()).take(any(), any())
+                verify(h.spool, never()).take(any(), any(), any(), any())
             }
             assertEquals(listOf("census enrol rejected status=400 reason=bad_request"), warnings)
         } finally {
@@ -479,7 +479,7 @@ class CensusUploadWorkerTest {
         assertEquals("enrol_rejected unsupported_schema", lastRun.token())
         assertEquals(1L, h.stats.enrolRejected.get())
         verify(h.credentials, never()).markEnrolled()
-        verify(h.spool, never()).take(any(), any())
+        verify(h.spool, never()).take(any(), any(), any(), any())
     }
 
     @Test fun `an enrol refusal persists the closed reason on the status line`() = runTest {
@@ -521,7 +521,7 @@ class CensusUploadWorkerTest {
         assertEquals(ListenableWorker.Result.success(), h.worker().doWork())
         verify(h.spool).remove(stale.map { it.id })
         assertEquals(listOf(fresh.map { it.itemJson }), h.api.bodies)
-        assertEquals(listOf(CensusApi.batchId(fresh.map { it.fingerprint })), h.api.batches)
+        assertEquals(listOf(CensusApi.skeletonBatchId(fresh.map { it.itemJson }, matched = false)), h.api.batches)
         assertEquals(30L, h.stats.stale.get())
         assertEquals(70L, h.stats.uploaded.get())
         assertTrue(h.queued.isEmpty())
@@ -536,7 +536,7 @@ class CensusUploadWorkerTest {
         h.api.uploads += UploadResult.Duplicate
         assertEquals(ListenableWorker.Result.success(), h.worker().doWork())
         assertEquals(listOf(fresh.map { it.itemJson }), h.api.bodies)
-        assertEquals(listOf(CensusApi.batchId(fresh.map { it.fingerprint })), h.api.batches)
+        assertEquals(listOf(CensusApi.skeletonBatchId(fresh.map { it.itemJson }, matched = false)), h.api.batches)
         assertEquals(2L, h.stats.stale.get())
         assertTrue(h.queued.isEmpty())
     }
@@ -899,7 +899,7 @@ class CensusUploadWorkerTest {
             UploadResult.TransportFailure("IOException")))
         assertEquals(ListenableWorker.Result.retry(), h.worker().doWork())
         assertEquals(listOf(notification, screen).map { batch -> batch.map { it.itemJson } }, h.api.bodies)
-        assertEquals(listOf(notification, screen).map { batch -> CensusApi.batchId(batch.map { it.fingerprint }) }, h.api.batches)
+        assertEquals(listOf(notification, screen).map { batch -> CensusApi.skeletonBatchId(batch.map { it.itemJson }, matched = false) }, h.api.batches)
         assertNotEquals(h.api.batches[0], h.api.batches[1])
         verify(h.spool).remove(notification.map { it.id })
         verify(h.spool, never()).remove(screen.map { it.id })
@@ -924,7 +924,7 @@ class CensusUploadWorkerTest {
             UploadResult.BatchQuality(mapOf("unknown_schema" to 1))))
         assertEquals(ListenableWorker.Result.success(), h.worker().doWork())
         assertEquals(mixed.map { listOf(it.itemJson) }, h.api.bodies)
-        assertEquals(mixed.map { CensusApi.batchId(listOf(it.fingerprint)) }, h.api.batches)
+        assertEquals(mixed.map { CensusApi.skeletonBatchId(listOf(it.itemJson), matched = false) }, h.api.batches)
         assertTrue(h.api.batches.none { it == legacyId })
         assertEquals(1L, h.stats.uploaded.get())
         assertEquals(1L, h.stats.rejectedCounts()["unknown_schema"])
@@ -965,7 +965,7 @@ class CensusUploadWorkerTest {
         h.api.uploads += UploadResult.TransportFailure("IOException")
         assertEquals(ListenableWorker.Result.retry(), h.worker().doWork())
         val originalBatchId = h.api.batches.single()
-        assertEquals(CensusApi.batchId(a.take(1).map { it.fingerprint }), originalBatchId)
+        assertEquals(CensusApi.skeletonBatchId(a.take(1).map { it.itemJson }, matched = false), originalBatchId)
         val b = h.queueBatch(1)
         // Fresh selection would now include both A and B; the in-flight screen must retry first.
         h.queued.clear()
@@ -973,8 +973,8 @@ class CensusUploadWorkerTest {
         h.api.uploads.addAll(listOf(UploadResult.Duplicate, UploadResult.Duplicate, UploadResult.Duplicate))
         assertEquals(ListenableWorker.Result.success(), h.worker().doWork())
         assertEquals(listOf(a.take(1), a.take(1), a.drop(1), b).map { items -> items.map { it.itemJson } }, h.api.bodies)
-        assertEquals(listOf(originalBatchId, originalBatchId, CensusApi.batchId(a.drop(1).map { it.fingerprint }),
-            CensusApi.batchId(b.map { it.fingerprint })), h.api.batches)
+        assertEquals(listOf(originalBatchId, originalBatchId, CensusApi.skeletonBatchId(a.drop(1).map { it.itemJson }, matched = false),
+            CensusApi.skeletonBatchId(b.map { it.itemJson }, matched = false)), h.api.batches)
         assertTrue(h.queued.isEmpty())
         assertNull(h.pending)
         verify(h.spool, times(3)).clearInFlight()
@@ -1029,7 +1029,7 @@ class CensusUploadWorkerTest {
         val second = items.drop(2)
         h.api.uploads.addAll(listOf(UploadResult.PayloadTooLarge, UploadResult.TransportFailure("IOException")))
         assertEquals(ListenableWorker.Result.retry(), h.worker().doWork())
-        assertEquals(CensusSpool.InFlight(CensusApi.batchId(first.map { it.fingerprint }), first.map { it.id }), h.pending)
+        assertEquals(CensusSpool.InFlight(CensusApi.skeletonBatchId(first.map { it.itemJson }, matched = false), first.map { it.id }), h.pending)
         val fresh = h.queueBatch(1)
         h.queued.clear()
         h.queued += items + fresh
@@ -1455,7 +1455,7 @@ class CensusUploadWorkerTest {
         h.queueEnvelopes()
         h.preferences.setCensusShareCaptures(false)
         h.worker().doWork()
-        verify(h.envelopeSpool, never()).take(any(), any())
+        verify(h.envelopeSpool, never()).take(any(), any(), any(), any())
         assertTrue(h.api.envelopeBodies.isEmpty())
         h.preferences.setCensusShareCaptures(true)
         h.api.envelopeResults += UploadResult.Accepted(1, 0, emptyMap(), CensusBudget(1, 1, 1, 1))
@@ -1522,7 +1522,7 @@ class CensusUploadWorkerTest {
             h.api.uploads.addAll(listOf(result, result))
             h.worker().doWork()
             assertTrue(h.api.envelopeBodies.isEmpty())
-            verify(h.envelopeSpool, never()).take(any(), any())
+            verify(h.envelopeSpool, never()).take(any(), any(), any(), any())
         }
         val h = harness()
         h.initialize()
@@ -1532,7 +1532,7 @@ class CensusUploadWorkerTest {
         h.preferences.setNextAllowedAtMillis(System.currentTimeMillis() + 60_000)
         h.worker().doWork()
         assertEquals("health_posted 1", h.preferences.censusLastRun.first()?.token())
-        verify(h.envelopeSpool, never()).take(any(), any())
+        verify(h.envelopeSpool, never()).take(any(), any(), any(), any())
     }
 
     @Test fun `envelope split keeps prefix resolves both halves and counts quality rejection`() = runTest {
@@ -1657,7 +1657,7 @@ class CensusUploadWorkerTest {
         assertEquals(50, h.queued.flatten().size)
         assertEquals(envelopes, h.envelopes)
         assertTrue(h.api.envelopeBodies.isEmpty())
-        verify(h.envelopeSpool, never()).take(any(), any())
+        verify(h.envelopeSpool, never()).take(any(), any(), any(), any())
         assertEquals("uploaded 300", h.preferences.censusLastRun.first()?.token())
     }
 
@@ -1734,7 +1734,7 @@ class CensusUploadWorkerTest {
         h.preferences.setNextAllowedAtMillis(System.currentTimeMillis() - 1)
         h.api.uploads.addAll(listOf(UploadResult.Duplicate, UploadResult.Duplicate))
         assertEquals(ListenableWorker.Result.success(), h.worker().doWork())
-        assertEquals(listOf(batchId, batchId, CensusApi.batchId(notification.map { it.fingerprint })), h.api.batches)
+        assertEquals(listOf(batchId, batchId, CensusApi.skeletonBatchId(notification.map { it.itemJson }, matched = false)), h.api.batches)
         assertNotEquals(batchId, h.api.batches.last())
         assertEquals(listOf(screen, screen, notification).map { batch -> batch.map { it.itemJson } }, h.api.bodies)
         assertTrue(h.queued.isEmpty())

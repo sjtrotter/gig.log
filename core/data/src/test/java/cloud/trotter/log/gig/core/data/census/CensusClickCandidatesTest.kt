@@ -204,4 +204,21 @@ class CensusClickCandidatesTest {
         assertEquals(null, s.clicks.restrict(batch, setOf("uber")))
         assertTrue(s.clicks.frozen().isEmpty())
     }
+
+    @Test fun `holding back an app the policy does not accept keeps its items as their own frozen batch`() = runTest {
+        val s = store()
+        (1..2).forEach { s.admit(clickedCensusRecord(it, day = day)) }
+        (3..4).forEach { val pair = clickedCensusRecord(it, day = day); s.clicks.admit(pair.first, pair.second.skeletonJson, "instacart", s.spool.generation) }
+        val whole = s.closeNextDay().single()
+        assertEquals(whole, s.clicks.holdBack(whole) { true })
+        assertEquals("none accepted: the batch is left as it is", null, s.clicks.holdBack(whole) { false })
+        assertEquals(listOf(whole.batchId), s.clicks.frozen().map { it.batchId })
+        val sent = requireNotNull(s.clicks.holdBack(whole) { it == "doordash" })
+        assertEquals(listOf("doordash", "doordash"), sent.platforms)
+        assertTrue(sent.batchId != whole.batchId)
+        val frozen = s.clicks.frozen()
+        assertEquals(2, frozen.size)
+        assertEquals(listOf("instacart", "instacart"), frozen.single { it.batchId != sent.batchId }.platforms)
+        assertEquals(whole.items.toSet(), frozen.flatMap { it.items }.toSet())
+    }
 }

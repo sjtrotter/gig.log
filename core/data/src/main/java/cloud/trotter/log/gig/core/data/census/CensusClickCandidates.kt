@@ -215,6 +215,28 @@ class CensusClickCandidates(
         }
     }
 
+    /**
+     * #1709: the items of [batch] whose delivery app the server's policy accepts ([sends]). The others stay on the phone
+     * as a frozen batch of their own under a new batch id, sent once a policy accepts their app or deleted by the usual
+     * expiry; both parts are written before the original is deleted. [batch] itself when every item is accepted; null
+     * when none is (its file is left as it is) or its file is gone.
+     */
+    suspend fun holdBack(batch: Batch, sends: (String) -> Boolean): Batch? {
+        if (batch.platforms.all(sends)) return batch
+        if (batch.platforms.none(sends)) return null
+        return spool.underClearLock<Batch?> {
+            val root = spool.censusRoot
+            if (!File(frozenDir(root), batch.file).isFile) return@underClearLock null
+            val (sent, held) = batch.platforms.indices.partition { sends(batch.platforms[it]) }
+            val parts = listOf(held, sent).map { part ->
+                write(root, batch.day, part.map { batch.keys[it] }, part.map { batch.identities[it] },
+                    part.map { batch.platforms[it] }, part.map { batch.items[it] })
+            }
+            removeFrozen(root, batch.file)
+            parts.last()
+        }
+    }
+
     // ── Files (called under the spool lock) ───────────────────────────────
 
     private fun today(): LocalDate = LocalDate.now(clock.withZone(ZoneOffset.UTC))

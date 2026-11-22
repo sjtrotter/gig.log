@@ -560,19 +560,20 @@ class CensusApi(
         /** #1627: the quarantine answer's artifact digest. */
         private val SHA256 = Regex("[0-9a-f]{64}")
 
-        fun batchId(fingerprints: List<String>): String = MessageDigest.getInstance("SHA-256")
-            .digest(fingerprints.sorted().joinToString("\n").toByteArray(Charsets.UTF_8))
+        /** The first 32 hex of the sha256 of [values], sorted and joined by newlines. */
+        fun batchId(values: List<String>): String = MessageDigest.getInstance("SHA-256")
+            .digest(values.sorted().joinToString("\n").toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(Locale.ROOT, it.toInt() and 0xff) }.take(32)
 
         /**
-         * #1573: the batch id of a `uinode.matched.v1` batch, from each item's fingerprint and rule id. The server keeps a
-         * day's batch ids per install and answers a repeat `duplicate`, so a matched batch must never share an id with
-         * the UNKNOWN batch of the same layouts (offer rot sends one frame both ways). The `m-` prefix keeps the two
-         * spaces apart; [items] are (fingerprint, ruleId) pairs.
+         * #1709: the batch id of a skeleton batch, initial or a split half, from its items' bytes ([batchId] over the
+         * item JSON). The server keeps a day's batch ids per install and answers a repeat `duplicate` without storing
+         * it, so two batches share an id only when they carry the same items: never a held platform's outline and
+         * another platform's of the same layout, nor two split halves of one layout. A matched batch (#1573) carries the
+         * `m-` prefix, which keeps it apart from the UNKNOWN batch of the same layout.
          */
-        fun matchedBatchId(items: List<Pair<String, String>>): String = "m-" + MessageDigest.getInstance("SHA-256")
-            .digest(items.map { (fingerprint, ruleId) -> "$fingerprint\n$ruleId" }.sorted().joinToString("\n").toByteArray(Charsets.UTF_8))
-            .joinToString("") { "%02x".format(Locale.ROOT, it.toInt() and 0xff) }.take(32)
+        fun skeletonBatchId(itemsJson: List<String>, matched: Boolean): String =
+            (if (matched) "m-" else "") + batchId(itemsJson)
 
         /**
          * #1634: the batch id of a `uinode.clicked.v1` batch, initial or a split half, from each item's clicked identity
