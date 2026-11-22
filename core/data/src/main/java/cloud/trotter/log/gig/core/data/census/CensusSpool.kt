@@ -134,11 +134,16 @@ open class CensusSpool internal constructor(
 
     /**
      * The oldest records, at most [maxItems] and [maxBytes]. #1709: a record [admit] refuses is passed over, left queued
-     * and not counted against the limits. An in-flight retry that [admit] refuses whole is kept, marker and id, and
-     * nothing is taken this call; one that holds some refused records loses its marker, so what is taken goes out in a
-     * new batch.
+     * and not counted against the limits. An in-flight retry holding a refused record loses its marker, so what is taken
+     * goes out in a new batch; with [keepHeldRetry] (a run that holds everything) a retry refused whole is kept, marker
+     * and id, and nothing is taken.
      */
-    open suspend fun take(maxItems: Int, maxBytes: Int, admit: (Spooled) -> Boolean = { true }): List<Spooled> = withContext(io) {
+    open suspend fun take(
+        maxItems: Int,
+        maxBytes: Int,
+        admit: (Spooled) -> Boolean = { true },
+        keepHeldRetry: Boolean = false,
+    ): List<Spooled> = withContext(io) {
         require(maxItems > 0 && maxBytes > 0)
         mutex.withLock {
             initialize()
@@ -151,9 +156,9 @@ open class CensusSpool internal constructor(
                 }
                 if (items.isNotEmpty()) {
                     if (items.all(admit)) return@withLock items
-                    // A retry held whole (a run with no platform list, say) keeps its marker and batch id for a later run,
-                    // so the server can still answer it as a duplicate.
-                    if (items.none(admit)) return@withLock emptyList()
+                    // A run that holds everything ([keepHeldRetry]) leaves a retry it refuses whole as it is, marker and
+                    // batch id, so a later run can still be answered as a duplicate.
+                    if (keepHeldRetry && items.none(admit)) return@withLock emptyList()
                 }
                 deleteInFlight()
             }

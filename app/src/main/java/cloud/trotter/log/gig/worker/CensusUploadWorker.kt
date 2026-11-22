@@ -475,7 +475,7 @@ class CensusUploadWorker @AssistedInject constructor(
             val oldestDay = LocalDate.now(ZoneOffset.UTC).minusDays(7)
             // #1709: a held item stays queued; "empty" below means nothing is left that this run may send.
             val covered = coveredPlatforms()
-            val taken = spool.take(100, 900 * 1024) { record.hold.admits(it, "s", covered, oldestDay) }
+            val taken = spool.take(100, 900 * 1024, { record.hold.admits(it, "s", covered, oldestDay) }, record.hold.holdsEverything)
             val pending = dropUncovered(spool, taken)
             if (taken.isEmpty()) {
                 record.skeletonSpoolEmpty = true
@@ -600,7 +600,7 @@ class CensusUploadWorker @AssistedInject constructor(
         val covered = coveredPlatforms()
         val oldestDay = LocalDate.now(ZoneOffset.UTC).minusDays(7)
         // #1709: an envelope past 7 days by its own timestamp is removed unsent, held or not, as a stale skeleton is.
-        val taken = envelopeSpool.take(20, 900 * 1024) { record.hold.admits(it, "e", covered, oldestDay) }
+        val taken = envelopeSpool.take(20, 900 * 1024, { record.hold.admits(it, "e", covered, oldestDay) }, record.hold.holdsEverything)
         val (stale, items) = dropUncovered(envelopeSpool, taken).partition { CensusPlatformHold.dayOf(it) < oldestDay }
         if (stale.isNotEmpty()) {
             removeBatch(stale.map { it.id }, envelopeSpool)

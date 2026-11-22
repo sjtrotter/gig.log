@@ -116,7 +116,7 @@ class CensusUploadWorkerTest {
         assertNull(h.preferences.censusLastRun.first()) // A consent-off no-op never overwrites the last real outcome.
         assertEquals(0, h.factoryCalls)
         verify(h.credentials, never()).current()
-        verify(h.spool, never()).take(any(), any(), any())
+        verify(h.spool, never()).take(any(), any(), any(), any())
     }
 
     @Test fun `nothing uploads until the disclosure is accepted`() = runTest {
@@ -128,7 +128,7 @@ class CensusUploadWorkerTest {
         assertEquals(CensusConsent.OFF, h.preferences.censusConsent.first())
         assertEquals(ListenableWorker.Result.success(), h.worker().doWork())
         assertEquals(0, h.factoryCalls)
-        verify(h.spool, never()).take(any(), any(), any())
+        verify(h.spool, never()).take(any(), any(), any(), any())
         assertTrue(h.api.healthBodies.isEmpty())
 
         h.preferences.setCensusUploadEnabled(true) // The disclosure's Accept.
@@ -382,7 +382,7 @@ class CensusUploadWorkerTest {
             verify(h.credentials, never()).mint()
             verify(h.credentials, never()).wipe()
             verify(h.credentials, never()).markEnrolled()
-            verify(h.spool, never()).take(any(), any(), any())
+            verify(h.spool, never()).take(any(), any(), any(), any())
             assertTrue(h.api.enrolledIds.isEmpty())
         } finally {
             Timber.uproot(tree)
@@ -408,7 +408,7 @@ class CensusUploadWorkerTest {
                 assertEquals(0L, h.stats.uploadFailures.get())
                 verify(h.credentials, never()).mint()
                 verify(h.credentials, never()).markEnrolled()
-                verify(h.spool, never()).take(any(), any(), any())
+                verify(h.spool, never()).take(any(), any(), any(), any())
             }
             assertEquals(listOf("census enrol rejected status=400 reason=bad_request"), warnings)
         } finally {
@@ -479,7 +479,7 @@ class CensusUploadWorkerTest {
         assertEquals("enrol_rejected unsupported_schema", lastRun.token())
         assertEquals(1L, h.stats.enrolRejected.get())
         verify(h.credentials, never()).markEnrolled()
-        verify(h.spool, never()).take(any(), any(), any())
+        verify(h.spool, never()).take(any(), any(), any(), any())
     }
 
     @Test fun `an enrol refusal persists the closed reason on the status line`() = runTest {
@@ -1455,7 +1455,7 @@ class CensusUploadWorkerTest {
         h.queueEnvelopes()
         h.preferences.setCensusShareCaptures(false)
         h.worker().doWork()
-        verify(h.envelopeSpool, never()).take(any(), any(), any())
+        verify(h.envelopeSpool, never()).take(any(), any(), any(), any())
         assertTrue(h.api.envelopeBodies.isEmpty())
         h.preferences.setCensusShareCaptures(true)
         h.api.envelopeResults += UploadResult.Accepted(1, 0, emptyMap(), CensusBudget(1, 1, 1, 1))
@@ -1522,7 +1522,7 @@ class CensusUploadWorkerTest {
             h.api.uploads.addAll(listOf(result, result))
             h.worker().doWork()
             assertTrue(h.api.envelopeBodies.isEmpty())
-            verify(h.envelopeSpool, never()).take(any(), any(), any())
+            verify(h.envelopeSpool, never()).take(any(), any(), any(), any())
         }
         val h = harness()
         h.initialize()
@@ -1532,7 +1532,7 @@ class CensusUploadWorkerTest {
         h.preferences.setNextAllowedAtMillis(System.currentTimeMillis() + 60_000)
         h.worker().doWork()
         assertEquals("health_posted 1", h.preferences.censusLastRun.first()?.token())
-        verify(h.envelopeSpool, never()).take(any(), any(), any())
+        verify(h.envelopeSpool, never()).take(any(), any(), any(), any())
     }
 
     @Test fun `envelope split keeps prefix resolves both halves and counts quality rejection`() = runTest {
@@ -1657,7 +1657,7 @@ class CensusUploadWorkerTest {
         assertEquals(50, h.queued.flatten().size)
         assertEquals(envelopes, h.envelopes)
         assertTrue(h.api.envelopeBodies.isEmpty())
-        verify(h.envelopeSpool, never()).take(any(), any(), any())
+        verify(h.envelopeSpool, never()).take(any(), any(), any(), any())
         assertEquals("uploaded 300", h.preferences.censusLastRun.first()?.token())
     }
 

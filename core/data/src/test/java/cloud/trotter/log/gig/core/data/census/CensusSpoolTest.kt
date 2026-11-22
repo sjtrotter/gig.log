@@ -165,11 +165,23 @@ class CensusSpoolTest {
         val retry = spool.take(2, 100_000)
         spool.markInFlight(retry.map { it.id }, "legacy-batch")
         // #1709: a run that holds every item (no platform list) takes nothing and leaves the retry alone.
-        assertEquals(emptyList<CensusSpool.Spooled>(), spool.take(100, 100_000) { false })
+        assertEquals(emptyList<CensusSpool.Spooled>(), spool.take(100, 100_000, { false }, keepHeldRetry = true))
         assertEquals(CensusSpool.InFlight("legacy-batch", retry.map { it.id }), spool.inFlight())
         assertEquals(3, spool.count())
         assertEquals(retry, spool.take(100, 100_000))
         assertEquals("legacy-batch", spool.inFlight()?.batchId)
+    }
+
+    @Test fun `with a platform list a retry refused whole steps aside for accepted work queued behind it`() = runTest {
+        val dir = File(tmp.newFolder(), "spool")
+        val spool = CensusSpool(dir, CensusUploadStats(), StandardTestDispatcher(testScheduler), now = { 10L })
+        repeat(3) { spool.append(censusRecord(it)) }
+        val all = spool.take(100, 100_000)
+        spool.markInFlight(all.take(1).map { it.id }, "held-batch")
+        val held = all.first().id
+        assertEquals(all.drop(1), spool.take(100, 100_000) { it.id != held })
+        assertNull("the held retry's marker is dropped so accepted work is not blocked", spool.inFlight())
+        assertEquals(3, spool.count())
     }
 
     @Test fun `corrupt in flight is removed counted once and fresh items remain drainable`() = runTest {

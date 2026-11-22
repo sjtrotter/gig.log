@@ -237,11 +237,15 @@ internal class CensusWorkerHarness(scope: CoroutineScope, io: CoroutineDispatche
     suspend fun initialize(enabled: Boolean = true) {
         preferences.setCensusUploadEnabled(enabled)
         whenever(credentials.current()).thenReturn(credential)
-        // As the real spool: a record the worker does not admit (#1709) is passed over and drops a retry holding it.
-        whenever(spool.take(eq(100), eq(900 * 1024), any())).thenAnswer { invocation ->
+        // As the real spool: a record the worker does not admit (#1709) is passed over and drops a retry holding it,
+        // except that a run holding everything keeps a retry it refuses whole.
+        whenever(spool.take(eq(100), eq(900 * 1024), any(), any())).thenAnswer { invocation ->
             val admit = invocation.getArgument<(CensusSpool.Spooled) -> Boolean>(2)
+            val keepHeldRetry = invocation.getArgument<Boolean>(3)
             val retained = pending?.ids?.mapNotNull { id -> queued.flatten().find { it.id == id } }
-            if (!retained.isNullOrEmpty() && retained.all(admit)) retained else {
+            if (!retained.isNullOrEmpty() && retained.all(admit)) retained
+            else if (keepHeldRetry && !retained.isNullOrEmpty() && retained.none(admit)) emptyList<CensusSpool.Spooled>()
+            else {
                 pending = null
                 queued.firstNotNullOfOrNull { batch -> batch.filter(admit).ifEmpty { null } } ?: emptyList<CensusSpool.Spooled>()
             }
@@ -260,10 +264,13 @@ internal class CensusWorkerHarness(scope: CoroutineScope, io: CoroutineDispatche
             queued.addAll(remaining)
             Unit
         }
-        whenever(envelopeSpool.take(eq(20), eq(900 * 1024), any())).thenAnswer { invocation ->
+        whenever(envelopeSpool.take(eq(20), eq(900 * 1024), any(), any())).thenAnswer { invocation ->
             val admit = invocation.getArgument<(CensusSpool.Spooled) -> Boolean>(2)
+            val keepHeldRetry = invocation.getArgument<Boolean>(3)
             val retained = envelopePending?.ids?.mapNotNull { id -> envelopes.find { it.id == id } }
-            if (!retained.isNullOrEmpty() && retained.all(admit)) retained else {
+            if (!retained.isNullOrEmpty() && retained.all(admit)) retained
+            else if (keepHeldRetry && !retained.isNullOrEmpty() && retained.none(admit)) emptyList<CensusSpool.Spooled>()
+            else {
                 envelopePending = null
                 envelopes.filter(admit).take(20)
             }

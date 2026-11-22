@@ -32,6 +32,9 @@ internal class CensusPlatformHold {
         accepted = acceptedIn(policy)
     }
 
+    /** True when this run read no platform list, so it holds every item. */
+    val holdsEverything: Boolean get() = accepted == null
+
     /** True when the policy accepts [platform]. */
     fun sends(platform: String?): Boolean = platform != null && accepted?.contains(platform) == true
 
