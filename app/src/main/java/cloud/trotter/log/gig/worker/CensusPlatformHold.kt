@@ -9,8 +9,11 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.long
 import timber.log.Timber
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneOffset
 
 /**
  * #1709: the delivery apps one census run may upload for, read from the server's `/v1/policy` (`acceptedPlatforms`).
@@ -37,21 +40,23 @@ internal class CensusPlatformHold {
 
     /**
      * True when the run may take [item] of a queue ([stream] keeps the queues' ids apart): the policy accepts its
-     * platform, or the run removes it unsent anyway (an app the [covered] choices leave out, or a day before
+     * platform, or the run removes it unsent anyway (an app the [covered] choices leave out, or a [dayOf] before
      * [oldestDay]). Otherwise it is counted as held and stays queued.
      */
-    fun admits(item: CensusSpool.Spooled, stream: String, covered: Collection<String>, oldestDay: LocalDate? = null): Boolean {
+    fun admits(item: CensusSpool.Spooled, stream: String, covered: Collection<String>, oldestDay: LocalDate): Boolean {
         val json = Json.parseToJsonElement(item.itemJson).jsonObject
         // An item without a platform is not covered: the run removes it.
         val platform = json["platform"]?.jsonPrimitive?.contentOrNull ?: return true
         if (platform !in covered || sends(platform)) return true
-        if (oldestDay != null && LocalDate.parse(json.getValue("day").jsonPrimitive.content) < oldestDay) return true
-        hold(platform, "$stream:${item.id}")
-        return false
+        if (dayOf(json) < oldestDay) return true
+        return sendsOrHolds(platform, "$stream:${item.id}")
     }
 
+    /** True when the policy accepts [platform]; otherwise counts [key] as held. */
+    fun sendsOrHolds(platform: String, key: String): Boolean = sends(platform).also { if (!it) hold(platform, key) }
+
     /** Counts [key] (unique within the run) as held for [platform]. */
-    fun hold(platform: String, key: String) {
+    private fun hold(platform: String, key: String) {
         held.getOrPut(if (platform in CensusPlatforms.ALL) platform else "other") { mutableSetOf() } += key
     }
 
@@ -69,6 +74,15 @@ internal class CensusPlatformHold {
     }
 
     companion object {
+        /**
+         * The UTC day of a queued item: a skeleton's `day`, or the UTC date of an envelope's `timestamp` (epoch
+         * milliseconds). The 7-day expiry reads it for both queues.
+         */
+        fun dayOf(item: CensusSpool.Spooled): LocalDate = dayOf(Json.parseToJsonElement(item.itemJson).jsonObject)
+
+        private fun dayOf(json: JsonObject): LocalDate = json["day"]?.let { LocalDate.parse(it.jsonPrimitive.content) }
+            ?: LocalDate.ofInstant(Instant.ofEpochMilli(json.getValue("timestamp").jsonPrimitive.long), ZoneOffset.UTC)
+
         /** The policy's `acceptedPlatforms`; null when the field is missing, not an array, or holds a non-string. */
         fun acceptedIn(policy: JsonObject): Set<String>? {
             val list = policy["acceptedPlatforms"] as? JsonArray ?: return null

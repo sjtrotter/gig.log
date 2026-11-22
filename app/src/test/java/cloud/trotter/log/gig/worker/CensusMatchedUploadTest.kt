@@ -18,7 +18,7 @@ import java.time.ZoneOffset
 
 /**
  * #1573 A7: a matched skeleton goes in its own batch, under a batch id keyed on its rule as well as its layout, so the
- * server never answers it `duplicate` for the UNKNOWN batch of the same layout; UNKNOWN batch ids are unchanged.
+ * server never answers it `duplicate` for the UNKNOWN batch of the same layout. Both are keyed on the items' bytes (#1709).
  */
 @RunWith(RobolectricTestRunner::class)
 class CensusMatchedUploadTest {
@@ -45,10 +45,9 @@ class CensusMatchedUploadTest {
         h.api.uploads += accepted(1)
         assertEquals(ListenableWorker.Result.success(), h.worker().doWork())
         assertEquals(listOf(listOf(unknown.itemJson), listOf(matched.itemJson)), h.api.bodies)
-        assertEquals("the UNKNOWN batch id is unchanged", "ffe054fe7ae0cb6dc65c3af9b61d5209", h.api.batches[0])
-        assertEquals(CensusApi.batchId(listOf(layout)), h.api.batches[0])
-        assertEquals("m-9527fe53196e0340745404396cba6b93", h.api.batches[1])
-        assertEquals(CensusApi.matchedBatchId(listOf(layout to rule)), h.api.batches[1])
+        assertEquals(CensusApi.skeletonBatchId(listOf(unknown.itemJson), matched = false), h.api.batches[0])
+        assertEquals(CensusApi.skeletonBatchId(listOf(matched.itemJson), matched = true), h.api.batches[1])
+        assertTrue(h.api.batches[1].startsWith("m-"))
         assertNotEquals(h.api.batches[0], h.api.batches[1])
         assertEquals(2L, h.stats.uploaded.get())
         assertTrue(h.queued.isEmpty())
@@ -64,9 +63,9 @@ class CensusMatchedUploadTest {
         assertEquals(ListenableWorker.Result.success(), h.worker().doWork())
         assertEquals(
             listOf(
-                CensusApi.matchedBatchId(listOf(layout to rule, "b".repeat(64) to "doordash.screen.dash_summary")),
-                CensusApi.matchedBatchId(listOf(layout to rule)),
-                CensusApi.matchedBatchId(listOf("b".repeat(64) to "doordash.screen.dash_summary")),
+                CensusApi.skeletonBatchId(listOf(first.itemJson, second.itemJson), matched = true),
+                CensusApi.skeletonBatchId(listOf(first.itemJson), matched = true),
+                CensusApi.skeletonBatchId(listOf(second.itemJson), matched = true),
             ),
             h.api.batches,
         )

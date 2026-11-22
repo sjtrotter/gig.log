@@ -117,7 +117,7 @@ class CensusPlatformHoldTest {
         assertTrue("held is not rejected", h.stats.rejectedCounts().isEmpty())
         assertEquals(0L, h.stats.platformNotChosen.get())
         assertEquals(CensusRunOutcome.UPLOADED, h.preferences.censusLastRun.first()?.outcome)
-        assertEquals(listOf(Log.INFO to "census held instacart=3"), logs.filter { it.second.startsWith("census held") })
+        assertEquals(listOf(Log.INFO to "census held instacart=4"), logs.filter { it.second.startsWith("census held") })
 
         h.api.policyResult = PolicyResult.Available(DEFAULT_POLICY)
         h.api.healthResults += HealthResult.Accepted(1, emptyMap())
@@ -157,12 +157,83 @@ class CensusPlatformHoldTest {
             assertEquals(listOf(listOf(click)), h.clicks.frozen().map { it.items })
             val lastRun = h.preferences.censusLastRun.first()
             assertEquals(CensusRunOutcome.HELD, lastRun?.outcome)
-            assertEquals(3, lastRun?.detail)
+            assertEquals("skeleton, envelope, click and health row", 4, lastRun?.detail)
             assertEquals(listOf(Log.WARN to "census policy has no platform list: holding every item this run"),
                 logs.filter { it.first == Log.WARN })
-            assertEquals(listOf(Log.INFO to "census held doordash=3"), logs.filter { it.second.startsWith("census held") })
+            assertEquals(listOf(Log.INFO to "census held doordash=4"), logs.filter { it.second.startsWith("census held") })
             h.clickSpool.clear()
         }
+    }
+
+    @Test fun `a held outline of one layout never reuses the batch id of another platform's`() = runTest {
+        assumeTrue("Instacart is readable only in the build that reads unbound platforms", BuildConfig.READS_UNBOUND_PLATFORMS)
+        val h = harness()
+        h.initialize()
+        h.api.policyResult = withoutInstacart
+        val today = LocalDate.now(ZoneOffset.UTC)
+        val layout = "a".repeat(64)
+        val doordash = CensusSpool.Spooled("1-1.json", layout, "{\"platform\":\"doordash\",\"day\":\"$today\"}")
+        val instacart = CensusSpool.Spooled("1-2.json", layout, "{\"platform\":\"instacart\",\"day\":\"$today\"}")
+        h.queued += listOf(listOf(doordash), listOf(instacart))
+        h.api.uploads += accepted(1)
+        assertEquals(ListenableWorker.Result.success(), h.worker().doWork())
+        h.api.policyResult = PolicyResult.Available(DEFAULT_POLICY)
+        h.api.uploads += accepted(1)
+        assertEquals(ListenableWorker.Result.success(), h.worker().doWork())
+        assertEquals(listOf(listOf(doordash.itemJson), listOf(instacart.itemJson)), h.api.bodies)
+        assertEquals("one fingerprint, two batch ids", 2, h.api.batches.distinct().size)
+        assertTrue(h.queued.isEmpty())
+    }
+
+    @Test fun `two split halves of one layout get two batch ids`() = runTest {
+        val h = harness()
+        h.initialize()
+        val today = LocalDate.now(ZoneOffset.UTC)
+        val layout = "a".repeat(64)
+        val items = listOf("8.1", "8.2").mapIndexed { i, version ->
+            CensusSpool.Spooled("1-${i + 1}.json", layout,
+                "{\"platform\":\"doordash\",\"platformAppVersion\":\"$version\",\"day\":\"$today\"}")
+        }
+        h.queued += items
+        h.api.uploads.addAll(listOf(UploadResult.PayloadTooLarge, accepted(1), accepted(1)))
+        assertEquals(ListenableWorker.Result.success(), h.worker().doWork())
+        assertEquals(listOf(items, items.take(1), items.drop(1)).map { batch -> batch.map { it.itemJson } }, h.api.bodies)
+        assertEquals(3, h.api.batches.distinct().size)
+        assertTrue(h.queued.isEmpty())
+    }
+
+    @Test fun `a held envelope past seven days is deleted and never sent`() = runTest {
+        assumeTrue("Instacart is readable only in the build that reads unbound platforms", BuildConfig.READS_UNBOUND_PLATFORMS)
+        val h = harness()
+        h.initialize()
+        h.api.policyResult = withoutInstacart
+        val (_, fresh) = h.envelopesWith(Platform.Instacart)
+        h.envelopes.clear()
+        val eightDaysAgo = System.currentTimeMillis() - 8L * 24 * 3_600_000
+        val old = CensusSpool.Spooled("2-98.json", fresh.fingerprint,
+            fresh.itemJson.replace(Regex("\"timestamp\":[0-9]+"), "\"timestamp\":$eightDaysAgo"))
+        h.envelopes += listOf(old, fresh)
+        assertEquals(ListenableWorker.Result.success(), h.worker().doWork())
+        assertTrue(h.api.envelopeBodies.isEmpty())
+        assertEquals("the old one expired, the fresh one is held", listOf(fresh), h.envelopes)
+        assertEquals(1L, h.stats.envelopesDropped.get())
+        h.api.policyResult = PolicyResult.Available(DEFAULT_POLICY)
+        h.api.envelopeResults += accepted(1)
+        assertEquals(ListenableWorker.Result.success(), h.worker().doWork())
+        assertEquals(listOf(listOf(fresh.itemJson)), h.api.envelopeBodies)
+    }
+
+    @Test fun `a run that holds only health rows logs them and ends held`() = runTest {
+        assumeTrue("Instacart is readable only in the build that reads unbound platforms", BuildConfig.READS_UNBOUND_PLATFORMS)
+        val h = harness()
+        h.initialize()
+        h.api.policyResult = withoutInstacart
+        h.healthOf(Platform.Instacart)
+        assertEquals(ListenableWorker.Result.success(), h.worker().doWork())
+        assertTrue(h.api.healthBodies.isEmpty())
+        assertEquals(CensusRunOutcome.HELD, h.preferences.censusLastRun.first()?.outcome)
+        assertEquals(1, h.preferences.censusLastRun.first()?.detail)
+        assertEquals(listOf(Log.INFO to "census held instacart=1"), logs.filter { it.second.startsWith("census held") })
     }
 
     @Test fun `the accepted list is read only from a well-formed field`() {

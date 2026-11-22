@@ -383,7 +383,8 @@ class CensusUploadWorker @AssistedInject constructor(
         // nor does one the policy does not accept yet.
         val covered = coveredPlatforms()
         val candidates = ledger.closedRowsToPost(todayUtc.toString(), todayUtc.minusDays(7).toString())
-            .filter { (key, _) -> key.platform in covered && record.hold.sends(key.platform) }.take(3)
+            .filter { (key, _) -> key.platform in covered && record.hold.sendsOrHolds(key.platform, "h:${key.day}|${key.platformAppVersion}") }
+            .take(3)
         for ((key, row) in candidates) {
             if (!preferences.censusUploadEnabled.first()) {
                 record.set(CensusRunOutcome.DISABLED)
@@ -481,9 +482,7 @@ class CensusUploadWorker @AssistedInject constructor(
                 summarize(record, spoolEmpty = true)
                 return Result.success()
             }
-            val (stale, items) = pending.partition {
-                LocalDate.parse(Json.parseToJsonElement(it.itemJson).jsonObject.getValue("day").jsonPrimitive.content) < oldestDay
-            }
+            val (stale, items) = pending.partition { CensusPlatformHold.dayOf(it) < oldestDay }
             if (stale.isNotEmpty()) {
                 spool.remove(stale.map { it.id })
                 spool.clearInFlight() // The surviving set needs a new batch ID and signature.
@@ -527,7 +526,7 @@ class CensusUploadWorker @AssistedInject constructor(
             }
             // #1709: the items of an app the policy does not accept yet stay frozen on the phone.
             val batch = restricted?.let { kept ->
-                kept.platforms.forEachIndexed { i, wire -> if (!record.hold.sends(wire)) record.hold.hold(wire, "c:${kept.items[i]}") }
+                kept.platforms.forEachIndexed { i, wire -> record.hold.sendsOrHolds(wire, "c:${kept.items[i]}") }
                 clicks.holdBack(kept, record.hold::sends)
             }
             if (batch != null) uploadClickedBatch(api, credential, batch, run, record)?.let { return it }
@@ -599,7 +598,14 @@ class CensusUploadWorker @AssistedInject constructor(
     private suspend fun uploadEnvelopes(api: CensusTransport, credential: Credential, record: RunRecord): Result {
         if (!preferences.censusUploadEnabled.first() || !preferences.censusShareCaptures.first()) return Result.success()
         val covered = coveredPlatforms()
-        val items = dropUncovered(envelopeSpool, envelopeSpool.take(20, 900 * 1024) { record.hold.admits(it, "e", covered) })
+        val oldestDay = LocalDate.now(ZoneOffset.UTC).minusDays(7)
+        // #1709: an envelope past 7 days by its own timestamp is removed unsent, held or not, as a stale skeleton is.
+        val taken = envelopeSpool.take(20, 900 * 1024) { record.hold.admits(it, "e", covered, oldestDay) }
+        val (stale, items) = dropUncovered(envelopeSpool, taken).partition { CensusPlatformHold.dayOf(it) < oldestDay }
+        if (stale.isNotEmpty()) {
+            removeBatch(stale.map { it.id }, envelopeSpool)
+            stats.envelopesDropped.addAndGet(stale.size.toLong())
+        }
         if (items.isNotEmpty()) {
             val batchId = envelopeSpool.inFlight()?.batchId ?: CensusApi.envelopeBatchId(items.map { it.itemJson })
             uploadBatch(api, credential, items, batchId, UploadRun(), record, depth = 0, envelopes = true)?.let { return it }
@@ -758,18 +764,12 @@ class CensusUploadWorker @AssistedInject constructor(
     }
 
     /**
-     * #1573: the ONE batch id of a skeleton batch, initial or a split half. A batch holds one schema: a matched batch is
-     * keyed on each item's fingerprint and rule id ([CensusApi.matchedBatchId]), any other on its fingerprints alone
-     * ([CensusApi.batchId], unchanged).
+     * The ONE batch id of a skeleton batch, initial or a split half, from its items' bytes ([CensusApi.skeletonBatchId],
+     * #1709); a batch holds one schema, and a matched batch (#1573) is the one with rule ids. An unchanged in-flight
+     * retry keeps the id it was sent with.
      */
-    private fun skeletonBatchId(items: List<CensusSpool.Spooled>): String {
-        val ruleIds = items.map { Json.parseToJsonElement(it.itemJson).jsonObject["ruleId"]?.jsonPrimitive?.contentOrNull }
-        return if (ruleIds.all { it == null }) {
-            CensusApi.batchId(items.map { it.fingerprint })
-        } else {
-            CensusApi.matchedBatchId(items.zip(ruleIds) { item, ruleId -> item.fingerprint to ruleId.orEmpty() })
-        }
-    }
+    private fun skeletonBatchId(items: List<CensusSpool.Spooled>): String = CensusApi.skeletonBatchId(items.map { it.itemJson },
+        matched = items.any { Json.parseToJsonElement(it.itemJson).jsonObject["ruleId"]?.jsonPrimitive?.contentOrNull != null })
 
     /** A skeleton or clicked batch answered 401: the run stops and the batch stays queued. */
     private fun unauthorized(credential: Credential, run: UploadRun, record: RunRecord): Result {

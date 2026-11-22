@@ -270,7 +270,7 @@ queued before the dasher unchecked the app is removed unsent, that app's health 
 phone after 8 days), and in the test build its capture envelopes are neither queued nor sent. An item of a delivery app
 the census server does not accept yet (its policy's `acceptedPlatforms`, #1709) stays on the phone instead of being
 sent, and goes once the server lists that app; until then it expires as anything queued does (a skeleton or click
-evidence after 7 days, a health row after 8, a test-build capture envelope when its queue is full), and a run that
+evidence after 7 days, a test-build capture envelope 7 days after its own timestamp, a health row after 8), and a run that
 cannot read that list sends nothing (`CensusPlatformHold`). **Sampling:** at most one skeleton of each
 variant a UTC day is queued (`CensusDailySample`, `CensusSampleKey`). A variant is the skeleton's schema, platform and
 platform app version, then for a screen its structural fingerprint (classes, ids, nesting) and each node's flags and

@@ -783,8 +783,9 @@ is not built yet; the bullets below describe what runs today, and each issue tha
   frame is never sent. `AccessibilityPipeline` reads the census clear boundary once per admitted screen, before capture,
   and the held record is offered with it (`CensusSink.offer(record, boundary)`). `HttpCensusSink` admits it through
   the daily sample, then `CensusMatchedCap` (1 per rule, 10 a day), and lists the matched schema to the publisher only
-  under a consent receipt of revision 32 or later. The worker's one schema-aware batch id helper keys a matched batch,
-  and each 413 split half, on fingerprint and rule id (`CensusApi.matchedBatchId`). Counts under `matched{…}`.
+  under a consent receipt of revision 32 or later. The worker's one batch id helper keys a matched batch, and each 413
+  split half, on its items' bytes, which carry the rule id, under an `m-` prefix (`CensusApi.skeletonBatchId`; #1709,
+  it was fingerprint and rule id before). Counts under `matched{…}`.
   **Invariant:** a matched frame never leaves without its `ruleId` and never under a v1/v2 id.
 - *Click evidence (#1634, ADR-0011 §19)* — UNKNOWN taps only (`obs.target == UNKNOWN_TARGET`); a recognized tap sends
   nothing. **Acquisition:** `ClickEvidenceArming` (the sink's `clickEvidenceArmed`: census on, `uinode.clicked.v1` in
@@ -951,13 +952,17 @@ is not built yet; the bullets below describe what runs today, and each issue tha
   counting it against the limits (an in-flight retry holding one loses its marker, so the rest go under a new batch
   id), `CensusClickCandidates.holdBack` rewrites a mixed frozen batch into its sent and held parts, and health rows of
   that platform are not posted. A held item is not sent, deleted or counted as rejected; its usual expiry still
-  applies (a skeleton's stale check takes a stale held item to remove it; click evidence after seven days, health rows
-  after eight, envelopes only by their queue's size cap), and so does `dropUncovered`. A missing or malformed list, or
+  applies (the 7-day check by a skeleton's `day` or an envelope's own `timestamp`, `CensusPlatformHold.dayOf`, takes a
+  stale held item to remove it; click evidence after seven days, health rows after eight), and so does `dropUncovered`.
+  Held health rows count toward the run's held total. A missing or malformed list, or
   no policy read this run, holds everything (one WARN). One INFO line per run gives the held counts per platform wire
-  (`census held instacart=3`), and a run whose only news is held items ends `held <n>`. A `bad_platform` answer for a
-  policy that raced keeps the old handling.
+  (`census held instacart=4`), and a run whose only news is held items ends `held <n>`. A `bad_platform` answer for a
+  policy that raced keeps the old handling. Because filtering can put one layout of two platforms, or two split halves
+  of one layout, in separate batches the same UTC day, a fresh skeleton batch id is keyed on the items' bytes, not
+  their fingerprints (below).
   A run selects at most three batches of 100 items / 900 KiB, preserving the builder's item bytes.
-  A fresh `batchId = sha256Hex(sorted fingerprints joined by "\n").take(32)` and ordered spool IDs
+  A fresh `batchId = sha256Hex(sorted item JSON joined by "\n").take(32)` (`CensusApi.skeletonBatchId`, `m-` before a
+  matched batch's; #1709, it was the sorted fingerprints before) and ordered spool IDs
   are atomically persisted in `filesDir/census/inflight.json` before sending. Retries send the same
   surviving IDs in order with the saved batch ID before taking new arrivals; removal clears the
   in-flight record. Accepted / duplicate batches are removed; batch-quality rejected batches are

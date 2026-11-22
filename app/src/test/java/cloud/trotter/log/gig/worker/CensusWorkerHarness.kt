@@ -359,7 +359,7 @@ internal class CensusWorkerHarness(scope: CoroutineScope, io: CoroutineDispatche
             val index = ++sequence
             val fingerprint = index.toString().padStart(64, '0')
             val json = requireNotNull(EnvelopeProjection.project(
-                """{"schemaId":"uinode.v1","timestamp":7200123,"platform":"doordash","metadata":{"deviceFingerprint":"removed","rulesetSignature":"removed"},"payload":{"text":"Continue $index"}}""", fingerprint))
+                """{"schemaId":"uinode.v1","timestamp":${System.currentTimeMillis()},"platform":"doordash","metadata":{"deviceFingerprint":"removed","rulesetSignature":"removed"},"payload":{"text":"Continue $index"}}""", fingerprint))
             CensusSpool.Spooled("2-$index.json", fingerprint, json)
         }.also { envelopes += it }
     }
