@@ -173,6 +173,8 @@ class PrivacyExportReplay(
     var revokeNextSkeleton = false
     /** What the fake server's policy (and enrol reply) advertises; #1522 narrows it to screens only. */
     var acceptedSchemaIds: List<String> = listOf("uinode.skeleton.v1", "notification.skeleton.v1")
+    /** #1709: the platforms the fake server's policy accepts, as the live server publishes them today. */
+    var acceptedPlatforms: List<String> = listOf("doordash", "uber", "_unknown")
     var factoryCalls = 0
         private set
     private val client = NetworkClientFactory.okHttpClient("Census", ClientProfile.Census).newBuilder()
@@ -188,7 +190,8 @@ class PrivacyExportReplay(
                 marker?.takeIf { it.isFile }?.readBytes()?.toByteString(), root?.let(::records).orEmpty())
             var status = 200
             val response = when (path) {
-                "/v1/enroll", "/v1/policy" -> """{"acceptedSchemaIds":${JsonArray(acceptedSchemaIds.map { JsonPrimitive(it) })}}"""
+                "/v1/enroll", "/v1/policy" -> """{"acceptedSchemaIds":${JsonArray(acceptedSchemaIds.map { JsonPrimitive(it) })},""" +
+                    """"acceptedPlatforms":${JsonArray(acceptedPlatforms.map { JsonPrimitive(it) })}}"""
                 "/v1/skeletons", "/v1/envelopes" -> if (path == "/v1/skeletons" && revokeNextSkeleton) {
                     revokeNextSkeleton = false
                     status = 401
