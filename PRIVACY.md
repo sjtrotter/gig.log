@@ -52,8 +52,8 @@ enrols the install there at the next daily run. Nothing reaches a server before 
   are not bound, cannot be enabled in Settings, and a saved preference from an older install that enables them is
   ignored (`Platform.readable`, `PlatformPreferencesRepository`). **The debug (tester) build also reads Instacart
   Shopper (`com.instacart.shopper`) and Walmart Spark (`com.walmart.spark`)** when the tester turns them on in
-  Settings, so a tester who drives them feeds their screens to the census (build table `readsUnboundPlatforms`, its
-  own `src/debug` service config and `<queries>`). They have no rules, so every screen of theirs is UNKNOWN and is
+  Settings, so a tester who drives them feeds their screens to the census once its server accepts those apps (§6;
+  build table `readsUnboundPlatforms`, its own `src/debug` service config and `<queries>`). They have no rules, so every screen of theirs is UNKNOWN and is
   handled like any UNKNOWN screen in that build: the sensitive-marker backstop first, then a capture envelope kept on
   the device (§3, §7) and, only with the census switches on, the census outline or capture text (§6).
   `AccessibilityPackageParityTest` pins, per build, the service config and `<queries>` to the registry's readable
@@ -267,7 +267,11 @@ to 20; `ParseRotTracker` defines a checked screen as one visit, `HealthLedger` k
 fewer than 20 times that day is left out, and no total of checked screens is sent. The run checks the consent first: without it, nothing is sent. The
 census choices filter every kind of data: a skeleton from a delivery app the choices leave out is not queued, one
 queued before the dasher unchecked the app is removed unsent, that app's health rows are not sent (they age out on the
-phone after 8 days), and in the test build its capture envelopes are neither queued nor sent. **Sampling:** at most one skeleton of each
+phone after 8 days), and in the test build its capture envelopes are neither queued nor sent. An item of a delivery app
+the census server does not accept yet (its policy's `acceptedPlatforms`, #1709) stays on the phone instead of being
+sent, and goes once the server lists that app; until then it expires as anything queued does (a skeleton or click
+evidence after 7 days, a health row after 8, a test-build capture envelope when its queue is full), and a run that
+cannot read that list sends nothing (`CensusPlatformHold`). **Sampling:** at most one skeleton of each
 variant a UTC day is queued (`CensusDailySample`, `CensusSampleKey`). A variant is the skeleton's schema, platform and
 platform app version, then for a screen its structural fingerprint (classes, ids, nesting) and each node's flags and
 text fields, and for a notification its channel and which fields and actions it has; every value adds only its format

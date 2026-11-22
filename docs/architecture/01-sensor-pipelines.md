@@ -944,6 +944,18 @@ is not built yet; the bullets below describe what runs today, and each issue tha
   of a platform they leave out are not posted, and spooled skeletons and envelopes of an app unchecked after they were
   queued are removed unsent (`dropUncovered`, counted `platformNotChosen`); the envelope sink also refuses to queue
   them.
+  **Platforms the server accepts (#1709).** The platform wire ids have one owner, the census contract's
+  `CensusPlatforms` (`Platform.wire` reads its constants; `PlatformWireContractTest` pins the two sets equal), and the
+  server publishes the ones it accepts as `/v1/policy`'s `acceptedPlatforms`. Each run reads that list from the policy
+  it fetches (`CensusPlatformHold`); an item of any other platform is held: `CensusSpool.take` passes it over without
+  counting it against the limits (an in-flight retry holding one loses its marker, so the rest go under a new batch
+  id), `CensusClickCandidates.holdBack` rewrites a mixed frozen batch into its sent and held parts, and health rows of
+  that platform are not posted. A held item is not sent, deleted or counted as rejected; its usual expiry still
+  applies (a skeleton's stale check takes a stale held item to remove it; click evidence after seven days, health rows
+  after eight, envelopes only by their queue's size cap), and so does `dropUncovered`. A missing or malformed list, or
+  no policy read this run, holds everything (one WARN). One INFO line per run gives the held counts per platform wire
+  (`census held instacart=3`), and a run whose only news is held items ends `held <n>`. A `bad_platform` answer for a
+  policy that raced keeps the old handling.
   A run selects at most three batches of 100 items / 900 KiB, preserving the builder's item bytes.
   A fresh `batchId = sha256Hex(sorted fingerprints joined by "\n").take(32)` and ordered spool IDs
   are atomically persisted in `filesDir/census/inflight.json` before sending. Retries send the same
