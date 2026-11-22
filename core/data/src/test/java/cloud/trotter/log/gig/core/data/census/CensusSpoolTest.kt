@@ -142,6 +142,22 @@ class CensusSpoolTest {
         assertNull(reopened.inFlight())
     }
 
+    @Test fun `a record take does not admit stays queued outside the limits and drops a retry that holds it`() = runTest {
+        val dir = File(tmp.newFolder(), "spool")
+        val stats = CensusUploadStats()
+        val spool = CensusSpool(dir, stats, StandardTestDispatcher(testScheduler), now = { 10L })
+        repeat(3) { spool.append(censusRecord(it)) }
+        val held = censusRecord(0).fingerprint
+        val all = spool.take(100, 100_000)
+        // #1709: the held record is passed over and does not use up the item limit.
+        assertEquals(all.drop(1).take(1), spool.take(1, 100_000) { it.fingerprint != held })
+        spool.markInFlight(all.take(2).map { it.id }, "mixed-batch")
+        assertEquals(all.drop(1), spool.take(100, 100_000) { it.fingerprint != held })
+        assertNull("a retry holding a refused record loses its marker", spool.inFlight())
+        assertEquals(3, spool.count())
+        assertEquals(all, spool.take(100, 100_000))
+    }
+
     @Test fun `corrupt in flight is removed counted once and fresh items remain drainable`() = runTest {
         for (corrupt in listOf("broken", "{}", "{\"batchId\":\"bad\",\"ids\":[\"../escape\"]}")) {
             val dir = File(tmp.newFolder(), "spool")

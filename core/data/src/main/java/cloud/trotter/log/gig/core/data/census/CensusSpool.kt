@@ -132,7 +132,12 @@ open class CensusSpool internal constructor(
         }
     }
 
-    open suspend fun take(maxItems: Int, maxBytes: Int): List<Spooled> = withContext(io) {
+    /**
+     * The oldest records, at most [maxItems] and [maxBytes]. #1709: a record [admit] refuses is passed over, left queued
+     * and not counted against the limits. An in-flight retry that holds a refused record loses its marker, so what is
+     * taken goes out in a new batch.
+     */
+    open suspend fun take(maxItems: Int, maxBytes: Int, admit: (Spooled) -> Boolean = { true }): List<Spooled> = withContext(io) {
         require(maxItems > 0 && maxBytes > 0)
         mutex.withLock {
             initialize()
@@ -143,7 +148,7 @@ open class CensusSpool internal constructor(
                     val file = File(directory, id)
                     if (file.isFile) readOrDrop(file) else null
                 }
-                if (items.isNotEmpty()) return@withLock items
+                if (items.isNotEmpty() && items.all(admit)) return@withLock items
                 deleteInFlight()
             }
             val result = mutableListOf<Spooled>()
@@ -151,6 +156,7 @@ open class CensusSpool internal constructor(
             for (file in files()) {
                 if (result.size == maxItems) break
                 val item = readOrDrop(file) ?: continue
+                if (!admit(item)) continue
                 val itemBytes = item.itemJson.toByteArray(Charsets.UTF_8).size
                 if (itemBytes > maxBytes) {
                     drop(file, stats.spoolOversized)
