@@ -25,6 +25,9 @@ package cloud.trotter.census.contract
  * stamps, rule ids and short digests (census#64, #1573, #1634). The phone and the server both read them from here.
  */
 object WireTokenGrammars {
+    /** A platform wire id, such as `doordash` or `_unknown` ([CensusPlatforms]); the server checks it before its allowlist. */
+    val platform = Regex("^[a-z_][a-z0-9_]{0,31}$")
+
     /** A platform app's numeric version, such as `8.99.20`. */
     val platformAppVersion = Regex("^[0-9]{1,5}(\\.[0-9]{1,5}){0,3}$")
 

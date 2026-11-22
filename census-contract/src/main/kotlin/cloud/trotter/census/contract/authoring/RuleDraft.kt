@@ -21,6 +21,7 @@
 package cloud.trotter.census.contract.authoring
 
 import cloud.trotter.census.contract.SensitiveMarkerScan
+import cloud.trotter.census.contract.WireTokenGrammars
 import cloud.trotter.census.contract.authoring.RuleAuthoringVocabulary as Vocabulary
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.Json
@@ -78,7 +79,6 @@ object RuleDraft {
         .associateWith { Regex(it, RegexOption.IGNORE_CASE) }
     private val dayPattern = Regex("""^\d{4}-\d{2}-\d{2}$""")
     private val versionPattern = Regex("^[0-9A-Za-z.+_-]{1,40}$")
-    private val platformPattern = Regex("^[a-z_][a-z0-9_]{0,31}$")
 
     fun generate(
         envelope: JsonObject,
@@ -90,7 +90,7 @@ object RuleDraft {
         val draft = Draft(envelope, selections)
         if (!dayPattern.matches(day)) draft.errors += "invalid day"
         if (platformAppVersion != null && !versionPattern.matches(platformAppVersion)) draft.errors += "invalid platformAppVersion"
-        if (!platformPattern.matches(platform)) draft.errors += "invalid platform"
+        if (!WireTokenGrammars.platform.matches(platform)) draft.errors += "invalid platform"
         val rule = draft.build(platform)
         if (draft.errors.isNotEmpty()) return DraftResult.Refused(draft.errors.toList())
         val fragment = buildJsonObject {

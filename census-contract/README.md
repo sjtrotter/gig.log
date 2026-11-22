@@ -34,6 +34,16 @@ path-sorted record containing either its refusal reason or its fingerprint,
 sorted distinct hashes, and embedded skeleton. The server's ingest suite replays
 this golden; it contains no plaintext text slots.
 
+## Platforms
+
+[`CensusPlatforms`](src/main/kotlin/cloud/trotter/census/contract/CensusPlatforms.kt) (#1709) is the one list of
+platform wire ids: `doordash`, `uber`, `instacart`, `walmart_spark` and the unresolved bucket `_unknown`. Each passes
+`WireTokenGrammars.platform` (`^[a-z_][a-z0-9_]{0,31}$`, the grammar the server checks before its allowlist). The app's
+`Platform` registry takes its wire ids from these constants, and a `:domain` test pins the two sets equal. The server's
+policy publishes the platforms it accepts (`acceptedPlatforms` at `/v1/policy`), which it derives from
+`CensusPlatforms.ALL` once its pinned checkout carries this file. Adding a delivery app is one entry here and one in the
+registry. Until the policy lists a platform, the phone holds that platform's items instead of sending them.
+
 ## Health report
 
 [`cloud.trotter.census.contract.health`](src/main/kotlin/cloud/trotter/census/contract/health/)
