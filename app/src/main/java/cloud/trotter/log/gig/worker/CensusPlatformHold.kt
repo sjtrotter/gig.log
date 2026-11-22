@@ -81,7 +81,7 @@ internal class CensusPlatformHold {
         fun dayOf(item: CensusSpool.Spooled): LocalDate = dayOf(Json.parseToJsonElement(item.itemJson).jsonObject)
 
         private fun dayOf(json: JsonObject): LocalDate = json["day"]?.let { LocalDate.parse(it.jsonPrimitive.content) }
-            ?: LocalDate.ofInstant(Instant.ofEpochMilli(json.getValue("timestamp").jsonPrimitive.long), ZoneOffset.UTC)
+            ?: Instant.ofEpochMilli(json.getValue("timestamp").jsonPrimitive.long).atZone(ZoneOffset.UTC).toLocalDate()
 
         /** The policy's `acceptedPlatforms`; null when the field is missing, not an array, or holds a non-string. */
         fun acceptedIn(policy: JsonObject): Set<String>? {

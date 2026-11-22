@@ -158,6 +158,20 @@ class CensusSpoolTest {
         assertEquals(all, spool.take(100, 100_000))
     }
 
+    @Test fun `a retry refused whole keeps its marker and id and goes out unchanged once admitted`() = runTest {
+        val dir = File(tmp.newFolder(), "spool")
+        val spool = CensusSpool(dir, CensusUploadStats(), StandardTestDispatcher(testScheduler), now = { 10L })
+        repeat(3) { spool.append(censusRecord(it)) }
+        val retry = spool.take(2, 100_000)
+        spool.markInFlight(retry.map { it.id }, "legacy-batch")
+        // #1709: a run that holds every item (no platform list) takes nothing and leaves the retry alone.
+        assertEquals(emptyList<CensusSpool.Spooled>(), spool.take(100, 100_000) { false })
+        assertEquals(CensusSpool.InFlight("legacy-batch", retry.map { it.id }), spool.inFlight())
+        assertEquals(3, spool.count())
+        assertEquals(retry, spool.take(100, 100_000))
+        assertEquals("legacy-batch", spool.inFlight()?.batchId)
+    }
+
     @Test fun `corrupt in flight is removed counted once and fresh items remain drainable`() = runTest {
         for (corrupt in listOf("broken", "{}", "{\"batchId\":\"bad\",\"ids\":[\"../escape\"]}")) {
             val dir = File(tmp.newFolder(), "spool")
