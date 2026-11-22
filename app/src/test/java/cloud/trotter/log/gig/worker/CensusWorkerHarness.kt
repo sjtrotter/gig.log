@@ -43,6 +43,7 @@ import cloud.trotter.log.gig.core.network.census.EnrolResult
 import cloud.trotter.log.gig.core.network.census.PolicyResult
 import cloud.trotter.log.gig.core.network.census.UploadResult
 import cloud.trotter.log.gig.domain.census.EnvelopeProjection
+import cloud.trotter.census.contract.CensusPlatforms
 import cloud.trotter.census.contract.CensusSkeletonSchema
 import cloud.trotter.census.contract.NotificationSkeletonSchema
 import cloud.trotter.census.contract.SkeletonSchema
@@ -63,7 +64,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -75,6 +78,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.mockito.kotlin.any
+import org.mockito.kotlin.eq
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
 import org.mockito.kotlin.spy
@@ -98,6 +102,12 @@ internal class CensusMemoryPreferences : DataStore<Preferences> {
         return next
     }
 }
+
+/** #1709: a policy that accepts screens (what a failed read declares) and every platform the contract lists. */
+internal val DEFAULT_POLICY = JsonObject(mapOf(
+    "acceptedSchemaIds" to JsonArray(listOf(JsonPrimitive(SkeletonSchema.SCHEMA_ID))),
+    "acceptedPlatforms" to JsonArray(CensusPlatforms.ALL.map { JsonPrimitive(it) }),
+))
 
 internal class FakeCensusApi : CensusTransport {
     val envelopeResults = ArrayDeque<UploadResult>()
@@ -132,7 +142,8 @@ internal class FakeCensusApi : CensusTransport {
         declaredSchemaIds += schemaIds
         return enrollments.removeFirst()
     }
-    var policyResult: PolicyResult = PolicyResult.Unavailable(503)
+    /** #1709: by default the server accepts screens and every platform; a test that needs less sets its own. */
+    var policyResult: PolicyResult = PolicyResult.Available(DEFAULT_POLICY)
     var policyCalls = 0
     override suspend fun policy(): PolicyResult = policyResult.also { policyCalls++ }
     override suspend fun uploadSkeletons(cred: Bearer.Credential, batchId: String, itemsJson: List<String>): UploadResult {
@@ -226,11 +237,13 @@ internal class CensusWorkerHarness(scope: CoroutineScope, io: CoroutineDispatche
     suspend fun initialize(enabled: Boolean = true) {
         preferences.setCensusUploadEnabled(enabled)
         whenever(credentials.current()).thenReturn(credential)
-        whenever(spool.take(100, 900 * 1024)).thenAnswer {
+        // As the real spool: a record the worker does not admit (#1709) is passed over and drops a retry holding it.
+        whenever(spool.take(eq(100), eq(900 * 1024), any())).thenAnswer { invocation ->
+            val admit = invocation.getArgument<(CensusSpool.Spooled) -> Boolean>(2)
             val retained = pending?.ids?.mapNotNull { id -> queued.flatten().find { it.id == id } }
-            if (!retained.isNullOrEmpty()) retained else {
+            if (!retained.isNullOrEmpty() && retained.all(admit)) retained else {
                 pending = null
-                queued.firstOrNull() ?: emptyList<CensusSpool.Spooled>()
+                queued.firstNotNullOfOrNull { batch -> batch.filter(admit).ifEmpty { null } } ?: emptyList<CensusSpool.Spooled>()
             }
         }
         whenever(spool.inFlight()).thenAnswer { pending }
@@ -247,9 +260,13 @@ internal class CensusWorkerHarness(scope: CoroutineScope, io: CoroutineDispatche
             queued.addAll(remaining)
             Unit
         }
-        whenever(envelopeSpool.take(20, 900 * 1024)).thenAnswer {
+        whenever(envelopeSpool.take(eq(20), eq(900 * 1024), any())).thenAnswer { invocation ->
+            val admit = invocation.getArgument<(CensusSpool.Spooled) -> Boolean>(2)
             val retained = envelopePending?.ids?.mapNotNull { id -> envelopes.find { it.id == id } }
-            if (!retained.isNullOrEmpty()) retained else { envelopePending = null; envelopes.take(20) }
+            if (!retained.isNullOrEmpty() && retained.all(admit)) retained else {
+                envelopePending = null
+                envelopes.filter(admit).take(20)
+            }
         }
         whenever(envelopeSpool.inFlight()).thenAnswer { envelopePending }
         whenever(envelopeSpool.markInFlight(any(), any())).thenAnswer {

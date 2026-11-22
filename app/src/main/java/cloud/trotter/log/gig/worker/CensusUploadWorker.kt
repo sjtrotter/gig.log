@@ -103,6 +103,8 @@ class CensusUploadWorker @AssistedInject constructor(
         var healthPosted = 0
         var healthRejected = 0
         var healthFailed = 0
+        /** #1709: the platforms this run's policy accepts, and what it held for the others. */
+        val hold = CensusPlatformHold()
         /** #1622: the server answered 401 for this enrolled ID with the clock right; [run] enrols a fresh one. */
         var identityUnknown = false
         /**
@@ -161,9 +163,13 @@ class CensusUploadWorker @AssistedInject constructor(
                 val api = apis.create(preferences.censusBaseUrl.first())
                 val credential = loadCredential()
                 val enrolled = if (credential.enrolled) {
-                    // Refresh capabilities for existing installs too; a failed fetch keeps the last-known policy.
+                    // Refresh capabilities for existing installs too; a failed fetch keeps the last-known policy, but
+                    // without a platform list this run holds every item (#1709).
                     val policy = api.policy()
-                    if (policy is PolicyResult.Available) preferences.setCensusPolicy(policy.policy)
+                    if (policy is PolicyResult.Available) {
+                        preferences.setCensusPolicy(policy.policy)
+                        record.hold.read(policy.policy)
+                    }
                     Enrollment.Ready(credential)
                 } else enrol(api, credential, record)
                 when (enrolled) {
@@ -184,6 +190,7 @@ class CensusUploadWorker @AssistedInject constructor(
         } catch (_: Exception) {
             failure(record)
         }
+        record.hold.logHeld(TAG)
         // A consent-off no-op writes nothing: the terminal outcome it would overwrite (revoked, enrol_rejected…) is
         // exactly what the status line exists to explain.
         if (record.outcome != CensusRunOutcome.DISABLED) {
@@ -200,6 +207,7 @@ class CensusUploadWorker @AssistedInject constructor(
 
     /** Health first, then the outlines, then (test build, trusted) the envelopes. */
     private suspend fun send(api: CensusTransport, credential: Credential, record: RunRecord): Result {
+        record.hold.warnIfClosed(TAG)
         val stopped = postHealth(api, credential, record)
         if (stopped != null) return stopped
         val result = uploadBatches(api, credential, record)
@@ -221,7 +229,7 @@ class CensusUploadWorker @AssistedInject constructor(
         record.authorized = false
         Timber.tag(TAG).w("census unauthorized: re-enrolling the same identity")
         val declared = when (val policy = api.policy()) {
-            is PolicyResult.Available -> CensusEnrolSchemas.declared(policy.policy)
+            is PolicyResult.Available -> CensusEnrolSchemas.declared(policy.policy).also { record.hold.read(policy.policy) }
             is PolicyResult.Unavailable, is PolicyResult.TransportFailure -> CensusEnrolSchemas.declared(null)
         }
         if (declared.isEmpty()) return Result.success()
@@ -323,6 +331,7 @@ class CensusUploadWorker @AssistedInject constructor(
         val declared = when (val policy = api.policy()) {
             is PolicyResult.Available -> {
                 preferences.setCensusPolicy(policy.policy)
+                record.hold.read(policy.policy)
                 CensusEnrolSchemas.declared(policy.policy)
             }
             is PolicyResult.Unavailable, is PolicyResult.TransportFailure -> CensusEnrolSchemas.declared(null)
@@ -370,10 +379,11 @@ class CensusUploadWorker @AssistedInject constructor(
     private suspend fun postHealth(api: CensusTransport, credential: Credential, record: RunRecord): Result? {
         val ledger = healthSink.snapshot()
         val todayUtc = LocalDate.now(ZoneOffset.UTC)
-        // #1620: a delivery app the census choices leave out sends no health rows either; its rows age out locally.
+        // #1620: a delivery app the census choices leave out sends no health rows either; its rows age out locally. #1709:
+        // nor does one the policy does not accept yet.
         val covered = coveredPlatforms()
         val candidates = ledger.closedRowsToPost(todayUtc.toString(), todayUtc.minusDays(7).toString())
-            .filter { (key, _) -> key.platform in covered }.take(3)
+            .filter { (key, _) -> key.platform in covered && record.hold.sends(key.platform) }.take(3)
         for ((key, row) in candidates) {
             if (!preferences.censusUploadEnabled.first()) {
                 record.set(CensusRunOutcome.DISABLED)
@@ -461,14 +471,16 @@ class CensusUploadWorker @AssistedInject constructor(
                 record.set(CensusRunOutcome.DISABLED)
                 return Result.success()
             }
-            val taken = spool.take(100, 900 * 1024)
+            val oldestDay = LocalDate.now(ZoneOffset.UTC).minusDays(7)
+            // #1709: a held item stays queued; "empty" below means nothing is left that this run may send.
+            val covered = coveredPlatforms()
+            val taken = spool.take(100, 900 * 1024) { record.hold.admits(it, "s", covered, oldestDay) }
             val pending = dropUncovered(spool, taken)
             if (taken.isEmpty()) {
                 record.skeletonSpoolEmpty = true
                 summarize(record, spoolEmpty = true)
                 return Result.success()
             }
-            val oldestDay = LocalDate.now(ZoneOffset.UTC).minusDays(7)
             val (stale, items) = pending.partition {
                 LocalDate.parse(Json.parseToJsonElement(it.itemJson).jsonObject.getValue("day").jsonPrimitive.content) < oldestDay
             }
@@ -509,9 +521,14 @@ class CensusUploadWorker @AssistedInject constructor(
         clicks.closeEndedDays()
         val covered = coveredPlatforms().toSet()
         for (frozen in clicks.frozen()) {
-            val batch = clicks.restrict(frozen, covered)
-            if (batch == null || batch.items.size < frozen.items.size) {
-                stats.platformNotChosen.addAndGet((frozen.items.size - (batch?.items?.size ?: 0)).toLong())
+            val restricted = clicks.restrict(frozen, covered)
+            if (restricted == null || restricted.items.size < frozen.items.size) {
+                stats.platformNotChosen.addAndGet((frozen.items.size - (restricted?.items?.size ?: 0)).toLong())
+            }
+            // #1709: the items of an app the policy does not accept yet stay frozen on the phone.
+            val batch = restricted?.let { kept ->
+                kept.platforms.forEachIndexed { i, wire -> if (!record.hold.sends(wire)) record.hold.hold(wire, "c:${kept.items[i]}") }
+                clicks.holdBack(kept, record.hold::sends)
             }
             if (batch != null) uploadClickedBatch(api, credential, batch, run, record)?.let { return it }
         }
@@ -581,7 +598,8 @@ class CensusUploadWorker @AssistedInject constructor(
 
     private suspend fun uploadEnvelopes(api: CensusTransport, credential: Credential, record: RunRecord): Result {
         if (!preferences.censusUploadEnabled.first() || !preferences.censusShareCaptures.first()) return Result.success()
-        val items = dropUncovered(envelopeSpool, envelopeSpool.take(20, 900 * 1024))
+        val covered = coveredPlatforms()
+        val items = dropUncovered(envelopeSpool, envelopeSpool.take(20, 900 * 1024) { record.hold.admits(it, "e", covered) })
         if (items.isNotEmpty()) {
             val batchId = envelopeSpool.inFlight()?.batchId ?: CensusApi.envelopeBatchId(items.map { it.itemJson })
             uploadBatch(api, credential, items, batchId, UploadRun(), record, depth = 0, envelopes = true)?.let { return it }
@@ -604,6 +622,7 @@ class CensusUploadWorker @AssistedInject constructor(
             healthRejected > 0 -> set(CensusRunOutcome.HEALTH_REJECTED, healthRejected)
             healthFailed > 0 -> set(CensusRunOutcome.FAILURE)
             outcome == CensusRunOutcome.ENROLLED -> Unit
+            hold.heldCount > 0 -> set(CensusRunOutcome.HELD, hold.heldCount)
             spoolEmpty -> set(CensusRunOutcome.SPOOL_EMPTY)
             else -> Unit
         }
