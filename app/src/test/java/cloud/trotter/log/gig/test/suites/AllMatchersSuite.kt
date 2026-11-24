@@ -39,6 +39,7 @@ import cloud.trotter.log.gig.core.pipeline.rules.UberHomeDashboardOfflineEvidenc
 import cloud.trotter.log.gig.core.pipeline.rules.UberIdleMapOfflineEvidenceTest
 import cloud.trotter.log.gig.core.pipeline.rules.UberOfferExpiryOverlayTest
 import cloud.trotter.log.gig.core.pipeline.rules.UberOfferKindAndStackStoreTest
+import cloud.trotter.log.gig.core.pipeline.rules.UberOfflineSheetAndSessionSummaryTest
 import org.junit.runner.RunWith
 import org.junit.runners.Suite
 
@@ -114,6 +115,9 @@ import org.junit.runners.Suite
  *   Uber home captures carrying only the bottom nav (or a Trip Details screen stacked over
  *   the dashboard) — `fixtures/uber_home_dashboard_partial/` — must classify UNKNOWN, so
  *   `uber.screen.home_dashboard` branch 3 can no longer claim offline from absence either.
+ * - [UberOfflineSheetAndSessionSummaryTest] — #1699: the Uber 4.606 offline status sheet
+ *   without an offline label is `idle_map` + offline, its online neighbours are not, and the
+ *   "Your session" sheet is `session_summary`.
  * - [UberOfferExpiryOverlayTest] — #858: real captures of Uber's expiry overlay
  *   ("This request is no longer available", rendered OVER the dimmed card inside
  *   `primary_touch_area`) must classify UNKNOWN, so a dead request can never mint an
@@ -199,6 +203,7 @@ import org.junit.runners.Suite
     TriageRulesTest::class,
     UberIdleMapOfflineEvidenceTest::class,
     UberHomeDashboardOfflineEvidenceTest::class,
+    UberOfflineSheetAndSessionSummaryTest::class,
     UberOfferExpiryOverlayTest::class,
     DefaultRulesIntegrationTest::class,
     NotificationClassifierTest::class,

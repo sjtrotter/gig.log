@@ -35,6 +35,12 @@
         "shape": null,
         "fields": {}
     },
+    "active_trip/2026-11-20_19-34-18-367__uber__accessibility.window__active_trip__ca50e4.json": {
+        "ruleId": "uber.screen.active_trip",
+        "intent": "active_trip",
+        "shape": null,
+        "fields": {}
+    },
     "alcohol_id_check/2026-09-21_12-53-44-102__doordash__accessibility.window__alcohol_id_check__007cce.json": {
         "ruleId": "doordash.screen.alcohol_id_check",
         "intent": "alcohol_id_check",
@@ -108,6 +114,18 @@
         "fields": {}
     },
     "awaiting_offer/2026-07-19_13-25-09-205__uber__accessibility.window__awaiting_offer__2d7503.json": {
+        "ruleId": "uber.screen.awaiting_offer",
+        "intent": "awaiting_offer",
+        "shape": null,
+        "fields": {}
+    },
+    "awaiting_offer/2026-11-20_19-33-09-140__uber__accessibility.window__awaiting_offer__0a1a9b.json": {
+        "ruleId": "uber.screen.awaiting_offer",
+        "intent": "awaiting_offer",
+        "shape": null,
+        "fields": {}
+    },
+    "awaiting_offer/2026-11-20_20-28-00-878__uber__accessibility.window__awaiting_offer__22c3ba.json": {
         "ruleId": "uber.screen.awaiting_offer",
         "intent": "awaiting_offer",
         "shape": null,
@@ -3243,6 +3261,30 @@
             "waitTimeEstimate": null,
             "zoneName": null
         }
+    },
+    "idle_map/2026-11-20_20-28-01-750__uber__accessibility.window__idle_map__03b17a.json": {
+        "ruleId": "uber.screen.idle_map",
+        "intent": "idle_map",
+        "shape": null,
+        "fields": {}
+    },
+    "idle_map/2026-11-20_20-28-52-159__uber__accessibility.window__UNKNOWN__1246d3.json": {
+        "ruleId": "uber.screen.idle_map",
+        "intent": "idle_map",
+        "shape": null,
+        "fields": {}
+    },
+    "idle_map/2026-11-21_15-00-34-018__uber__accessibility.window__UNKNOWN__afc9e7.json": {
+        "ruleId": "uber.screen.idle_map",
+        "intent": "idle_map",
+        "shape": null,
+        "fields": {}
+    },
+    "idle_map/2026-11-21_15-00-58-700__uber__accessibility.window__UNKNOWN__1c5d0b.json": {
+        "ruleId": "uber.screen.idle_map",
+        "intent": "idle_map",
+        "shape": null,
+        "fields": {}
     },
     "idle_map/20260128_155954_491_MAIN_MAP_IDLE.json": {
         "ruleId": "doordash.screen.idle_map",
@@ -7112,6 +7154,12 @@
         "fields": {}
     },
     "session_summary/2026-07-21_19-15-20-384__uber__accessibility.window__session_summary__fbdfa9.json": {
+        "ruleId": "uber.screen.session_summary",
+        "intent": "session_summary",
+        "shape": null,
+        "fields": {}
+    },
+    "session_summary/2026-11-20_20-28-04-971__uber__accessibility.window__UNKNOWN__0919ce.json": {
         "ruleId": "uber.screen.session_summary",
         "intent": "session_summary",
         "shape": null,

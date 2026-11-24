@@ -32,7 +32,7 @@ import org.junit.runners.Parameterized
  * observation reaches the state machine and the platform region keeps its last known mode
  * until a settled frame arrives (a deliberate toggle's `uber.click.go_offline` tap arms the
  * graced shift end itself, #1697). The
- * corresponding positive half lives in the golden corpus: the two `snapshots/idle_map/
+ * corresponding positive half lives in the golden corpus: the `snapshots/idle_map/
  * *__uber__*` captures, guarded by [cloud.trotter.log.gig.core.pipeline.recognition.matchers.GoldenSnapshotRegressionTest].
  */
 @RunWith(Parameterized::class)

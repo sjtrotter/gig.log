@@ -51,6 +51,11 @@ session). Recognizing a screen on Uber is less about "does this exact tree match
   includes `notExists: "You're online"` and `notExists: "Finding trips"` alongside its id anchor —
   it has to actively rule out the online affordances, not just check for the offline one, because
   the container id it anchors on isn't unique to the offline state.
+- **`idle_map` branch 1 (#1699)** recognizes the offline status sheet by structure,
+  `status_assistant` with `agenda_feed_content_view`, when Uber 4.606 replaces "You're offline"
+  with a promo line or "Before you go online"; the pair sat on 12 of 319 window frames, all offline.
+- **`session_summary` branch 1 (#1699)** recognizes the id-less 4.606 "Your session (…)" sheet off
+  "Trips completed", "Trips offered" and "Open earnings activity"; it reads nothing, like branch 0.
 
 ## Field extraction notes
 

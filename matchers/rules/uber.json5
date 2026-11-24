@@ -1143,15 +1143,47 @@
     {
       "id": "uber.screen.session_summary",
       "priority": 80,
+      // No parse: both branches only recognize the sheet and carry the rule-level state.
       "state": {
         "flow": "session:ended",
         "modeHint": "offline"
       },
-      "require": {
-        "exists": {
-          "hasTextContaining": "Session summary"
+      "branches": [
+        {
+          // The pre-4.606 sheet, titled "Session summary".
+          "require": {
+            "exists": {
+              "hasTextContaining": "Session summary"
+            }
+          }
+        },
+        {
+          // #1699 — Uber 4.606 titles the sheet "Your session (<start> - <end>)" and never draws
+          // "Session summary". Every sheet node is id-less (UberComposeView), so the anchor is
+          // the sheet's own chrome: "Trips completed", "Trips offered" and the "Open earnings
+          // activity" button sit on both fielded session sheets (4.606 and the July render) and
+          // on none of the other 317 Uber window frames in the two November pulls and the corpus.
+          "require": {
+            "all": [
+              {
+                "exists": {
+                  "hasText": "Trips completed"
+                }
+              },
+              {
+                "exists": {
+                  "hasText": "Trips offered"
+                }
+              },
+              {
+                "exists": {
+                  "hasText": "Open earnings activity"
+                }
+              }
+            ]
+          }
         }
-      }
+      ]
     },
     {
       "id": "uber.screen.active_trip",
@@ -1322,6 +1354,17 @@
       // "GO" button) — all three co-occur with a genuinely offline home in the corpus, and
       // none appears on any online (awaiting_offer / offer / active_trip) frame.
       //
+      // #1699 — the same sheet does not always draw one of those three labels: Uber 4.606
+      // replaces "You're offline" with a promo line ("It's dinner time") or a required-action
+      // heading ("Before you go online"), with no GO button. Branch 1 anchors on the sheet's
+      // structure instead: `status_assistant` together with `agenda_feed_content_view`. Over
+      // 319 Uber window frames (the 11-21 and 11-22 pulls plus the corpus), that pair sits on
+      // 12 frames, all genuinely offline status sheets ("You're offline" 7, the promo 1,
+      // "Before you go online" 4) from 5 days and 8 go-offline moments, and on 0 online,
+      // on-trip, offer, splash or partial frames. Online, on-trip and splash frames carry
+      // `agenda_content_view` instead (65 frames); the two ids never co-occur. Every
+      // `status_assistant*` child id renders in every mode, so none of them alone is evidence.
+      //
       // Bias is deliberately "believe still online": a partial genuinely-offline frame now
       // classifies UNKNOWN, makes no mode claim, and the platform region keeps its last
       // mode until a settled frame arrives; a deliberate toggle needs no frame, because the
@@ -1364,47 +1407,75 @@
           }
         }
       ],
-      "require": {
-        "all": [
-          {
-            "exists": {
-              "hasIdSuffix": "home_screen_overlay_container"
-            }
-          },
-          {
-            "exists": {
-              "any": [
-                {
-                  "all": [
-                    {
-                      "hasIdSuffix": "status_label_leading"
-                    },
-                    {
-                      "hasText": "You're offline"
-                    }
-                  ]
-                },
-                {
-                  "all": [
-                    {
-                      "hasIdSuffix": "status_assistant_overlay_text"
-                    },
-                    {
-                      "hasText": "You're ready to go online"
-                    }
-                  ]
-                },
-                {
-                  // The big GO button. It carries no view id, so the anchor is the exact
-                  // (case-sensitive) label — tight enough that map chrome, whose text nodes
-                  // are merchant names, cannot collide.
-                  "hasTextCaseSensitive": "GO"
+      // Branches inherit the rule-level state and rejects (RuleCompiler prepends the rejects).
+      "branches": [
+        {
+          // Branch 0: the offline sheet's own label or GO button (#857).
+          "require": {
+            "all": [
+              {
+                "exists": {
+                  "hasIdSuffix": "home_screen_overlay_container"
                 }
-              ]
-            }
+              },
+              {
+                "exists": {
+                  "any": [
+                    {
+                      "all": [
+                        {
+                          "hasIdSuffix": "status_label_leading"
+                        },
+                        {
+                          "hasText": "You're offline"
+                        }
+                      ]
+                    },
+                    {
+                      "all": [
+                        {
+                          "hasIdSuffix": "status_assistant_overlay_text"
+                        },
+                        {
+                          "hasText": "You're ready to go online"
+                        }
+                      ]
+                    },
+                    {
+                      // The big GO button. It carries no view id, so the anchor is the exact
+                      // (case-sensitive) label — tight enough that map chrome, whose text nodes
+                      // are merchant names, cannot collide.
+                      "hasTextCaseSensitive": "GO"
+                    }
+                  ]
+                }
+              }
+            ]
           }
-        ]
-      }
+        },
+        {
+          // Branch 1 (#1699): the offline status sheet by structure, whatever its label says.
+          "require": {
+            "all": [
+              {
+                "exists": {
+                  "hasIdSuffix": "home_screen_overlay_container"
+                }
+              },
+              {
+                "exists": {
+                  "hasIdSuffix": "status_assistant"
+                }
+              },
+              {
+                "exists": {
+                  "hasIdSuffix": "agenda_feed_content_view"
+                }
+              }
+            ]
+          }
+        }
+      ]
     },
     {
       // #874 — the sibling of #857, one priority down. Branch 3 used to claim
